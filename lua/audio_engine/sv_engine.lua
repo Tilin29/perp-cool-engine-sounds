@@ -44,7 +44,11 @@ function E.ApplyPerformance(veh, prof)
 	local accel = prof and prof.accel or 1
 	local vmax = prof and prof.vmax or 0
 	local p = table.Copy(base)
-	p.engine.horsepower = base.engine.horsepower * accel
+	-- audioTC: launch traction control's power trim; audioSteerLock: the lock at speed (sv_handling.lua)
+	p.engine.horsepower = base.engine.horsepower * accel * (veh.audioTC or 1)
+	if p.steering and p.steering.degreesFast and veh.audioSteerLock then
+		p.steering.degreesFast = base.steering.degreesFast * veh.audioSteerLock
+	end
 	if vmax > 0 then p.engine.maxSpeed = vmax / 1.609344 * HU_PER_MPH end
 	E.SetParams(veh, p)
 end

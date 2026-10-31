@@ -17,6 +17,12 @@
 	are shared by every TDM car, so this goes for all of them. The rim scrape of spiked tyres
 	("wheelrim_scrape", spiked/ scripts only) is kept.
 
+	The scraping while cornering is a different sound: the tyres' surface materials. When a wheel
+	slides, Source plays its skid/brake material's scrape sound, and about a third of PERP's
+	scripts use "glassbottle" there (the glass bottle scrape), the rest rubber (base "dirt":
+	Dirt.Scrape). audio_engine_mutetyrescrape 1 (default) silences those game sounds. They're
+	global, so props of those materials also scrape silently.
+
 	It also lists every PERP car in the spawn menu (Vehicles > PERP cars (Audio Engine)) with its
 	base script, for testing outside the PERP gamemode.
 ]]
@@ -27,6 +33,12 @@ local cvMute = CreateConVar("audio_engine_mutestock", "1", FCVAR_ARCHIVE + FCVAR
 	"1 = silence the TDM engine recordings of cars that use the procedural engine")
 local cvSkid = CreateConVar("audio_engine_muteskid", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"1 = silence the TDM tyre screech when braking (shared by all TDM cars)")
+local cvScrape = CreateConVar("audio_engine_mutetyrescrape", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+	"1 = silence the scrape of sliding tyres (glass bottle / dirt surface sounds; global)")
+
+-- the scrape sounds of the surface materials PERP's wheels slide and brake on
+-- (glassbottle; slidingrubbertire / brakingrubbertire / snow, which all scrape as dirt)
+E.TYRE_SCRAPE_SOUNDS = { "GlassBottle.ScrapeRough", "GlassBottle.ScrapeSmooth", "Dirt.Scrape" }
 
 local PACKS = { "tdmcars", "jarheads", "perp2" }
 local TIERS = { "", "used/", "upgrade_1/", "upgrade_2/", "spiked/" }
@@ -126,6 +138,8 @@ function E.ApplyStockMute()
 	if skidOn and ns > 0 then
 		MsgN(string.format("[Audio Engine] muted %d TDM tyre screech sounds", ns))
 	end
+	local scrapeOn = cvScrape:GetBool()
+	for _, name in ipairs(E.TYRE_SCRAPE_SOUNDS) do mute(name, scrapeOn) end
 end
 
 -- TDM / PERP define their soundscripts in their own autorun files, which may load after this
@@ -136,6 +150,7 @@ hook.Add("InitPostEntity", "audio_engine_perp", function()
 end)
 cvars.AddChangeCallback("audio_engine_mutestock", function() E.ApplyStockMute() end, "audio_engine_perp")
 cvars.AddChangeCallback("audio_engine_muteskid", function() E.ApplyStockMute() end, "audio_engine_perp")
+cvars.AddChangeCallback("audio_engine_mutetyrescrape", function() E.ApplyStockMute() end, "audio_engine_perp")
 if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then E.ApplyStockMute() end -- lua refresh
 
 -- spawn menu entries (sandbox and derived gamemodes; PERP's own dealer ignores them).

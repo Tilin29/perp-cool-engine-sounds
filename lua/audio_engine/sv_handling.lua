@@ -7,13 +7,21 @@
 	1. PERP physics on the test script. Off the PERP server, PERP's vehicle scripts aren't mounted
 	   and the spawn menu falls back to scripts/vehicles/audio_engine/test_car.txt (sh_perp.lua).
 	   The car's own PERP base script values (sv_perp_physics.lua: horsepower, top speed, gearing,
-	   mass, steering, suspension, torque and brake split) are then put on it, so it accelerates,
+	   mass, steering, suspension, torque and brake split, manual gearbox) are then put on it, so it accelerates,
 	   tops out and handles like on the server. They're applied as ratios to test_car.txt's own
 	   values, so Source's internal units never matter.
 	2. Anti-spin setup (audio_engine_handling 1): brakes biased to the front (a locking rear
 	   spins the car), less power while steering at speed, a slightly lower centre of mass, at
 	   least normal grip, and more steering lock at speed. Relative changes only.
 	3. Stability assist (sv_stability.lua) for the PERP cars, with each car's own steering angles.
+	4. Launch traction control (audio_engine_traction 1). Source turns horsepower into wheel torque
+	   that is biggest at low wheel speed, so a strong, light car (Veyron 490 hp, SLR 420 hp at
+	   1700 kg) just spins its tyres off the line, barely moving, then hooks up and rockets once
+	   it's fast. While the driven wheels turn faster than the car moves, the horsepower is
+	   trimmed until they grip, and given back as they do. Off the line it may cut to 1/4 of the
+	   power; from ~36 mph to no less than 60%, so it catches slides without holding the car back.
+	5. High-speed steering: the wider lock of step 2 eases back to about 2/3 between ~60 and
+	   80 mph (E.HIGH_SPEED_STEER), so the car turns well at town speeds and stays calm when fast.
 
 	A car on a spiked/ tier script (tyres shot by a stinger) gets none of it: it's meant to be
 	hard to drive.
@@ -105,6 +113,10 @@ local function perpOnto(p, ph)
 	ratio(e, "shiftUpRPM", pe.shiftuprpm, TEST.engine.shiftUpRPM)
 	ratio(e, "shiftDownRPM", pe.shiftdownrpm, TEST.engine.shiftDownRPM)
 	set(e, "axleRatio", pe.axleratio)
+	-- PERP's scripts are manual (autotransmission 0): Source keeps one ratio up to top speed.
+	-- The test script is automatic, and its box sat in top gear (slow) until the revs passed
+	-- maxRPM, then dropped into 1st and rocketed: the Veyron crawled to 70 mph, then flew
+	if pe.autotransmission ~= nil then set(e, "isAutoTransmission", pe.autotransmission ~= 0) end
 	if e and istable(e.gearRatio) and pe.gears and #pe.gears > 0 then
 		e.gearRatio = table.Copy(pe.gears)
 		set(e, "gearCount", #pe.gears)
@@ -225,6 +237,142 @@ for _, car in pairs(E.Cars) do
 	end
 end
 
+---------------------------------------------------------------------------
+-- 4. launch traction control
+---------------------------------------------------------------------------
+local cvTraction = CreateConVar("audio_engine_traction", "1", FCVAR_ARCHIVE,
+	"1 = traction control: less power while the driven wheels spin (strong cars launch instead of spinning)")
+
+E.TRACTION = {
+	slip = 0.25,      -- wheel surface speed this much above the car's speed counts as spinning
+	minSpeed = 2,     -- m/s: below this the slip is measured against this speed
+	-- it works at any speed, but how much it may take away shrinks from fadeFrom to fadeTo. (A
+	-- hard cut-off at 40 m/s held a car whose wheels read as slipping at the floor all the way to
+	-- ~85 mph, then gave it 4x the power at once; switching it off by fadeTo let them slide.)
+	fadeFrom = 6,     -- m/s (~13 mph)
+	fadeTo = 16,      -- m/s (~36 mph)
+	floorFast = 0.6,  -- the least power it leaves from fadeTo up
+	cut = 2.5,        -- how fast it takes power away while spinning (per second)
+	restore = 1.2,    -- ... and gives it back while gripping
+	floor = 0.25,     -- never below this share of the power (at a standstill)
+	step = 0.04,      -- only re-sends the params when the trim moved this much
+}
+
+-- steering lock at speed, x the (already widened) degreesFast: 1 up to fromMph, `scale` from toMph
+E.HIGH_SPEED_STEER = { fromMph = 60, toMph = 80, scale = 0.65 }
+
+local function steerScale(mph)
+	local H = E.HIGH_SPEED_STEER
+	local t = math.Clamp((mph - H.fromMph) / (H.toMph - H.fromMph), 0, 1)
+	t = t * t * (3 - 2 * t)
+	return 1 + (H.scale - 1) * t
+end
+
+-- the fastest-turning driven wheel's surface speed (m/s), from the wheel physics objects
+local function drivenWheelSpeed(veh)
+	local p = veh.audioBase
+	if not (p and p.axles) then return nil end
+	local fastest
+	for axle = 1, #p.axles do
+		local a = p.axles[axle]
+		if (a.torqueFactor or 0) > 0 and a.wheels_radius then
+			for side = 0, 1 do
+				local w = veh:GetWheel((axle - 1) * 2 + side)
+				if IsValid(w) then
+					-- deg/s about the axle; the steering turn is small next to a spinning wheel
+					local surf = math.rad(w:GetAngleVelocity():Length()) * a.wheels_radius * 0.0254
+					if not fastest or surf > fastest then fastest = surf end
+				end
+			end
+		end
+	end
+	return fastest
+end
+
+local profCache = setmetatable({}, { __mode = "k" })
+local function profileOf(veh)
+	local s = veh:GetNW2String("audio_prof", "")
+	local c = profCache[veh]
+	if c and c.s == s then return c.p end
+	local prof = E.DecodeProfile(s)
+	profCache[veh] = { s = s, p = prof }
+	return prof
+end
+
+-- traction control and the steering lock at speed: both change the car's params on the fly
+hook.Add("Tick", "audio_engine_traction", function()
+	local on = cvTraction:GetBool()
+	local T, dt = E.TRACTION, engine.TickInterval()
+	for veh in pairs(E.TrackedVehicles or {}) do
+		if IsValid(veh) and not veh.audioSpiked and veh.audioBase then
+			local phys = veh:GetPhysicsObject()
+			local v = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 or 0
+			-- steering: only on cars that got the wider lock (anti-spin setup)
+			local steer = veh.audioAntiSpin and steerScale(v * 2.23694) or nil
+			if steer and math.abs(steer - (veh.audioSteerSent or 1)) >= 0.03 then
+				veh.audioSteerLock = steer   -- (not audioSteer: sv_stability keeps the A/D input there)
+				veh.audioSteerSent = steer
+				veh.audioSteerFast = E.ANTI_SPIN.steerFast * steer   -- sv_stability follows the lock
+				veh.audioParamsDirty = true
+			end
+
+			local tc = veh.audioTC or 1
+			local want = tc
+			local drv = veh:GetDriver()
+			-- the lowest trim allowed at this speed: T.floor at a standstill, T.floorFast from fadeTo
+			local f = math.Clamp((v - T.fadeFrom) / (T.fadeTo - T.fadeFrom), 0, 1)
+			local floor = T.floor + (T.floorFast - T.floor) * f * f * (3 - 2 * f)
+			if on and IsValid(drv) and IsValid(phys) and drv:KeyDown(IN_FORWARD) then
+				local ws = drivenWheelSpeed(veh)
+				if ws then
+					local slip = (ws - v) / math.max(v, T.minSpeed)
+					veh.audioSlip = slip
+					if slip > T.slip then want = tc - T.cut * dt
+					else want = tc + T.restore * dt end
+				else
+					want = tc + T.restore * dt
+				end
+				want = math.Clamp(want, floor, 1)
+			else
+				want = 1
+			end
+			-- params are re-sent only on a real change (and always when it's back to full)
+			if math.abs(want - (veh.audioTCSent or 1)) >= T.step or (want == 1 and (veh.audioTCSent or 1) ~= 1) then
+				veh.audioTCSent = want
+				veh.audioParamsDirty = true
+			end
+			veh.audioTC = want
+			if veh.audioParamsDirty then
+				veh.audioParamsDirty = false
+				E.ApplyPerformance(veh, profileOf(veh))
+			end
+		end
+	end
+end)
+
+-- audio_engine_accel_log [seconds]: logs the car you drive to the console 4x a second (admins).
+-- Source's own gear and rpm (GetOperatingParams) next to speed, wheel slip, traction trim and the
+-- steering scale: shows where a car's acceleration goes during a launch.
+concommand.Add("audio_engine_accel_log", function(ply, _, args)
+	if IsValid(ply) and not ply:IsAdmin() then return end
+	local veh = IsValid(ply) and ply:GetVehicle()
+	if not IsValid(veh) then return end
+	local secs = math.Clamp(tonumber(args[1]) or 12, 1, 60)
+	local t0 = CurTime()
+	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end end
+	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | power x | steer x")
+	local id = "audio_engine_accel_log_" .. veh:EntIndex()
+	timer.Create(id, 0.25, math.floor(secs * 4), function()
+		if not IsValid(veh) then timer.Remove(id) return end
+		local phys = veh:GetPhysicsObject()
+		local mph = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 * 2.23694 or 0
+		local okp, op = pcall(veh.GetOperatingParams, veh)
+		op = okp and istable(op) and op or {}
+		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f", CurTime() - t0, mph,
+			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioTC or 1, veh.audioSteerLock or 1))
+	end)
+end, nil, "Log speed, Source gear/rpm, wheel slip and traction trim of the car you drive (admins)")
+
 -- what the car you look at got: audio_engine_handling_info
 concommand.Add("audio_engine_handling_info", function(ply)
 	if IsValid(ply) and not ply:IsAdmin() then return end
@@ -241,6 +389,7 @@ concommand.Add("audio_engine_handling_info", function(ply)
 	if ok and istable(p) and p.engine then
 		local f, r = p.axles and p.axles[1] or {}, p.axles and p.axles[2] or {}
 		local phys = veh:GetPhysicsObject()
+		out(string.format("  traction control: power x%.2f, last wheel slip %.2f", veh.audioTC or 1, veh.audioSlip or 0))
 		out(string.format("  %.0f hp, top %.0f mph, mass %.0f kg, brakes %.2f/%.2f, torque %.2f/%.2f, grip x%.2f, centre %s",
 			p.engine.horsepower or 0, (p.engine.maxSpeed or 0) / HU_PER_MPH, IsValid(phys) and phys:GetMass() or 0,
 			f.brakeFactor or 0, r.brakeFactor or 0, f.torqueFactor or 0, r.torqueFactor or 0,

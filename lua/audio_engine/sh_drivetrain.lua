@@ -257,6 +257,13 @@ function DT.Step(st, cfg, dt, inp)
 				st.shiftT = kind == 1 and 0.32 or 0.22
 			end
 			st.holdT = st.holdT - dt
+			-- about to hit the limiter: change up now, even inside the hold or the shift before
+			-- (close gearing on a car that pulls hard reached redline before the hold ran out,
+			-- and the limiter kept cutting the sound)
+			if st.holdT > 0 and st.gear < n and wheelRpm > red * (pedal and SH.upRpm or 0.97) then
+				shift(st.gear + 1, 1, 0.8)
+				wheelRpm = rpmIn(st.gear)
+			end
 			if st.holdT <= 0 and st.shiftT <= 0 then
 				-- flat out but no longer accelerating (top speed / drag limit)
 				if pedal and st.accel < 0.35 and wheelRpm > red * 0.55 then
