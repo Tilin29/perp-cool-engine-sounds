@@ -311,6 +311,43 @@ E.CAR_BOV = {
 }
 
 --[[
+	Rev flare on start-up (the "emotion start", audio_engine_emotionstart): only high-powered cars
+	blip their engine on start-up (sports cars, supercars, muscle cars, AMG/M/RS saloons, rally
+	homologation specials). Every other car starts with a short, gentle rise to just above idle.
+	Runtime only: the server picks the start, both start-ups are in every bank, so no re-bake.
+]]
+E.CAR_EMOTION = {}
+for _, name in ipairs({
+	-- supercars and exotics
+	"Alfa Romeo 33 Stradale (1967)", "Aston Martin DBS", "Aston Martin Rapide", "Aston Martin V12 Vantage",
+	"Audi R8 Plus", "Audi R8 Spyder", "Audi R8 V10", "Bowler EXR-S", "Bugatti EB110",
+	"Bugatti Veyron 16.4", "Bugatti Veyron SS", "Dodge Viper GTS", "Ferrari 250 GTO", "Ferrari 250GT",
+	"Ferrari 458 Spider", "Ferrari 512 TR", "Ferrari Enzo", "Ferrari F12 Berlinetta", "Ferrari F430",
+	"Ferrari F50", "Ferrari LaFerrari", "Ford GT 05", "Lamborghini Diablo", "Lamborghini Gallardo",
+	"Lamborghini Gallardo LP570-4 Spyder Performante", "Lamborghini Miura", "Lamborghini Murcielago",
+	"Lamborghini Murcielago LP670-4 SV", "Lamborghini Reventon Roadster", "Mazda Furai", "McLaren F1",
+	"McLaren P1", "Mercedes McLaren SLR", "Mercedes SLS AMG", "Noble M600", "Pagani Zonda C12",
+	"Porsche 911 GT3", "Porsche 918 Spyder", "Porsche 997 GT3", "Porsche Carrera GT",
+	-- sports and GT cars
+	"Aston Martin DB5", "BMW 1M", "BMW M1", "Chevrolet Corvette GSC", "Chevrolet Corvette Stingray 427",
+	"Honda S2000", "Jaguar E-Type", "Jaguar F-Type", "Mazda RX7", "Mercedes 300SL Gullwing Coupe",
+	"Mercedes SL65 AMG", "Morgan Aero SS", "Nissan 350z", "Nissan 370Z", "Nissan GT-R SpecV",
+	"Nissan Skyline R34", "Toyota Supra",
+	-- muscle cars
+	"Chevrolet Camaro SS 69", "Chevrolet Camaro ZL1", "Chevrolet Chevelle SS", "Dodge Challenger 1970",
+	"Dodge Challenger 2015", "Dodge Charger SRT-8", "Dodge RAM SRT10", "Ford Mustang GT",
+	"Ford Shelby GT500", "Holden HSV GTS", "Holden HSV W427", "Pontiac Firebird Trans Am", "Shelby 1000",
+	-- performance saloons and SUVs
+	"Audi RS4 Avant", "Audi S5", "BMW 340i", "BMW M3 E92", "BMW M5 E34", "BMW M5 E60", "BMW M6 2013",
+	"Lexus IS F", "Maserati Ghibli S", "Maserati Quattroporte Sport GT S", "Mercedes C32 AMG",
+	"Mercedes E63 AMG", "Mercedes ML63 AMG", "Porsche Cayenne Turbo 2012", "Porsche Cayenne Turbo S",
+	"GMC Syclone",
+	-- hot hatches and rally specials
+	"Ford Focus RS", "Honda Civic Type R", "Honda Civic Type R 1997", "Mitsubishi Lancer Evo VIII",
+	"Mitsubishi Lancer Evo X", "Subaru Impreza WRX STI",
+}) do E.CAR_EMOTION[name] = true end
+
+--[[
 	Economy cars: stock silencers and small engines sound duller and quieter than the presets,
 	which are tuned for character. On top of its preset, an economy car gets:
 	  tone x ECONOMY.toneScale   (darker exhaust; part of the sound, so re-bake after changing)
@@ -355,6 +392,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		stockPopVol = E.STOCK_POP_VOLUME,
 		stockBov = E.CAR_BOV[carName] and true or false,
 		stockBovVol = E.STOCK_BOV_VOLUME,
+		emotionStart = E.CAR_EMOTION[carName] or false,
 		topSpeed = "auto",
 		wheelRadius = 0.33,
 		soundLevel = 85,

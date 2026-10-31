@@ -19,6 +19,7 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   Stock pops/BOV are per car, not per preset: `CAR_POPS[name]` (frequency, unlisted = off), `CAR_BOV[name]` (audible stock
   blow-off only), volumes `STOCK_POP_VOLUME` 0.7 / `STOCK_BOV_VOLUME` 0.6, applied in `CarStockProfile` (runtime only: no re-bake).
   Preset pops/bov are just the starting point when retuning in the menu. Big pop events scale with pops^2 (cl_engine).
+  `CAR_EMOTION[name]`: high-powered cars that rev-flare on start-up (`cfg.emotionStart`, picked by sv_engine; runtime only); others get the gentle start.
   `ECONOMY[name]` + `ECONOMY_SOUND`: economy cars get tone x0.5 and gurgle 0 (in the sound key: re-bake), volume 0.8, soundLevel 80.
 - `sh_perp.lua`: mutes the TDM engine soundscripts named in registered cars' PERP scripts (base + used/upgrade_1/upgrade_2/spiked
   + `<base>_*` variants), keeping names other vehicles share; `audio_engine_mutestock`. Spawn-menu category for testing.

@@ -81,17 +81,24 @@ local function setDrivable(veh, ok)
 	if veh.StartEngine then pcall(veh.StartEngine, veh, ok) end
 end
 
+-- rev flare on start-up: only cars listed as high-powered (sh_carlist.lua CAR_EMOTION)
+local function wantsEmotion(veh)
+	local car = E.GetCarConfig(veh)
+	return cvEmotion:GetBool() and car ~= nil and car.emotionStart == true
+end
+
 local function setEngine(veh, on, instant)
 	veh:SetNW2Bool("audio_on", on)
 	if on then
+		local emotion = wantsEmotion(veh)
 		veh:SetNW2Float("audio_on_t", CurTime())
-		veh:SetNW2Bool("audio_emo", cvEmotion:GetBool())
+		veh:SetNW2Bool("audio_emo", emotion)
 		if instant then
 			veh.audioStart = nil
 			setDrivable(veh, true)
 		else
 			local st = DT.New()
-			DT.Start(st, cvEmotion:GetBool())
+			DT.Start(st, emotion)
 			veh.audioStart = st
 			setDrivable(veh, false)
 		end

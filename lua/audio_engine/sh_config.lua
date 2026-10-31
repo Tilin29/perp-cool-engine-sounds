@@ -45,6 +45,7 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 	stockPopVol = 0.7,
 	stockBov = false,
 	stockBovVol = 0.6,
+	emotionStart = true,   -- rev flare on start-up (sh_carlist.lua CAR_EMOTION)
 	topSpeed = "auto",     -- "auto" = MaxSpeed from the car's vehicle script, or a number in km/h
 
 	-- arcade gearbox shift points as fractions of redline (remove to use the defaults).
