@@ -174,6 +174,9 @@ local function build(b)
 		refDb = refDb or db
 		local want = refDb + 3 * (nb > 1 and (i - 1) / (nb - 1) or 0)
 		local g = math.min(4, math.max(0.5, 10 ^ ((want - db) / 20)))
+		-- an electric motor keeps its natural levels: near silent at low speed, the whine
+		-- growing with speed (evening the bands out would blow the faint low end up)
+		if cfg.electric then g = 1 end
 		bandGain[i] = g
 		scale(off, g); scale(on, g)
 		loudest = math.max(loudest, db + 20 * math.log10(g))
@@ -332,6 +335,7 @@ local function buildEnv(b)
 		{ "road", Synth.RenderRoadLoop(sr, y), 0.07, true },
 		{ "wind", Synth.RenderWindLoop(sr, y), 0.06, true },
 		{ "turbo", Synth.RenderTurboLoop(sr, y), 0.068, true },
+		{ "evhum", Synth.RenderEVHumLoop(sr, y), 0.06, true },
 		{ "bov1", Synth.RenderBlowoff(sr, 0xB10F + 4099, y), 0.234, false, 0.15 },
 		{ "bov2", Synth.RenderBlowoff(sr, 0xB10F + 2 * 4099, y), 0.234, false, 0.15 },
 	}

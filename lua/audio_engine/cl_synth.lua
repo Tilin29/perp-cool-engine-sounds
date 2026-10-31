@@ -225,14 +225,15 @@ end
 --[[
 	Electric motor: no firing pulses, just the motor's whine. Tones locked to the motor speed
 	(the electrical frequency of a 4-pole-pair motor, its torque ripple, the reduction gear's
-	mesh) grow with speed and load; a faint inverter whine under load at low speed; a hush
-	of air and bearings. Practically silent standing still.
+	mesh) grow with speed and load, and a hush of air and bearings. Practically silent at low
+	speed: what you hear there is the steady low-speed hum (Synth.RenderEVHumLoop), which
+	cl_engine plays at a fixed pitch and fades out as the whine takes over.
 ]]
 function Synth.EVRender(g, out, o, n)
 	local sr, K = g.sr, g.k
 	local rpmS, thrS, gain = g.rpm, g.thr, g.gain
 	local tRpm, tThr, onT = g.tRpm, g.tThr, g.on and 1 or 0
-	local p1, p2, p3, p4, p5 = g.e1 or 0, g.e2 or 0, g.e3 or 0, g.e4 or 0, g.e5 or 0
+	local p1, p2, p3, p4 = g.e1 or 0, g.e2 or 0, g.e3 or 0, g.e4 or 0
 	local nl, seed = g.nlp, g.seed
 	local redline, pitch, tone = g.redline, g.pitch, g.tone
 	local kRpm, kThr, kGain = K.rpm, K.thr, K.gain
@@ -246,21 +247,20 @@ function Synth.EVRender(g, out, o, n)
 		local load = 0.3 + 0.7 * thrS
 		p1 = (p1 + w * f * 4) % TAU
 		p2 = (p2 + w * f * 8) % TAU
-		p3 = (p3 + w * f * 24) % TAU
+		-- the gear mesh: 12x keeps the top end a whine (~3 kHz), not a 6 kHz shriek
+		p3 = (p3 + w * f * 12) % TAU
 		p4 = (p4 + w * f * 9.1) % TAU
-		p5 = (p5 + w * (3200 + 500 * spd)) % TAU
 		local s = 0.30 * spd ^ 0.7 * load * sin(p1)
 			+ 0.12 * spd * load * sin(p2)
-			+ (0.10 + 0.25 * tone) * spd ^ 1.2 * load * sin(p3)
+			+ (0.08 + 0.2 * tone) * spd ^ 1.2 * load * sin(p3)
 			+ 0.16 * spd ^ 0.8 * (0.5 + 0.5 * thrS) * sin(p4)
-			+ 0.04 * (1 - spd) ^ 2 * thrS * sin(p5)
 		seed = bxor(seed, lshift(seed, 13)); seed = bxor(seed, rshift(seed, 17)); seed = bxor(seed, lshift(seed, 5))
 		nl = nl + (seed / 2147483648 - nl) * 0.05
 		s = s + nl * 0.08 * spd
 		out[o + i] = s * gain * 0.6
 	end
 	g.rpm, g.thr, g.gain = rpmS, thrS, gain
-	g.e1, g.e2, g.e3, g.e4, g.e5 = p1, p2, p3, p4, p5
+	g.e1, g.e2, g.e3, g.e4 = p1, p2, p3, p4
 	g.nlp, g.seed = nl, seed
 end
 
@@ -535,6 +535,8 @@ end
 function Synth.NewChain(sr, cfg)
 	local tone = cfg.tone
 	local R = realismOf(cfg)
+	-- a car's silencer (cfg.muffle 0-1, economy cars): lower cutoffs and more treble cut
+	local muffle = cfg.muffle or 0
 	local d = floor(0.0052 * sr + 0.5)
 	local k = 0.15 + 1.6 * tone * tone
 	local tp = floor(0.0115 * sr + 0.5)
@@ -557,14 +559,14 @@ function Synth.NewChain(sr, cfg)
 		peak = biquad("peaking", 95, sr, 1.0, 3 + tone * 5),
 		low = biquad("lowshelf", 130 + 20 * R.voice, sr, 1, 4 + 2 * R.voice),
 		lpf = biquad("lowpass", 700, sr, 0.5),
-		lpf2 = biquad("lowpass", 4200 - 800 * R.voice, sr, 0.6),
+		lpf2 = biquad("lowpass", (4200 - 800 * R.voice) * (1 - 0.5 * muffle), sr, 0.6),
 		tloop = biquad("lowpass", 1900, sr, 1),
-		shelf = biquad("highshelf", 2500, sr, 1, -8),
+		shelf = biquad("highshelf", 2500, sr, 1, -8 - 8 * muffle),
 		tube = zeros(d), tubeN = d, tubePos = 1,
 		tail = zeros(tp), tailN = tp, tailPos = 1, tailLp = 0,
 		tailWet = R.tailpipe, tailK = 1 - exp(-TAU * 1200 / sr),
 		combs = combs, aps = aps, verbWet = R.reverb, verbLpK = 0.35,
-		fc = 700, fcTarget = 700,
+		fc = 700, fcTarget = 700, muffleK = 1 - 0.35 * muffle,
 		ev = cfg.layout == "electric",
 	}
 end
@@ -573,7 +575,7 @@ end
 local function updateCutoff(ch, n)
 	local a = 1 - exp(-(n / ch.sr) / 0.06)
 	ch.fc = ch.fc + (ch.fcTarget - ch.fc) * a
-	setCoefs(ch.lpf, biquad("lowpass", ch.fc, ch.sr, 0.5))
+	setCoefs(ch.lpf, biquad("lowpass", ch.fc * ch.muffleK, ch.sr, 0.5))
 end
 
 -- run buf[o .. o+n-1] through the chain in place
@@ -1140,6 +1142,36 @@ function Synth.RenderTurboLoop(sr, yieldFn)
 		local tone = sin(TAU * ph) * 0.55 + sin(TAU * ph2) * 0.12
 		local a = runBiquad(air, nz) * 1.6 + runBiquad(air2, rnd()) * 0.9 + runBiquad(hiss, rnd()) * 0.15
 		buf[i] = runBiquad(cut, tone * 0.5 + a)
+		if yieldFn and i % 8192 == 0 then yieldFn() end
+	end
+	return makeLoop(buf, L, X), L
+end
+
+--[[
+	Electric low-speed hum, like the pedestrian warning sound EVs play at walking pace: a soft,
+	low tone (220 Hz with a fifth and a few harmonics) with a slow shimmer, no motor in it.
+	cl_engine plays it at an almost fixed pitch and fades it out by ~30 km/h. Shared by every
+	electric car (env bank).
+]]
+function Synth.RenderEVHumLoop(sr, yieldFn)
+	local rnd = noiseGen(0xE7A5)
+	local L = floor(sr * 2)
+	local X = floor(sr * 0.2)
+	local total = L + X
+	local buf = {}
+	local f0 = 220
+	local air = biquad("bandpass", 900, sr, 0.8)
+	local cut = biquad("lowpass", 1600, sr, 0)
+	for i = 1, total do
+		local t = i / sr
+		-- two slightly detuned voices beat slowly (0.5 Hz): a living hum, not a test tone
+		local shimmer = 1 + 0.15 * sin(TAU * 0.5 * t)
+		local tone = 0.50 * sin(TAU * f0 * t)
+			+ 0.22 * sin(TAU * (f0 * 2 + 0.5) * t) * shimmer
+			+ 0.16 * sin(TAU * f0 * 1.5 * t)
+			+ 0.08 * sin(TAU * f0 * 3 * t)
+			+ 0.04 * sin(TAU * f0 * 4 * t)
+		buf[i] = runBiquad(cut, tone * 0.5 + runBiquad(air, rnd()) * 0.15)
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
 	return makeLoop(buf, L, X), L

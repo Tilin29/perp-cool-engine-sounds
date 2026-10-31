@@ -314,8 +314,19 @@ local function updateSound(car, dt)
 	-- turbo sounds live in the shared bank (Bank.env): any engine can have them
 	local turboOn = cfg.turbo and env and env.ready and env.turbo
 	local b = turboOn and (st.boost or 0) or 0
+	-- electric: a steady low hum at walking pace (like an EV's pedestrian warning sound), at an
+	-- almost fixed pitch; it fades out between ~8% and 20% of top speed (about 15-35 km/h)
+	-- while the motor whine, rising with speed, takes over
+	local humSpd = rpm / cfg.redline
+	local humVol = 0
+	if cfg.electric and env and env.ready and env.evhum and st.on and st.phase == "run" then
+		local fade = 1 - math.Clamp((humSpd - 0.08) / 0.12, 0, 1)
+		local moving = math.Clamp(abs(car.v) / 2, 0, 1)   -- a little softer standing still
+		humVol = g * 0.5 * fade * (0.7 + 0.3 * moving)
+	end
 	local thrE = car.thrS
 	local est2 = (car.limW * g * pk(bank.limiter.off)) ^ 2
+		+ (humVol * (env and env.peak and env.peak.evhum or 0.3)) ^ 2
 		+ (turboOn and (g * b ^ 1.5 * 0.5 * (cfg.profile.turboVol or 1) * (env.peak.turbo or 0.9)) or 0) ^ 2
 		+ (env and (roadVol * (env.peak and env.peak.road or 0.3)) or 0) ^ 2
 		+ (env and (windVol * (env.peak and env.peak.wind or 0.3)) or 0) ^ 2
@@ -331,7 +342,7 @@ local function updateSound(car, dt)
 	car.busPeak = est * car.bus
 	car.popLoad = (car.popLoad or 0) * math.exp(-dt / 0.08)
 	g = g * car.bus
-	roadVol, windVol = roadVol * car.bus, windVol * car.bus
+	roadVol, windVol, humVol = roadVol * car.bus, windVol * car.bus, humVol * car.bus
 
 	local thr = car.thrS
 	local det = car.detune * (car.dop or 1)
@@ -362,6 +373,13 @@ local function updateSound(car, dt)
 			p:Stop()
 			p:PlayEx(vol, math.Clamp(math.random(95, 105) * (car.dop or 1), 20, 255))
 		end
+	elseif car.active.turbo then
+		-- turbo switched off in the menu: fade the whistle out
+		setGroup(car, "turbo", { env.turbo }, { 0 }, 100, dt)
+	end
+	if humVol > 0 or car.active.evhum then
+		local pitch = math.Clamp(100 * (car.dop or 1) * (1 + 0.12 * math.Clamp(humSpd / 0.2, 0, 1)), 20, 220)
+		setGroup(car, "evhum", { env.evhum }, { humVol }, pitch, dt)
 	end
 
 	-- pops & bangs: profile "pops" = how often (0 = off), "popVol" = how loud (1 = default)

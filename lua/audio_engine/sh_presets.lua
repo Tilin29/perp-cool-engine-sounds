@@ -285,8 +285,11 @@ function E.ResolveProfile(car, prof)
 	-- everything that changes the generated sound; cars with the same key share sounds.
 	-- The turbo, blow-off valve, volumes and how often pops happen are not in it: they are
 	-- played on top at runtime, so changing them never generates a new engine.
-	cfg.soundKey = table.concat({ prof.layout, fmt(prof.pitch), fmt(prof.tone), prof.idle, prof.redline,
-		fmt(r), fmt(prof.gurgle), fmt(prof.popTone) }, "_")
+	local key = { prof.layout, fmt(prof.pitch), fmt(prof.tone), prof.idle, prof.redline,
+		fmt(r), fmt(prof.gurgle), fmt(prof.popTone) }
+	-- the car's silencer (economy cars); only in the key when set, so other keys stay as they were
+	if (car.muffle or 0) > 0 then key[#key + 1] = "m" .. fmt(car.muffle) end
+	cfg.soundKey = table.concat(key, "_")
 	cfg.id = cfg.soundKey
 	return cfg
 end

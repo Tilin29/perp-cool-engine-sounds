@@ -28,7 +28,8 @@ without knowing which one PERP spawned.
 
 | File | What |
 |---|---|
-| `lua/audio_engine/sh_carlist.lua` | `E.CAR_MODELS`: all 165 cars from the engine list (`Engine Types.xlsx`) → model, PERP base script, wheel radius (read from the script). All registered at load. `E.PERP_STABILITY = false`: the steering assist stays off on PERP cars (PERP tunes their handling; spiked tyres must stay undrivable) |
+| `lua/audio_engine/sh_carlist.lua` | `E.CAR_MODELS`: all 165 cars from the engine list (`Engine Types.xlsx`) → model, PERP base script, wheel radius (read from the script). All registered at load. `E.PERP_STABILITY = true`: the stability assist is on for PERP cars (never on spiked tyres) |
+| `lua/audio_engine/sv_handling.lua`, `sv_perp_physics.lua` | handling (section 6a): PERP base-script physics on cars spawned on the generic test script (generated table, `dev/perp_carmodels.py --physics`), the anti-spin setup, and the stability assist per car |
 | `lua/audio_engine/sh_perp.lua` | PERP glue: mutes the TDM engine recordings of registered cars (section 4), and lists all 165 cars in the spawn menu (Vehicles → *PERP cars (Audio Engine)*) for testing in sandbox |
 | `lua/audio_engine/cl_baked.lua` | **generated** manifest of the pre-generated sounds |
 | `sound/audio_engine/<preset>_<redline>_<hash>/*.wav` | **pre-generated** engine sounds: one folder per distinct stock engine (73, e.g. `v8x_6500_2cf9f8`), plus `env_<hash>/` (road, wind, turbo whistle, blow-off) |
@@ -144,6 +145,31 @@ By default a registered car is **off** when someone gets in, and the driver star
   volumes and pop frequency are runtime layers and never cost a generation.
 - The profile is networked per entity and isn't saved: if PERP persists cars, store the string
   with the car and set it back on spawn.
+
+## 6a. Handling and stability
+
+Cars tended to spin out. `sv_handling.lua` runs once on every registered car as it spawns,
+before its physics become the base for engine tuning:
+
+- **Anti-spin setup** (`audio_engine_handling 1`, default on): at least 60% of the braking on the
+  front axle (PERP's scripts are mostly 50/50, and a locking rear swaps ends), at least 50% power
+  cut while steering at speed, centre of mass lowered by a quarter wheel radius (only where the
+  script sets one), at least normal grip (`AddGravity` 1), and the handbrake slide push x0.6.
+  All relative to what the car's script set, so they work on every tier. Tune in `E.ANTI_SPIN`.
+- **Stability assist** (`sv_stability.lua`, `audio_engine_stability 1`): now on for all PERP
+  cars, with each car's own steering lock from its script. It follows the driver's steering keys,
+  catches spins and still allows handbrake drifts. `E.PERP_STABILITY = false` in `sh_carlist.lua`
+  turns it off for the PERP cars.
+- **Spiked tyres** (`spiked/` tier scripts) get neither: a stinger is meant to make the car hard to
+  drive. The car's script is read from its `vehiclescript` keyvalue.
+- **Off the PERP server** (PERP's scripts not mounted, the spawn menu uses the generic test
+  script): each car gets its PERP base-script physics (horsepower, top speed, gears, mass, centre
+  of mass, steering, suspension, torque and brake split) from `sv_perp_physics.lua`, so it
+  accelerates and tops out like on the server. On the server itself PERP's own scripts do this.
+- `audio_engine_handling_info` (admins) prints what a car got: script, PERP physics, anti-spin,
+  spiked, stability, and its live hp / top speed / mass / brake and torque split / centre.
+- None of this has been tried in game yet. If a car feels wrong, compare it with
+  `audio_engine_handling 0` (applies to cars spawned after the change).
 
 ## 7. Testing
 

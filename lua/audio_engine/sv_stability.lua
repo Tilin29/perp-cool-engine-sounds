@@ -166,7 +166,8 @@ hook.Add("Tick", "audio_engine_stability", function()
 	for veh in pairs(E.TrackedVehicles or {}) do
 		if IsValid(veh) then
 			local cfg = E.GetCarConfig(veh)
-			if cfg and cfg.stability ~= false then assist(veh, cfg, dt) end
+			-- not on spiked tyres (sv_handling.lua): a stinger is meant to make the car hard to drive
+			if cfg and cfg.stability ~= false and not veh.audioSpiked then assist(veh, cfg, dt) end
 		end
 	end
 end)

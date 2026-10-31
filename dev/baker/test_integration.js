@@ -148,7 +148,7 @@ function findAll(pat) {
     end
     local env = Bank.GetEnv()
     if not env.baked then miss[#miss + 1] = "env not baked" end
-    for _, k in ipairs({ "road", "wind", "turbo", "bov1", "bov2" }) do
+    for _, k in ipairs({ "road", "wind", "turbo", "evhum", "bov1", "bov2" }) do
       if not (env[k] and file.Exists("sound/" .. env[k], "GAME")) then miss[#miss + 1] = "env " .. k end
     end
     __result(cars .. "\\t" .. nb .. "\\t" .. baked .. "\\t" .. table.concat(miss, "\\n"))`)

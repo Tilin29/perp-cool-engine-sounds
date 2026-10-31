@@ -14,6 +14,8 @@ end
 for _, f in ipairs(shared) do include(base .. f) end
 
 if SERVER then
+	include(base .. "sv_perp_physics.lua")   -- generated: PERP's base-script physics per car
+	include(base .. "sv_handling.lua")
 	include(base .. "sv_engine.lua")
 	include(base .. "sv_stability.lua")
 else

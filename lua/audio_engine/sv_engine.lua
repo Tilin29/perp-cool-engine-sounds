@@ -24,8 +24,7 @@ end
 -- real performance: the profile's acceleration and top speed are applied to the car's
 -- physics (Source vehicle params), starting from what its own vehicle script set up
 ---------------------------------------------------------------------------
-local HU_PER_MPH = 17.6   -- GetVehicleParams speeds are inches/s; SetVehicleParams takes mph
-local SPEED_KEYS = { "maxSpeed", "maxRevSpeed", "boostMaxSpeed" }
+local HU_PER_MPH = E.HU_PER_MPH   -- GetVehicleParams speeds are inches/s (sv_handling.lua: E.SetParams)
 
 local function captureBase(veh)
 	if veh.audioBase then return veh.audioBase end
@@ -45,28 +44,17 @@ function E.ApplyPerformance(veh, prof)
 	local accel = prof and prof.accel or 1
 	local vmax = prof and prof.vmax or 0
 	local p = table.Copy(base)
-	for _, k in ipairs(SPEED_KEYS) do
-		if p.engine[k] then p.engine[k] = p.engine[k] / HU_PER_MPH end
-	end
 	p.engine.horsepower = base.engine.horsepower * accel
-	if vmax > 0 then p.engine.maxSpeed = vmax / 1.609344 end
-	if not pcall(veh.SetVehicleParams, veh, p) then return end
-	-- self-check the speed unit: if the engine took our mph as inches/s, set it again scaled
-	local ok, chk = pcall(veh.GetVehicleParams, veh)
-	if ok and istable(chk) and chk.engine and chk.engine.maxSpeed then
-		local want = p.engine.maxSpeed * HU_PER_MPH
-		if math.abs(chk.engine.maxSpeed - p.engine.maxSpeed) < math.abs(chk.engine.maxSpeed - want) then
-			for _, k in ipairs(SPEED_KEYS) do
-				if p.engine[k] then p.engine[k] = p.engine[k] * HU_PER_MPH end
-			end
-			pcall(veh.SetVehicleParams, veh, p)
-		end
-	end
+	if vmax > 0 then p.engine.maxSpeed = vmax / 1.609344 * HU_PER_MPH end
+	E.SetParams(veh, p)
 end
 
 local function track(ent)
 	if not isOurs(ent) then return end
 	tracked[ent] = true
+	-- PERP physics on the test script and the anti-spin setup (sv_handling.lua), before the
+	-- car's physics are captured as the base the tuning menu works from
+	E.PrepareHandling(ent)
 	captureBase(ent)
 	-- after a lua refresh, a car that is already running stays drivable
 	if ent.audioDrivable == nil then ent.audioDrivable = ent:GetNW2Bool("audio_on", false) end

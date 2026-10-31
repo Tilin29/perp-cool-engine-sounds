@@ -310,6 +310,35 @@ E.CAR_BOV = {
 	["Mitsubishi Lancer Evo X"] = true,
 }
 
+--[[
+	Economy cars: stock silencers and small engines sound duller and quieter than the presets,
+	which are tuned for character. On top of its preset, an economy car gets:
+	  tone x ECONOMY.toneScale   (darker exhaust; part of the sound, so re-bake after changing)
+	  muffle                     (a stock silencer: lower cutoffs, more treble cut; also re-bake)
+	  gurgle = 0                 (no off-throttle burble; also part of the sound)
+	  volume, soundLevel         (quieter, and carries less far; runtime)
+]]
+E.ECONOMY_SOUND = { toneScale = 0.5, muffle = 0.7, gurgle = 0, volume = 0.8, soundLevel = 80 }
+E.ECONOMY = {
+	["Chevrolet Spark"] = true,
+	["Chrysler PT Cruiser"] = true,
+	["Citroen C1"] = true,
+	["Citroen C4"] = true,
+	["Kia Ceed"] = true,
+	["Kia Forte Koup"] = true,
+	["Mini Clubman"] = true,
+	["Scion tC"] = true,
+	["Scion xD"] = true,
+	["Toyota Prius"] = true,
+	["Vauxhall Agila"] = true,
+	["Vauxhall Astra"] = true,
+	["Vauxhall Corsa"] = true,
+	["Vauxhall Insignia"] = true,
+	["Volkswagen Golf MKII"] = true,
+	["Volkswagen Golf MKIII"] = true,
+	["Volkswagen New Beetle"] = true,
+}
+
 -- register a car's model with the engine from the list above
 function E.RegisterCarNamed(model, carName, extra)
 	local e = E.CAR_ENGINES[carName]
@@ -331,6 +360,15 @@ function E.RegisterCarNamed(model, carName, extra)
 		soundLevel = 85,
 		volume = 1.0,
 	}
+	if E.ECONOMY[carName] then
+		local eco, preset = E.ECONOMY_SOUND, E.EnginePreset(e.preset)
+		local stock = {}
+		for k, v in pairs(e.stock or {}) do stock[k] = v end
+		stock.tone = (stock.tone or (preset and preset.tone) or 0.4) * eco.toneScale
+		stock.gurgle = eco.gurgle
+		cfg.stock = stock
+		cfg.volume, cfg.soundLevel, cfg.muffle, cfg.economy = eco.volume, eco.soundLevel, eco.muffle, true
+	end
 	for k, v in pairs(extra or {}) do cfg[k] = v end
 	return E.RegisterCar(model, cfg)
 end
@@ -512,9 +550,9 @@ E.CAR_MODELS = {
 	["Volvo S60"] = { "models/tdmcars/vol_s60.mdl", "scripts/vehicles/tdmcars/vols60.txt", 0.368 },
 }
 
--- PERP tunes the handling of these cars itself (and spiked tyres are meant to be undrivable),
--- so the stability assist stays off for them: set PERP_STABILITY = true to try it
-E.PERP_STABILITY = false
+-- the stability assist on the PERP cars, with each car's own steering angles (sv_handling.lua).
+-- Never on spiked tyres: a stinger is meant to make the car hard to drive. false = off for all
+E.PERP_STABILITY = true
 
 for name, m in pairs(E.CAR_MODELS) do
 	local extra = { script = m[2], wheelRadius = m[3] or 0.36, perp = true }
