@@ -20,7 +20,10 @@ DT.TMAX = 320 -- Rev Bench reference torque, only used for free-revving
 
 -- Arcade gearbox shift points, as fractions of redline (cars can override with cfg.shift)
 DT.SHIFT = {
-	upRpm = 0.92,      -- W held: shift up here
+	upRpm = 0.92,      -- W held: shift up here...
+	lazyUpRpm = 0.68,  -- ...or as early as this when the car barely accelerates
+	pullAccel = 2.5,   -- m/s2 of acceleration that counts as pulling hard (shifts at upRpm)
+	lazyLand = 0.45,   -- an early upshift only if the next gear keeps the revs above this
 	kickRpm = 0.60,    -- pressing W with the revs below this kicks down...
 	sagRpm = 0.38,     -- ...and so does holding W while they sag below this
 	kickLand = 0.88,   -- kickdown picks the lowest gear that stays under this
@@ -28,6 +31,18 @@ DT.SHIFT = {
 	brakeLand = 0.96,  -- ...if the lower gear keeps them under this
 	lugRpm = 0.30,     -- coasting: shift down below this
 }
+
+-- a car's own shift points, any it leaves out from DT.SHIFT
+local shiftCache = setmetatable({}, { __mode = "k" })
+function DT.ShiftPoints(t)
+	local r = shiftCache[t]
+	if r then return r end
+	r = {}
+	for k, v in pairs(DT.SHIFT) do r[k] = v end
+	for k, v in pairs(t) do r[k] = v end
+	shiftCache[t] = r
+	return r
+end
 
 function DT.TorqueNorm(cfg, rpm)
 	local x = rpm / cfg.redline
@@ -138,6 +153,8 @@ function DT.Step(st, cfg, dt, inp)
 	local mode, pedal
 	if inp.hand and av < 1.0 then
 		mode, pedal = "N", inp.fwd         -- handbrake at a standstill: rev it in neutral
+	elseif st.gear == 0 and av < 1.0 and not inp.fwd and not inp.back then
+		mode, pedal = "N", false           -- stays in neutral until W (or S) is pressed
 	elseif v < -0.6 or (inp.back and not inp.fwd and v < 0.6) then
 		mode, pedal = "R", inp.back
 	else
@@ -232,7 +249,7 @@ function DT.Step(st, cfg, dt, inp)
 		if st.gear > 0 then
 			local n = #cfg.gears
 			local red = cfg.redline
-			local SH = cfg.shift or DT.SHIFT
+			local SH = cfg.shift and DT.ShiftPoints(cfg.shift) or DT.SHIFT
 			local rpm = st.rpm  -- the engine's actual revs
 			local function rpmIn(g) return av * K * gearRatio(cfg, g) end
 			local function shift(g, kind, hold)
@@ -250,7 +267,13 @@ function DT.Step(st, cfg, dt, inp)
 				if pedal then
 					-- kickdown when you get on it with the revs low, or if they sag while you hold it
 					local kick = (st.pressT < 0.6 and rpm < red * SH.kickRpm) or rpm < red * SH.sagRpm
-					if st.gear < n and (wheelRpm > red * SH.upRpm or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then
+					-- the shift point follows how hard the car pulls: flat out on a quick car it
+					-- holds each gear to upRpm, a car that only creeps faster (heavy, or near its
+					-- top speed) changes up early, so it still climbs into its last gear
+					local pull = clamp(st.accel / SH.pullAccel, 0, 1)
+					local upAt = red * (SH.lazyUpRpm + (SH.upRpm - SH.lazyUpRpm) * pull)
+					local lazy = st.gear < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
+					if st.gear < n and (wheelRpm > red * SH.upRpm or lazy or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then
 						shift(st.gear + 1, 1, 0.8)
 					elseif st.gear > 1 and kick then
 						-- the lowest gear that keeps the revs under kickLand (skips gears if needed)

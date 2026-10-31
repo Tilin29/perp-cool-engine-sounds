@@ -275,10 +275,10 @@ function E.OpenMenu(veh)
 		if stats.gears then
 			local K = 60 / (2 * math.pi * car.wheelRadius)
 			local parts = {}
-			for i, r in ipairs(prof.gears) do
-				parts[#parts + 1] = string.format("%s %d", ord(i), prof.redline / (K * r * cfg.final) * 3.6)
+			for i, r in ipairs(cfg.gears) do   -- the gears the box uses (a slow car drops its top ones)
+				parts[#parts + 1] = string.format("%s %d", ord(i), prof.redline / (K * r * cfg.final) * 2.23694)
 			end
-			stats.gears:SetText("Top speed per gear (km/h): " .. table.concat(parts, " · "))
+			stats.gears:SetText("Top speed per gear (mph): " .. table.concat(parts, " · "))
 		end
 		if stats.final then
 			stats.final:SetText(prof.fit > 0 and string.format("Final drive %.2f (fitted)", cfg.final) or "Final drive")
@@ -356,14 +356,21 @@ function E.OpenMenu(veh)
 		-- real performance: changes how the car actually drives; the revs and gears follow
 		add2(slider(rpm, s, "Acceleration", 0.5, 2.5, 2, prof.accel, function(v) prof.accel = floor(v * 20 + 0.5) / 20; changed() end,
 			function(v) return string.format("×%.2f", floor(v * 20 + 0.5) / 20) end))
-		local stockTop = E.CarTopSpeed(veh, car)
-		add2(slider(rpm, s, "Top speed", 80, 450, 0, prof.vmax > 0 and prof.vmax or stockTop, function(v)
-			v = floor(v / 5 + 0.5) * 5
-			prof.vmax = (v == stockTop) and 0 or v
+		-- shown in mph (the profile keeps km/h): steps of 5 mph, snapping to the car's stock speed
+		local KMH_PER_MPH = 1.609344
+		local stockMph = floor(E.CarTopSpeed(veh, car) / KMH_PER_MPH + 0.5)
+		local function snapMph(v)
+			v = floor(v + 0.5)
+			if math.abs(v - stockMph) < 3 then return stockMph, true end
+			return floor(v / 5 + 0.5) * 5, false
+		end
+		add2(slider(rpm, s, "Top speed", 25, 280, 0, prof.vmax > 0 and prof.vmax / KMH_PER_MPH or stockMph, function(v)
+			local mph, stock = snapMph(v)
+			prof.vmax = stock and 0 or floor(mph * KMH_PER_MPH + 0.5)
 			changed()
 		end, function(v)
-			v = floor(v / 5 + 0.5) * 5
-			return v == stockTop and (v .. " km/h (stock)") or (v .. " km/h")
+			local mph, stock = snapMph(v)
+			return stock and (mph .. " mph (stock)") or (mph .. " mph")
 		end))
 		stats.engine = label(rpm, "", "AudioMenu_Small", C.muted)
 		stats.engine:Dock(TOP)

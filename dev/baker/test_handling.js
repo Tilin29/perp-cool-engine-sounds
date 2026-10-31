@@ -95,11 +95,12 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     function Describe(veh)
       local p = veh.params
       local f, r = p.axles[1], p.axles[2]
-      return string.format("%.0f|%.0f|%s|%.0f|%.2f|%.2f|%.2f|%.2f|%g|%.2f|%.1f|%s|%s|%s",
+      return string.format("%.0f|%.0f|%s|%.0f|%.2f|%.2f|%.2f|%.2f|%g|%.2f|%.1f|%s|%s|%s|%.2f",
         p.engine.horsepower, p.engine.maxSpeed / 17.6, table.concat(p.engine.gearRatio, ","), veh.mass,
         f.brakeFactor, r.brakeFactor, p.steering.turnThrottleReduceFast, p.body.addGravity,
         p.body.massCenterOverride.z, p.steering.powerSlideAccel, p.steering.degreesSlow,
-        tostring(veh.audioPerpPhysics or false), tostring(veh.audioAntiSpin or false), tostring(veh.audioSpiked or false))
+        tostring(veh.audioPerpPhysics or false), tostring(veh.audioAntiSpin or false), tostring(veh.audioSpiked or false),
+        p.steering.degreesFast)
     end
     -- E.GetCarConfig reads the model
     function Spawn(model, script, s)
@@ -111,8 +112,8 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   let fail = 0
   const check = (ok, msg) => { if (!ok) { fail++; console.log('FAIL', msg) } }
   const parse = (s) => {
-    const [hp, mph, gears, mass, bf, br, trf, grav, cz, psa, deg, perp, anti, spiked] = s.split('|')
-    return { hp: +hp, mph: +mph, gears, mass: +mass, bf: +bf, br: +br, trf: +trf, grav: +grav, cz: +cz, psa: +psa, deg: +deg, perp, anti, spiked }
+    const [hp, mph, gears, mass, bf, br, trf, grav, cz, psa, deg, perp, anti, spiked, dfast] = s.split('|')
+    return { hp: +hp, mph: +mph, gears, mass: +mass, bf: +bf, br: +br, trf: +trf, grav: +grav, cz: +cz, psa: +psa, deg: +deg, perp, anti, spiked, dfast: +dfast }
   }
   const near = (a, b, tol = 0.01) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b))
 
@@ -127,8 +128,9 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   check(near(c.bf, 0.6) && near(c.br, 0.4), 'expected 60/40 front brake bias (PERP 50/50)')
   check(near(c.trf, 0.75), 'turnThrottleReduceFast: PERP 0.75 kept (above the 0.5 floor)')
   check(near(c.cz, -1 - 0.25 * 15), 'centre: PERP -1, lowered by a quarter wheel radius')
-  check(near(c.psa, 150 * 0.6), 'handbrake slide x0.6')
+  check(near(c.psa, 150), 'handbrake slide as the PERP script has it')
   check(near(c.deg, 38.5), 'steering lock from the PERP script')
+  check(near(c.dfast, 11 * 1.3), 'steering at speed: PERP 11 degrees x1.3')
 
   // 2. SL65 on its own PERP script (the server): anti-spin only
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/sl65amg.txt", SL65))`)

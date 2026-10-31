@@ -7,10 +7,15 @@
 
 	  * rotating more than asked (oversteer, a spin starting)  -> catches it. With the handbrake
 	    held it allows a lot more, so handbrake drifts still work.
-	  * rotating against the steering (counter-steering)      -> helps stop the rotation
+	  * rotating against the steering (a snap the other way)  -> helps stop the rotation
 	  * rotating less than asked (pushing wide, understeer)    -> adds a little turn-in
-	  * last-resort guard: if the tail still slides out past the drift angle, it pulls the
-	    car's travel back toward the nose without losing speed
+	  * last-resort guard: if the tail still slides out past the drift angle, it slows the
+	    rotation down (it never turns the car's travel: that launched it where the nose pointed)
+
+	A drift starts with the handbrake and lasts as long as the car stays sideways (past
+	driftHold degrees), handbrake held or not. While drifting the car may slide and rotate
+	freely, counter-steering holds the angle instead of being fought, and only a real spin
+	(past handbrakeAngle) is caught.
 
 	It never reacts to the normal angle of a car going round a tight bend (the body naturally
 	points a little across its path at low speed), only to the tail stepping OUT.
@@ -25,14 +30,14 @@ local cvOn = CreateConVar("audio_engine_stability", "1", FCVAR_ARCHIVE + FCVAR_N
 local DEFAULTS = {
 	steerSlow = 35,        -- front wheel angle at full lock, parking speeds (degrees)
 	steerFast = 10,        -- ... at speed (100+ km/h)
-	grip = 1.25,           -- how many g of cornering the car may pull before it counts as sliding (arcade)
+	grip = 1.5,            -- how many g of cornering the car may pull before it counts as sliding (arcade)
 	yawAllow = 10,         -- deg/s of extra rotation allowed before it steps in
 	driftYaw = 70,         -- ... with the handbrake held (drifting)
 	overDamp = 9,          -- how firmly it catches oversteer (per second)
 	turnHelp = 2.5,        -- how much turn-in it adds when the car pushes wide (per second)
 	driftAngle = 30,       -- last-resort guard: tail-out slide angle (degrees)
-	handbrakeAngle = 55,   -- ... with the handbrake held
-	gripAssist = 3,        -- how firmly the guard pulls the travel back toward the nose
+	handbrakeAngle = 70,   -- ... while drifting
+	driftHold = 8,         -- a drift lasts while the car slides at least this many degrees
 	minSpeed = 8,          -- km/h
 }
 E.STABILITY_DEFAULTS = DEFAULTS
@@ -103,18 +108,23 @@ local function assist(veh, cfg, dt)
 
 	if kmh < minSpeed or vf <= 0 then return end
 	local fade = clamp((kmh - minSpeed) / 12, 0, 1)
-	local handbrake = drv:KeyDown(IN_JUMP)
+	local beta = deg(atan2(vr, vf))                      -- + = nose rotated left of the travel
+	-- drifting: started with the handbrake, held while the car stays sideways
+	if drv:KeyDown(IN_JUMP) then veh.audioDrift = true
+	elseif abs(beta) < P("driftHold") then veh.audioDrift = false end
+	local handbrake = veh.audioDrift
 
 	-- rotation the driver is asking for (deg/s, left = +): what the steering angle would give
 	-- at this speed, capped by what the tyres can actually hold
-	local lock = rad(P("steerSlow") + (P("steerFast") - P("steerSlow")) * clamp((kmh - 20) / 80, 0, 1))
+	-- (sv_handling may have widened the car's lock at speed: veh.audioSteerFast)
+	local fast = P("steerFast") * (veh.audioSteerFast or 1)
+	local lock = rad(P("steerSlow") + (fast - P("steerSlow")) * clamp((kmh - 20) / 80, 0, 1))
 	local vv = max(v, 2)
 	local wKin = deg(vv * tan(lock) / geo.wheelbase)
 	local wGrip = deg(P("grip") * 9.81 / vv)
 	local wRef = s * min(wKin, wGrip)
 
 	local yaw = phys:GetAngleVelocity().z                -- deg/s, left = +
-	local beta = deg(atan2(vr, vf))                      -- + = nose rotated left of the travel
 	local add = 0
 
 	local allow = handbrake and P("driftYaw") or (P("yawAllow") + 0.15 * abs(wRef))
@@ -129,8 +139,9 @@ local function assist(veh, cfg, dt)
 			-- pushing wide: a little help to turn in
 			add = add + sign(wRef) * (abs(wRef) * 0.8 - abs(yaw)) * min(1, P("turnHelp") * dt)
 		end
-	else
-		-- rotating against the steering (counter-steering, or a snap the other way): stop it
+	elseif not handbrake then
+		-- rotating against the steering (a snap the other way): stop it. Not while drifting:
+		-- there counter-steering is how the driver holds the angle
 		local excess = abs(yaw) - allow * 0.5
 		if excess > 0 then add = add - sign(yaw) * excess * min(1, kOver * dt) end
 	end
@@ -145,14 +156,6 @@ local function assist(veh, cfg, dt)
 			add = add - sign(beta) * min(90, (a - maxA) * 4) * dt * 4    -- ease the nose back
 		end
 		add = add - yaw * min(1, kOver * 0.6 * k * dt)
-		-- turn the travel toward the nose (same speed, new direction)
-		local turn = min(a * 0.5, a * P("gripAssist") * k * dt) * fade
-		if turn > 0 then
-			local nb = rad(sign(beta) * (a - turn))
-			local vUp = vel:Dot(up)
-			local newVel = fwd * (speedIn * math.cos(nb)) + right * (speedIn * math.sin(nb)) + up * vUp
-			phys:AddVelocity(newVel - vel)
-		end
 	end
 
 	if add ~= 0 then

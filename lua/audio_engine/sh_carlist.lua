@@ -346,6 +346,8 @@ for _, name in ipairs({
 	"Ford Focus RS", "Honda Civic Type R", "Honda Civic Type R 1997", "Mitsubishi Lancer Evo VIII",
 	"Mitsubishi Lancer Evo X", "Subaru Impreza WRX STI",
 }) do E.CAR_EMOTION[name] = true end
+-- and they carry further (Source sound level in dB; other cars 85, economy cars 80)
+E.EMOTION_SOUNDLEVEL = 92
 
 --[[
 	Economy cars: stock silencers and small engines sound duller and quieter than the presets,
@@ -395,7 +397,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		emotionStart = E.CAR_EMOTION[carName] or false,
 		topSpeed = "auto",
 		wheelRadius = 0.33,
-		soundLevel = 85,
+		soundLevel = E.CAR_EMOTION[carName] and E.EMOTION_SOUNDLEVEL or 85,
 		volume = 1.0,
 	}
 	if E.ECONOMY[carName] then

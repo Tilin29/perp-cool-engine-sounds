@@ -18,6 +18,7 @@ CreateClientConVar("audio_engine_startkey", "i", true, true, "Key that starts/st
 local cvRoad = CreateClientConVar("audio_engine_roadnoise", "1", true, false, "Tyre roar volume (0-2)", 0, 2)
 local cvWind = CreateClientConVar("audio_engine_windnoise", "1", true, false, "Wind noise volume (0-2)", 0, 2)
 local cvDoppler = CreateClientConVar("audio_engine_doppler", "1", true, false, "Doppler pitch shift of passing cars (0 = off, 1 = real)", 0, 1)
+local cvPassby = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off)", 0, 1)
 
 local cars = {}
 E.ClientCars = cars
@@ -221,6 +222,22 @@ local function dopplerFactor(car, dt, mine)
 	return car.dop
 end
 
+--[[
+	Pass-by swell, for everyone but the car's own driver. Close up the game already plays a car
+	at full level (its distance falloff only starts some 20-40 m out), and the mix can't go any
+	louder without clipping, so a drive-by had no loudness peak. Instead a car is turned down a
+	little at mid range and comes up to full level as it gets close: closer than PASSBY_NEAR
+	it's untouched, past PASSBY_FAR it sits audio_engine_passby x PASSBY_DROP lower.
+]]
+local PASSBY_NEAR, PASSBY_FAR, PASSBY_DROP = 8 / 0.0254, 35 / 0.0254, 0.4   -- inches; 0.4 = -4.4 dB
+local function proximityGain(car, mine)
+	local amt = cvPassby:GetFloat()
+	if mine or amt <= 0 or not listener.ok then return 1 end
+	local t = math.Clamp((listener.pos:Distance(car.ent:GetPos()) - PASSBY_NEAR) / (PASSBY_FAR - PASSBY_NEAR), 0, 1)
+	t = t * t * (3 - 2 * t)
+	return 1 - amt * PASSBY_DROP * t
+end
+
 local function updateSound(car, dt)
 	local bank, cfg, st, ent = car.bank, car.cfg, car.st, car.ent
 	if not bank or not bank.ready then return end
@@ -254,18 +271,24 @@ local function updateSound(car, dt)
 	car.loopGain = approach(car.loopGain, target, rate * dt)
 
 	car.thrS = car.thrS + (st.soundThr - car.thrS) * min(1, dt * 12)
-	local limTarget = (st.on and st.phase == "run" and st.gear == 0 and st.limHold > 0) and 1 or 0
-	car.limW = approach(car.limW, limTarget, dt / 0.06)
+	-- the limiter loop only while the throttle is held against it: let go and the revs fall
+	-- straight away, so the loop must too (it used to stutter on for its hold time)
+	local limTarget = (st.on and st.phase == "run" and st.gear == 0 and st.limHold > 0
+		and st.lastPedal and st.rpm > cfg.redline * 0.9) and 1 or 0
+	car.limW = approach(car.limW, limTarget, dt / (limTarget > car.limW and 0.06 or 0.03))
 
 	--[[
 		Headroom. Everything this car plays is summed by the game and clips (crackles) past
 		full scale, so the car's own mix is kept under a ceiling: driving leaves headroom,
-		revving in neutral may go a few dB louder. Loops are normalised to a 0.9 peak; loops
-		that aren't phase-locked add up by power.
+		revving in neutral may go a little louder. Loops are normalised to a 0.9 peak; loops
+		that aren't phase-locked add up by power. The estimate is by power, but mid cross-fade
+		two bands' peaks do line up now and then (up to ~1.4x the estimate on the heavily
+		limited V8 / flat-4 banks), so the ceilings leave room for that: at 0.72 / 0.85 most
+		engines crackled idling in neutral.
 	]]
 	local neutral = st.on and st.phase == "run" and st.gear == 0
-	local ceiling = neutral and 0.85 or 0.72
-	car.ceiling = approach(car.ceiling or 0.72, ceiling, dt * 0.5)
+	local ceiling = neutral and 0.68 or 0.66
+	car.ceiling = approach(car.ceiling or 0.66, ceiling, dt * 0.5)
 	-- revving in neutral sits a few dB above driving (driving leaves that headroom)
 	car.revGain = approach(car.revGain or 0.85, neutral and 1.2 or 0.85, dt * 2)
 	local g = master * car.loopGain * car.revGain
@@ -339,10 +362,12 @@ local function updateSound(car, dt)
 	-- pull down quickly, recover slowly
 	if busT < car.bus then car.bus = car.bus + (busT - car.bus) * min(1, dt * 30)
 	else car.bus = car.bus + (busT - car.bus) * min(1, dt * 3) end
-	car.busPeak = est * car.bus
 	car.popLoad = (car.popLoad or 0) * math.exp(-dt / 0.08)
-	g = g * car.bus
-	roadVol, windVol, humVol = roadVol * car.bus, windVol * car.bus, humVol * car.bus
+	-- the pass-by swell goes on after the headroom, so a car pinned at its ceiling still swells
+	local prox = car.prox or 1
+	car.busPeak = est * car.bus * prox
+	g = g * car.bus * prox
+	roadVol, windVol, humVol = roadVol * car.bus * prox, windVol * car.bus * prox, humVol * car.bus * prox
 
 	local thr = car.thrS
 	local det = car.detune * (car.dop or 1)
@@ -386,7 +411,7 @@ local function updateSound(car, dt)
 
 	-- pops & bangs: profile "pops" = how often (0 = off), "popVol" = how loud (1 = default)
 	local P = cfg.profile.pops or 0
-	local popVol = master * car.loopGain * 0.5 * (cfg.profile.popVol or 1)
+	local popVol = master * car.loopGain * 0.5 * (cfg.profile.popVol or 1) * (car.prox or 1)
 	if P > 0 and popVol > 0 and #bank.pops > 0 and st.on and st.phase == "run" then
 		local red = cfg.redline
 		local firings = st.rpm / 60 * bank.cyl / 2
@@ -490,6 +515,7 @@ local function updateCar(car, dt)
 	end
 	car.v = car.v + (vRaw - car.v) * min(1, dt * 10)
 	dopplerFactor(car, dt, mine)
+	car.prox = proximityGain(car, mine)
 
 	local f, b, h = readInputs(car)
 	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, v = car.v })

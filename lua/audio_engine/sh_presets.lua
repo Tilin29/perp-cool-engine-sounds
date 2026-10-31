@@ -148,7 +148,7 @@ function E.SanitizeProfile(p)
 	o.fit = (tonumber(p.fit) or 0) > 0 and 1 or 0
 	-- performance: acceleration (engine power multiplier) and top speed (km/h, 0 = car's own)
 	o.accel = clampRound(p.accel or 1, 0.5, 2.5, 0.05)
-	o.vmax = (tonumber(p.vmax) or 0) > 0 and clampRound(p.vmax, 80, 450, 5) or 0
+	o.vmax = (tonumber(p.vmax) or 0) > 0 and clampRound(p.vmax, 40, 450, 1) or 0   -- km/h (the menu sets it in whole mph)
 	-- pops & bangs: how often (0 = off) and how loud; the turbo blow-off valve
 	o.pops = clampRound(p.pops or 0, 0, 1, 0.05)
 	o.popVol = clampRound(p.popVol or 1, 0, 2, 0.05)
@@ -232,6 +232,23 @@ function E.FitFinal(gears, redline, wheelRadius, topKmh)
 	return redline * 0.97 / ((topKmh / 3.6) * K * gears[#gears])
 end
 
+--[[
+	With fitted gearing, top gear reaches redline at the car's top speed, so a slow car (a van
+	PERP caps at 35 mph) would squeeze six gears into 56 km/h and shift every few km/h. Its
+	box keeps only as many of its gears as leave 1st reaching at least FIRST_GEAR_MIN km/h, or
+	FIRST_GEAR_SHARE of the top speed on a fast car (real 1st gears top out around there).
+]]
+E.FIRST_GEAR_MIN, E.FIRST_GEAR_SHARE = 25, 0.16
+function E.FitGearCount(gears, topKmh)
+	local span = topKmh / max(E.FIRST_GEAR_MIN, topKmh * E.FIRST_GEAR_SHARE)
+	local n = #gears
+	while n > 1 and gears[1] / gears[n] > span do n = n - 1 end
+	if n == #gears then return gears end
+	local g = {}
+	for i = 1, n do g[i] = gears[i] end
+	return g
+end
+
 local resolveCache = setmetatable({}, { __mode = "k" })
 
 --[[
@@ -273,10 +290,10 @@ function E.ResolveProfile(car, prof)
 	cfg.turbo = (prof.turbo and not cfg.electric) and { whine = 1.0, blowoff = 1.0 } or nil
 	cfg.gurgle = prof.gurgle
 	cfg.popTone = prof.popTone
-	cfg.gears = prof.gears
 	-- the speed the car will actually reach: the profile's top speed, else the car's own
 	cfg.topSpeed = prof.vmax > 0 and prof.vmax or (tonumber(car.topSpeed) or 250)
-	cfg.final = prof.fit > 0 and E.FitFinal(prof.gears, prof.redline, car.wheelRadius, cfg.topSpeed) or prof.final
+	cfg.gears = prof.fit > 0 and E.FitGearCount(prof.gears, cfg.topSpeed) or prof.gears
+	cfg.final = prof.fit > 0 and E.FitFinal(cfg.gears, prof.redline, car.wheelRadius, cfg.topSpeed) or prof.final
 	cfg.reverse = prof.gears[1] * 0.9
 	-- torque converter stall speed (an electric motor is direct drive)
 	cfg.stallRpm = cfg.electric and prof.idle or (prof.idle + 0.27 * prof.redline)
@@ -307,7 +324,7 @@ function E.CarTopSpeed(ent, car)
 	local t = car and car.topSpeed
 	if t == "auto" or t == nil then
 		local v = IsValid(ent) and ent:GetNW2Float("audio_vmax", 0) or 0
-		return v > 0 and min(400, max(80, floor(v / 5 + 0.5) * 5)) or 250
+		return v > 0 and min(400, max(40, floor(v / 5 + 0.5) * 5)) or 250
 	end
 	return t
 end

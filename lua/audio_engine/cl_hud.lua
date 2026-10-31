@@ -7,7 +7,13 @@
 local E = AUDIO_ENGINE
 
 local cvHud = CreateClientConVar("audio_engine_hud", "1", true, false, "Show the speed/rpm HUD")
-local cvUnits = CreateClientConVar("audio_engine_units", "kmh", true, false, "HUD speed units: kmh or mph")
+local cvUnits = CreateClientConVar("audio_engine_units", "mph", true, false, "HUD speed units: mph or kmh")
+-- the default used to be kmh, and the old value is archived: move everyone to mph once
+-- (a cookie remembers it, so choosing kmh again afterwards sticks)
+if cookie.GetNumber("audio_engine_units_mph", 0) == 0 then
+	cookie.Set("audio_engine_units_mph", "1")
+	if cvUnits:GetString() ~= "mph" then RunConsoleCommand("audio_engine_units", "mph") end
+end
 local cvScale = CreateClientConVar("audio_engine_hud_scale", "1", true, false, "HUD size multiplier", 0.5, 2)
 
 local C = {

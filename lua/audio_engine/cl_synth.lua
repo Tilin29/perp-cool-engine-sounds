@@ -1117,31 +1117,29 @@ local function runBiquad(f, x)
 end
 
 --[[
-	Turbo loop at full boost: compressor whistle with a little bearing wobble, plus the
-	rush of air through the intake. The game pitches it with boost.
+	Turbo loop at full boost: a soft, round compressor whine with a little bearing wobble and
+	a narrow band of air around the tone (broadband intake rush sounded like a vacuum cleaner).
+	Everything above ~3 kHz is rolled off. The game pitches it with boost.
 ]]
 function Synth.RenderTurboLoop(sr, yieldFn)
 	local rnd = noiseGen(0x5EED7)
-	local fw = 2500
+	local fw = 1700
 	local L = floor(sr * 1.5)
 	local X = floor(sr * 0.15)
 	local total = L + X
 	local buf = {}
-	local ph, ph2 = 0, 0
+	local ph = 0
 	local drift = 0
-	local air = biquad("bandpass", 1900, sr, 0.9)
-	local air2 = biquad("bandpass", 4200, sr, 1.4)
-	local hiss = biquad("highpass", 2500, sr, 0)
-	local cut = biquad("lowpass", 9000, sr, 0)
+	local air = biquad("bandpass", fw, sr, 3)
+	local cut1 = biquad("lowpass", 3200, sr, 0)
+	local cut2 = biquad("lowpass", 3200, sr, 0)
 	for i = 1, total do
 		local nz = rnd()
 		drift = drift + (nz - drift) * 0.0004
-		local f = fw * (1 + 0.012 * drift * 30)
+		local f = fw * (1 + 0.008 * drift * 30)
 		ph = ph + f / sr; if ph >= 1 then ph = ph - 1 end
-		ph2 = ph2 + (f * 1.52) / sr; if ph2 >= 1 then ph2 = ph2 - 1 end
-		local tone = sin(TAU * ph) * 0.55 + sin(TAU * ph2) * 0.12
-		local a = runBiquad(air, nz) * 1.6 + runBiquad(air2, rnd()) * 0.9 + runBiquad(hiss, rnd()) * 0.15
-		buf[i] = runBiquad(cut, tone * 0.5 + a)
+		local tone = sin(TAU * ph) * 0.8 * (1 + 0.08 * sin(TAU * 7 * i / sr))
+		buf[i] = runBiquad(cut2, runBiquad(cut1, tone + runBiquad(air, rnd()) * 1.4))
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
 	return makeLoop(buf, L, X), L
@@ -1178,23 +1176,23 @@ function Synth.RenderEVHumLoop(sr, yieldFn)
 end
 
 --[[
-	Blow-off: on a recirculating valve (stock) it's a soft "pssh" with a little flutter as
-	the compressor surges.
+	Blow-off: on a recirculating valve (stock) it's a soft, dark "pshh" with a short tail and a
+	gentle flutter as the compressor surges.
 ]]
 function Synth.RenderBlowoff(sr, seed, yieldFn)
 	local rnd = noiseGen(seed or 0xB10F)
-	local dur = 0.75
+	local dur = 0.5
 	local n = floor(sr * dur)
 	local buf = {}
-	local b1 = biquad("bandpass", 1500, sr, 0.8)
-	local b2 = biquad("bandpass", 3300, sr, 1.1)
-	local lp = biquad("lowpass", 7000, sr, 0)
-	local flutterHz = 19 + 4 * rnd()
+	local b1 = biquad("bandpass", 900, sr, 0.7)
+	local b2 = biquad("bandpass", 2200, sr, 1.0)
+	local lp = biquad("lowpass", 4500, sr, 0)
+	local flutterHz = 17 + 4 * rnd()
 	for i = 1, n do
 		local t = (i - 1) / sr
-		local env = min(1, t / 0.012) * exp(-t / 0.2)
-		local fl = 1 - 0.45 * exp(-t / 0.22) * (0.5 + 0.5 * sin(TAU * flutterHz * t))
-		local v = runBiquad(b1, rnd()) * 1.3 + runBiquad(b2, rnd()) * 0.8
+		local env = min(1, t / 0.008) * exp(-t / 0.12)
+		local fl = 1 - 0.3 * exp(-t / 0.15) * (0.5 + 0.5 * sin(TAU * flutterHz * t))
+		local v = runBiquad(b1, rnd()) * 1.2 + runBiquad(b2, rnd()) * 0.5
 		buf[i] = runBiquad(lp, v) * env * fl
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end

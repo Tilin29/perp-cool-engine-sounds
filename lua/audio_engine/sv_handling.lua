@@ -12,7 +12,7 @@
 	   values, so Source's internal units never matter.
 	2. Anti-spin setup (audio_engine_handling 1): brakes biased to the front (a locking rear
 	   spins the car), less power while steering at speed, a slightly lower centre of mass, at
-	   least normal grip, and a softer handbrake slide. Relative changes only.
+	   least normal grip, and more steering lock at speed. Relative changes only.
 	3. Stability assist (sv_stability.lua) for the PERP cars, with each car's own steering angles.
 
 	A car on a spiked/ tier script (tyres shot by a stinger) gets none of it: it's meant to be
@@ -148,9 +148,10 @@ end
 E.ANTI_SPIN = {
 	frontBrake = 0.6,       -- at least this share of the braking on the front axle
 	throttleReduceFast = 0.5, -- at least this much power cut while steering at speed
-	powerSlide = 0.6,       -- handbrake slide push x this
+	powerSlide = 1.0,       -- handbrake slide push x this (1 = the script's own: lower kills drifts)
 	minGravity = 1.0,       -- at least normal grip
 	lowerCentre = 0.25,     -- lower the centre of mass by this many wheel radii
+	steerFast = 1.3,        -- steering angle at speed x this (the scripts' 8-13 degrees turn too little)
 }
 
 local function antiSpin(p)
@@ -165,6 +166,7 @@ local function antiSpin(p)
 	local s, b = p.steering, p.body
 	if s and s.turnThrottleReduceFast then s.turnThrottleReduceFast = math.max(s.turnThrottleReduceFast, A.throttleReduceFast) end
 	if s and s.powerSlideAccel then s.powerSlideAccel = s.powerSlideAccel * A.powerSlide end
+	if s and s.degreesFast then s.degreesFast = s.degreesFast * A.steerFast end
 	if b and b.addGravity then b.addGravity = math.max(b.addGravity, A.minGravity) end
 	-- only when the script set a centre (a zero vector means "none": moving it would shift the car)
 	if b and isvector(b.massCenterOverride) and b.massCenterOverride:LengthSqr() > 0 and f and f.wheels_radius then
@@ -197,6 +199,7 @@ function E.PrepareHandling(veh)
 	if cvHandling:GetBool() then
 		antiSpin(p)
 		veh.audioAntiSpin = true
+		veh.audioSteerFast = E.ANTI_SPIN.steerFast   -- sv_stability expects the wider lock
 		changed = true
 	end
 	if changed then

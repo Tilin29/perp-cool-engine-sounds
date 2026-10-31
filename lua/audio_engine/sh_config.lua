@@ -68,14 +68,14 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 	stability = {
 		steerSlow = 35,        -- front wheel angle at full lock at parking speeds (degrees)
 		steerFast = 10,        -- ... at 100+ km/h
-		grip = 1.25,           -- cornering (g) the car may pull before it counts as sliding
+		grip = 1.5,            -- cornering (g) the car may pull before it counts as sliding
 		yawAllow = 10,         -- extra rotation (deg/s) allowed before it steps in
 		driftYaw = 70,         -- ... with the handbrake held (drifting)
 		overDamp = 9,          -- how firmly it catches oversteer
 		turnHelp = 2.5,        -- how much turn-in it adds when the car pushes wide (0 = none)
 		driftAngle = 30,       -- last-resort guard: tail-out slide angle (degrees)
-		handbrakeAngle = 55,   -- ... with the handbrake held
-		gripAssist = 3,        -- how firmly the guard pulls the travel back toward the nose
+		handbrakeAngle = 70,   -- ... while drifting (started with the handbrake)
+		driftHold = 8,         -- a drift lasts while the car slides at least this many degrees
 		minSpeed = 8,          -- km/h
 	},
 })

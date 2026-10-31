@@ -356,10 +356,10 @@ local function buildEnv(b)
 	local jobs = {
 		{ "road", Synth.RenderRoadLoop(sr, y), 0.07, true },
 		{ "wind", Synth.RenderWindLoop(sr, y), 0.06, true },
-		{ "turbo", Synth.RenderTurboLoop(sr, y), 0.068, true },
+		{ "turbo", Synth.RenderTurboLoop(sr, y), 0.027, true },
 		{ "evhum", Synth.RenderEVHumLoop(sr, y), 0.06, true },
-		{ "bov1", Synth.RenderBlowoff(sr, 0xB10F + 4099, y), 0.234, false, 0.15 },
-		{ "bov2", Synth.RenderBlowoff(sr, 0xB10F + 2 * 4099, y), 0.234, false, 0.15 },
+		{ "bov1", Synth.RenderBlowoff(sr, 0xB10F + 4099, y), 0.093, false, 0.15 },
+		{ "bov2", Synth.RenderBlowoff(sr, 0xB10F + 2 * 4099, y), 0.093, false, 0.15 },
 	}
 	b.peak = {}
 	for _, j in ipairs(jobs) do
