@@ -29,7 +29,13 @@ DT.SHIFT = {
 	kickLand = 0.88,   -- kickdown picks the lowest gear that stays under this
 	brakeRpm = 0.80,   -- braking: shift down once the revs fall below this...
 	brakeLand = 0.96,  -- ...if the lower gear keeps them under this
-	lugRpm = 0.30,     -- coasting: shift down below this
+	lugRpm = 0.40,     -- coasting: shift down below this (0.30 let corners sag to a near-idle drone)
+	-- cornering (A/D held, or let go under cornerHold s ago): no early upshifts (the car isn't
+	-- accelerating there because it turns, not because it's at top speed: it climbed through
+	-- the gears to a drone), and it changes down once the revs fall below cornerRpm
+	cornerRpm = 0.50,
+	cornerLand = 0.80, -- ... to the lowest gear that stays under this
+	cornerHold = 0.6,
 }
 
 -- a car's own shift points, any it leaves out from DT.SHIFT
@@ -61,7 +67,7 @@ function DT.New()
 		cut = false, crankMode = 0, limT = 0, limHold = 0, limEvent = false,
 		shiftT = 0, shiftKind = 0, holdT = 0,
 		boost = 0, bovEvent = nil, lastPedal = false,
-		lastV = 0, accel = 0, stallT = 0, pressT = 9,
+		lastV = 0, accel = 0, stallT = 0, pressT = 9, steerAgo = 9,
 	}
 end
 
@@ -139,6 +145,7 @@ DT.GearRatio = gearRatio
 
 --[[
 	inp.fwd, inp.back, inp.hand : driver keys (W, S, Space)
+	inp.steer                   : A or D held (the gearbox holds its gear through corners)
 	inp.v                       : speed along the car's nose, m/s (negative when rolling back)
 ]]
 function DT.Step(st, cfg, dt, inp)
@@ -183,6 +190,7 @@ function DT.Step(st, cfg, dt, inp)
 		end
 	end
 	if pedal and not st.lastPedal then st.pressT = 0 elseif pedal then st.pressT = st.pressT + dt end
+	st.steerAgo = inp.steer and 0 or (st.steerAgo or 9) + dt
 	st.lastPedal = pedal
 
 	if not st.on then
@@ -251,6 +259,7 @@ function DT.Step(st, cfg, dt, inp)
 			local red = cfg.redline
 			local SH = cfg.shift and DT.ShiftPoints(cfg.shift) or DT.SHIFT
 			local rpm = st.rpm  -- the engine's actual revs
+			local corner = st.steerAgo < SH.cornerHold
 			local function rpmIn(g) return av * K * gearRatio(cfg, g) end
 			local function shift(g, kind, hold)
 				st.gear = g; st.shiftKind = kind; st.holdT = hold; st.stallT = 0
@@ -266,7 +275,7 @@ function DT.Step(st, cfg, dt, inp)
 			end
 			if st.holdT <= 0 and st.shiftT <= 0 then
 				-- flat out but no longer accelerating (top speed / drag limit)
-				if pedal and st.accel < 0.35 and wheelRpm > red * 0.55 then
+				if pedal and not corner and st.accel < 0.35 and wheelRpm > red * 0.55 then
 					st.stallT = st.stallT + dt
 				else
 					st.stallT = 0
@@ -274,18 +283,20 @@ function DT.Step(st, cfg, dt, inp)
 				if pedal then
 					-- kickdown when you get on it with the revs low, or if they sag while you hold it
 					local kick = (st.pressT < 0.6 and rpm < red * SH.kickRpm) or rpm < red * SH.sagRpm
+					local cornerKick = corner and rpm < red * SH.cornerRpm
 					-- the shift point follows how hard the car pulls: flat out on a quick car it
 					-- holds each gear to upRpm, a car that only creeps faster (heavy, or near its
 					-- top speed) changes up early, so it still climbs into its last gear
 					local pull = clamp(st.accel / SH.pullAccel, 0, 1)
 					local upAt = red * (SH.lazyUpRpm + (SH.upRpm - SH.lazyUpRpm) * pull)
-					local lazy = st.gear < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
+					local lazy = not corner and st.gear < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
 					if st.gear < n and (wheelRpm > red * SH.upRpm or lazy or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then
 						shift(st.gear + 1, 1, 0.8)
-					elseif st.gear > 1 and kick then
+					elseif st.gear > 1 and (kick or cornerKick) then
 						-- the lowest gear that keeps the revs under kickLand (skips gears if needed)
+						local land = kick and SH.kickLand or SH.cornerLand
 						local g = st.gear
-						while g > 1 and rpmIn(g - 1) < red * SH.kickLand do g = g - 1 end
+						while g > 1 and rpmIn(g - 1) < red * land do g = g - 1 end
 						if g < st.gear then shift(g, -1, 0.8) end
 					end
 				elseif braking then
@@ -297,8 +308,9 @@ function DT.Step(st, cfg, dt, inp)
 				else
 					if st.gear < n and wheelRpm > red * 0.97 then
 						shift(st.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
-					elseif st.gear > 1 and rpm < red * SH.lugRpm and rpmIn(st.gear - 1) < red * 0.75 then
-						shift(st.gear - 1, -1, 0.6)                      -- don't let it lug
+					elseif st.gear > 1 and rpm < red * (corner and SH.cornerRpm or SH.lugRpm)
+						and rpmIn(st.gear - 1) < red * 0.75 then
+						shift(st.gear - 1, -1, 0.6)                      -- don't let it lug (or drone through a corner)
 					end
 				end
 				wheelRpm = rpmIn(st.gear)

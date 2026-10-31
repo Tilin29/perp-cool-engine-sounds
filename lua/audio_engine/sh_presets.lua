@@ -235,17 +235,48 @@ end
 --[[
 	With fitted gearing, top gear reaches redline at the car's top speed, so a slow car (a van
 	PERP caps at 35 mph) would squeeze six gears into 56 km/h and shift every few km/h. Its
-	box keeps only as many of its gears as leave 1st reaching at least FIRST_GEAR_MIN km/h, or
-	FIRST_GEAR_SHARE of the top speed on a fast car (real 1st gears top out around there).
+	box is respaced to suit the speed: about one gear per KMH_PER_GEAR of top speed, and enough
+	that no step between gears is over GEAR_STEP_MAX (a slow car's 1st still ends at
+	FIRST_GEAR_MIN: one long gear after it lugged at a quarter of redline); at least 2, at most
+	the box's own count (a car may set its own: `count`, sh_carlist.lua CAR_GEARS).
+	1st reaches FIRST_GEAR_SHARE of the top speed (at least FIRST_GEAR_MIN km/h). The gears
+	in between end at speeds evenly spaced in speed^GEAR_SPREAD: a car gains speed slower the
+	faster it goes, so evenly spaced ratios (spread 0) flew through the low gears and pulled
+	forever in the last one. Spread 2 would give every gear the same time at full power; 1.5
+	leaves the top gears a little longer, like a real box. If that makes a step bigger than
+	GEAR_STEP_MAX (few gears over a wide span) the spread is lowered until it fits.
+	So the Veyron (135 mph, 6 by CAR_GEARS) ends its gears at about 61, 101, 135, 164, 192 and
+	217 km/h, the M5 (81 mph) gets 3 and a 35 mph van 2. Taking the box's own ratios instead put
+	six gears into the M5's 81 mph, or cut a 5-speed down to 3 on a 155 mph car.
 ]]
-E.FIRST_GEAR_MIN, E.FIRST_GEAR_SHARE = 25, 0.16
-function E.FitGearCount(gears, topKmh)
-	local span = topKmh / max(E.FIRST_GEAR_MIN, topKmh * E.FIRST_GEAR_SHARE)
-	local n = #gears
-	while n > 1 and gears[1] / gears[n] > span do n = n - 1 end
-	if n == #gears then return gears end
+E.FIRST_GEAR_MIN, E.FIRST_GEAR_SHARE, E.KMH_PER_GEAR, E.GEAR_STEP_MAX = 25, 0.28, 40, 2.3
+E.GEAR_SPREAD = 1.5
+function E.FitGearCount(gears, topKmh, count)
+	if #gears < 2 then return gears end
+	local v1 = max(E.FIRST_GEAR_MIN, topKmh * E.FIRST_GEAR_SHARE)
+	local span = topKmh / v1
+	local bySteps = 1 + math.ceil(math.log(span) / math.log(E.GEAR_STEP_MAX))
+	local n = math.Clamp(count or max(floor(topKmh / E.KMH_PER_GEAR + 0.5), bySteps), 2, #gears)
+	-- the speed (as a share of 1st's) where gear i ends, for a spread p (p 0 = geometric)
+	local function ends(p)
+		local e = {}
+		for i = 1, n do
+			local t = (i - 1) / (n - 1)
+			e[i] = p < 0.05 and span ^ t or (1 + t * (span ^ p - 1)) ^ (1 / p)
+		end
+		return e
+	end
+	local p, e = E.GEAR_SPREAD
+	repeat
+		e = ends(p)
+		local ok = true
+		for i = 2, n do if e[i] / e[i - 1] > E.GEAR_STEP_MAX then ok = false end end
+		if ok then break end
+		p = p - 0.25
+	until p < 0.05
+	if p < 0.05 then e = ends(0) end
 	local g = {}
-	for i = 1, n do g[i] = gears[i] end
+	for i = 1, n do g[i] = floor(gears[1] / e[i] * 100 + 0.5) / 100 end
 	return g
 end
 
@@ -292,7 +323,7 @@ function E.ResolveProfile(car, prof)
 	cfg.popTone = prof.popTone
 	-- the speed the car will actually reach: the profile's top speed, else the car's own
 	cfg.topSpeed = prof.vmax > 0 and prof.vmax or (tonumber(car.topSpeed) or 250)
-	cfg.gears = prof.fit > 0 and E.FitGearCount(prof.gears, cfg.topSpeed) or prof.gears
+	cfg.gears = prof.fit > 0 and E.FitGearCount(prof.gears, cfg.topSpeed, car.gearCount) or prof.gears
 	cfg.final = prof.fit > 0 and E.FitFinal(cfg.gears, prof.redline, car.wheelRadius, cfg.topSpeed) or prof.final
 	cfg.reverse = prof.gears[1] * 0.9
 	-- torque converter stall speed (an electric motor is direct drive)

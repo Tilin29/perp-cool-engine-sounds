@@ -310,6 +310,13 @@ E.CAR_BOV = {
 	["Mitsubishi Lancer Evo X"] = true,
 }
 
+-- gear count with fitted gearing (sh_presets.lua E.FitGearCount), where one per 40 km/h of
+-- top speed is too few. Runtime only: no re-bake
+E.CAR_GEARS = {
+	["Bugatti Veyron 16.4"] = 6,
+	["Bugatti Veyron SS"] = 6,
+}
+
 --[[
 	Rev flare on start-up (the "emotion start", audio_engine_emotionstart): only high-powered cars
 	blip their engine on start-up (sports cars, supercars, muscle cars, AMG/M/RS saloons, rally
@@ -395,6 +402,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		stockBov = E.CAR_BOV[carName] and true or false,
 		stockBovVol = E.STOCK_BOV_VOLUME,
 		emotionStart = E.CAR_EMOTION[carName] or false,
+		gearCount = E.CAR_GEARS[carName],
 		topSpeed = "auto",
 		wheelRadius = 0.33,
 		soundLevel = E.CAR_EMOTION[carName] and E.EMOTION_SOUNDLEVEL or 85,

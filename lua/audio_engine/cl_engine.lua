@@ -173,15 +173,15 @@ end
 local function readInputs(car)
 	local ent = car.ent
 	local bits = ent:GetNW2Int("audio_in", 0)
-	local f, b, h = band(bits, 1) ~= 0, band(bits, 2) ~= 0, band(bits, 4) ~= 0
+	local f, b, h, s = band(bits, 1) ~= 0, band(bits, 2) ~= 0, band(bits, 4) ~= 0, band(bits, 8) ~= 0
 	local ply = LocalPlayer()
 	if IsValid(ply) and ply:GetVehicle() == ent then
 		-- the local driver: use their own keys for zero latency, once we know they register
 		local lf, lb, lh = ply:KeyDown(IN_FORWARD), ply:KeyDown(IN_BACK), ply:KeyDown(IN_JUMP)
 		if lf or lb or lh then car.localKeys = true end
-		if car.localKeys then return lf, lb, lh end
+		if car.localKeys then return lf, lb, lh, ply:KeyDown(IN_MOVELEFT) ~= ply:KeyDown(IN_MOVERIGHT) end
 	end
-	return f, b, h
+	return f, b, h, s
 end
 
 -- the listener (whoever's ears the sound reaches): position and velocity, once per frame
@@ -517,8 +517,8 @@ local function updateCar(car, dt)
 	dopplerFactor(car, dt, mine)
 	car.prox = proximityGain(car, mine)
 
-	local f, b, h = readInputs(car)
-	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, v = car.v })
+	local f, b, h, s = readInputs(car)
+	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, steer = s, v = car.v })
 
 	updateSound(car, dt)
 

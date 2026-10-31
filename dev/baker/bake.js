@@ -6,6 +6,7 @@
     node bake.js                       all engines, 44100 Hz, one worker per CPU core
     node bake.js --rate 22050          half the size
     node bake.js --jobs 4 --only 3     limit workers / bake just engine #3 (no manifest, for testing)
+    node bake.js --list                print the engine numbers and exit
 
   Output (inside the addon):
     sound/audio_engine/<dir>/*.wav      one folder per engine (+ env_<hash>/ for road, wind, turbo)
@@ -135,6 +136,10 @@ async function main() {
   for (let i = 1; i <= n; i++) {
     const [dir, engine, cars, names] = (await call(`__result(BAKE.info(${i}))`)).split('\t')
     items.push({ i, dir, engine, cars, names })
+  }
+  if (process.argv.includes('--list')) {
+    for (const it of items) console.log(`  #${it.i} ${it.dir} ${it.engine}: ${it.names}`)
+    return
   }
   console.log(`${n} stock engine families at ${RATE} Hz, synth version ${version}, ${JOBS} workers`)
   let todo = items

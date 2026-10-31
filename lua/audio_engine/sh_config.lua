@@ -57,7 +57,7 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 		kickLand = 0.88,   -- kickdown picks the lowest gear that stays under 5,280
 		brakeRpm = 0.80,   -- braking: shift down once the revs fall below 4,800...
 		brakeLand = 0.96,  -- ...if the lower gear keeps them under 5,760
-		lugRpm = 0.30,     -- coasting: shift down below 1,800
+		lugRpm = 0.40,     -- coasting: shift down below 2,400
 	},
 	wheelRadius = 0.376,
 	soundLevel = 85,

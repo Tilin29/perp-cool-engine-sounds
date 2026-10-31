@@ -20,7 +20,9 @@
 	   it's fast. While the driven wheels turn faster than the car moves, the horsepower is
 	   trimmed until they grip, and given back as they do. Off the line it may cut to 1/4 of the
 	   power; from ~36 mph to no less than 60%, so it catches slides without holding the car back.
-	5. High-speed steering: the wider lock of step 2 eases back to about 2/3 between ~60 and
+	   When the car slides (tail out or over-rotating, from sv_stability.lua; not in a handbrake
+	   drift) it cuts the power quickly, down to 20% at any speed, until it straightens up.
+	5. High-speed steering: the wider lock of step 2 eases back to 0.8 between ~60 and
 	   80 mph (E.HIGH_SPEED_STEER), so the car turns well at town speeds and stays calm when fast.
 
 	A car on a spiked/ tier script (tyres shot by a stinger) gets none of it: it's meant to be
@@ -251,7 +253,11 @@ E.TRACTION = {
 	-- ~85 mph, then gave it 4x the power at once; switching it off by fadeTo let them slide.)
 	fadeFrom = 6,     -- m/s (~13 mph)
 	fadeTo = 16,      -- m/s (~36 mph)
-	floorFast = 0.6,  -- the least power it leaves from fadeTo up
+	floorFast = 0.6,  -- the least power it leaves from fadeTo up (wheelspin)
+	-- sliding (sv_stability.lua's veh.audioSlide: tail out or over-rotating, not in a drift):
+	-- the wheel speeds can't show it, but cutting the power is what stops it
+	slideCut = 4,     -- per second at full slide
+	slideFloor = 0.2, -- it may take the power down to this while sliding, at any speed
 	cut = 2.5,        -- how fast it takes power away while spinning (per second)
 	restore = 1.2,    -- ... and gives it back while gripping
 	floor = 0.25,     -- never below this share of the power (at a standstill)
@@ -259,7 +265,7 @@ E.TRACTION = {
 }
 
 -- steering lock at speed, x the (already widened) degreesFast: 1 up to fromMph, `scale` from toMph
-E.HIGH_SPEED_STEER = { fromMph = 60, toMph = 80, scale = 0.65 }
+E.HIGH_SPEED_STEER = { fromMph = 60, toMph = 80, scale = 0.8 }
 
 local function steerScale(mph)
 	local H = E.HIGH_SPEED_STEER
@@ -323,16 +329,17 @@ hook.Add("Tick", "audio_engine_traction", function()
 			local f = math.Clamp((v - T.fadeFrom) / (T.fadeTo - T.fadeFrom), 0, 1)
 			local floor = T.floor + (T.floorFast - T.floor) * f * f * (3 - 2 * f)
 			if on and IsValid(drv) and IsValid(phys) and drv:KeyDown(IN_FORWARD) then
+				-- (only a fresh reading: with the stability assist off nothing updates it)
+				local slide = CurTime() - (veh.audioSlideT or 0) < 0.2 and veh.audioSlide or 0
 				local ws = drivenWheelSpeed(veh)
-				if ws then
-					local slip = (ws - v) / math.max(v, T.minSpeed)
-					veh.audioSlip = slip
-					if slip > T.slip then want = tc - T.cut * dt
-					else want = tc + T.restore * dt end
-				else
-					want = tc + T.restore * dt
-				end
-				want = math.Clamp(want, floor, 1)
+				local slip = ws and (ws - v) / math.max(v, T.minSpeed) or 0
+				veh.audioSlip = slip
+				if slide > 0.05 then
+					want = tc - T.slideCut * slide * dt
+					floor = math.min(floor, T.slideFloor)
+				elseif slip > T.slip then want = tc - T.cut * dt
+				else want = tc + T.restore * dt end
+				want = math.Clamp(want, math.min(floor, tc), 1)
 			else
 				want = 1
 			end
@@ -360,7 +367,7 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 	local secs = math.Clamp(tonumber(args[1]) or 12, 1, 60)
 	local t0 = CurTime()
 	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end end
-	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | power x | steer x")
+	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x")
 	local id = "audio_engine_accel_log_" .. veh:EntIndex()
 	timer.Create(id, 0.25, math.floor(secs * 4), function()
 		if not IsValid(veh) then timer.Remove(id) return end
@@ -368,8 +375,8 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 		local mph = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 * 2.23694 or 0
 		local okp, op = pcall(veh.GetOperatingParams, veh)
 		op = okp and istable(op) and op or {}
-		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f", CurTime() - t0, mph,
-			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioTC or 1, veh.audioSteerLock or 1))
+		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f", CurTime() - t0, mph,
+			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioSlide or 0, veh.audioTC or 1, veh.audioSteerLock or 1))
 	end)
 end, nil, "Log speed, Source gear/rpm, wheel slip and traction trim of the car you drive (admins)")
 

@@ -61,8 +61,8 @@
 		{
 			"radius"	"15"
 			"mass"		"170"
-			"inertia"	"0.5"
-			"damping"	"0"
+			"inertia"	"1"		// PERP's scripts nearly all use inertia 1, damping 0.8: with 0.5 / 0 test cars launched and pulled harder
+			"damping"	"0.8"
 			"rotdamping"	"0.3"
 			"material"	"jeeptire"
 			"skidmaterial"	"slidingrubbertire"
@@ -87,8 +87,8 @@
 		{
 			"radius"	"15"
 			"mass"		"170"
-			"inertia"	"0.5"
-			"damping"	"0"
+			"inertia"	"1"
+			"damping"	"0.8"
 			"rotdamping"	"0.3"
 			"material"	"jeeptire"
 			"skidmaterial"	"slidingrubbertire"

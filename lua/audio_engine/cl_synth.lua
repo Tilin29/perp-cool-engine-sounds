@@ -72,8 +72,11 @@ Synth.LAYOUTS = {
 	flat6   = { angles = evenAngles(6), amp = { 1, 0.9, 1.03, 0.92, 1.01, 0.9 }, banks = "LRLRLR" },
 	-- flat-twelve (180 degree V12): even firing, a bit lumpier than a V12
 	flat12  = { angles = offsetAngles(12, function(i) return i % 2 == 1 and 4 or 0 end), amp = { 1, 0.93, 1, 0.94, 1, 0.92, 1, 0.93, 1, 0.94, 1, 0.92 }, banks = "LRLRLRLRLRLR" },
-	-- W16: four banks of four, a firing every 45 degrees, two exhausts
-	w16     = { angles = evenAngles(16), amp = { 1, 0.96, 0.98, 0.95, 1, 0.97, 0.98, 0.96, 1, 0.96, 0.98, 0.95, 1, 0.97, 0.98, 0.96 }, banks = "LRLRLRLRLRLRLRLR" },
+	-- W16: two narrow-angle VR8s on one crank, two exhausts. Firings come in pairs (the VR8's
+	-- offset banks) and each pair goes to the same side, so each exhaust hears a lumpy stream
+	-- at half the firing rate: a deep growl under the 16-cylinder hum, not a thin even buzz
+	w16     = { angles = offsetAngles(16, function(i) return i % 2 == 1 and -12 or 0 end),
+		amp = { 1, 0.9, 0.98, 0.86, 1, 0.92, 0.97, 0.88, 1, 0.9, 0.98, 0.86, 1, 0.92, 0.97, 0.88 }, banks = "LLRRLLRRLLRRLLRR" },
 	-- Wankel rotary: each rotor fires once per turn of the eccentric shaft, so a twin-rotor
 	-- fires 4 times per 720 degrees (like an inline-4) and a triple-rotor 6 times. The exhaust
 	-- port opens all at once, so each pulse is long and hard-edged: the rotary buzz
@@ -118,7 +121,7 @@ Synth.CHARACTER = {
 	v6      = { f1 = 88,  f2 = 360, f3 = 185, w = 0.95, o1 = 0.08, o05 = 0.07 },
 	flat6   = { f1 = 100, f2 = 450, f3 = 225, w = 0.85, o1 = 0.12, o05 = 0.10 },
 	flat12  = { f1 = 82,  f2 = 400, f3 = 200, w = 0.92, o1 = 0.08, o05 = 0.10 },
-	w16     = { f1 = 66,  f2 = 300, f3 = 160, w = 1.05, o1 = 0.05, o05 = 0.05 },
+	w16     = { f1 = 55,  f2 = 235, f3 = 125, w = 1.25, o1 = 0.16, o05 = 0.14 },
 	rotary2 = { f1 = 125, f2 = 540, f3 = 270, w = 1.25, o1 = 0.00, o05 = 0.08 },
 	rotary3 = { f1 = 120, f2 = 560, f3 = 280, w = 1.20, o1 = 0.00, o05 = 0.06 },
 	electric = { f1 = 100, f2 = 400, f3 = 200, w = 1.00, o1 = 0.00, o05 = 0.00 },

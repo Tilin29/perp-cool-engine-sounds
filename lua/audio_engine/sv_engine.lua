@@ -173,6 +173,7 @@ hook.Add("Think", "audio_engine", function()
 				if drv:KeyDown(IN_FORWARD) then bits = bits + 1 end
 				if drv:KeyDown(IN_BACK) then bits = bits + 2 end
 				if drv:KeyDown(IN_JUMP) then bits = bits + 4 end
+				if drv:KeyDown(IN_MOVELEFT) ~= drv:KeyDown(IN_MOVERIGHT) then bits = bits + 8 end   -- steering
 			end
 			if bits ~= veh.audioInBits then
 				veh.audioInBits = bits

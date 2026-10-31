@@ -36,8 +36,12 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   Upshift point follows the car's acceleration (`upRpm` pulling hard .. `lazyUpRpm` creeping), so power-limited cars reach top gear.
   Past `upRpm` it changes up even inside the post-shift hold (close-geared hard pullers like the M5 E60 hit the in-gear limiter).
   Neutral (Space+W rev) latches until W or S is pressed. The limiter loop (cl_engine) plays only while W is held near redline.
-  Fitted gearing drops top gears so 1st reaches `E.FIRST_GEAR_MIN` 25 km/h / 16% of top speed (`E.FitGearCount`): PERP's 163 cars
-  share TDM's generic 5-speed, so only their top speed (30-145 mph) is per car. HUD speed defaults to mph (`audio_engine_units`).
+  Fitted gearing respaces the box (`E.FitGearCount`): ~1 gear per `E.KMH_PER_GEAR` 40 km/h of top speed, enough that no step
+  exceeds `E.GEAR_STEP_MAX` 2.3, at most the box's count; 1st reaches `E.FIRST_GEAR_MIN` 25 km/h / 28% of top speed: PERP's 163 cars
+  share TDM's generic 5-speed, so only their top speed (30-145 mph) is per car. `CAR_GEARS[name]` overrides the count (Veyrons 6).
+  Gear end speeds are evenly spaced in speed^`E.GEAR_SPREAD` 1.5 (lowered if a step would pass the max): evenly spaced ratios
+  flew through low gears and pulled forever in the last. HUD speed defaults to mph (`audio_engine_units`).
+  Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.5; coasting lugRpm 0.4.
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
   gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (whine only, near silent at low speed; electric bands keep
   natural levels, no per-band loudness matching). `RenderEVHumLoop`: the steady low-speed EV hum (env bank `evhum`), played by
@@ -60,15 +64,22 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   - The server runs `DT.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
 - `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `veh.audioSpiked`.
-  Never changes the velocity direction (that launched cars toward the nose). A drift starts with the handbrake and lasts while
+  Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
+  and reports any rotation as `veh.audioSlide`, so traction control cuts the power.
+  Slip limit (no handbrake): past `slipMax` 4 deg tail-out the nose rotates no faster than the path (yaw - dBeta/dt); the turn-in help
+  stops while the tail is out, so fast corners turn instead of drifting.
+  Lateral grip (no handbrake, also in the straight-line hold): `gripAssist` 1 g of extra side grip removes sideways speed at any slip
+  angle, forward speed untouched (turning the whole velocity toward the nose launched cars before).
+  Never turns a sliding car's velocity (that launched cars toward the nose). A drift starts with the handbrake and lasts while
   the slide angle > `driftHold`; while drifting counter-steer isn't damped. Grip 1.5 g; `veh.audioSteerFast` widens the lock at speed.
 - `sv_handling.lua`: on spawn (`E.PrepareHandling`, before `captureBase`): PERP base physics from generated `sv_perp_physics.lua` onto cars
   on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), anti-spin `E.ANTI_SPIN`
   (`audio_engine_handling`; also steering at speed x1.3, handbrake slide left as scripted),
   launch traction control `E.TRACTION` (`audio_engine_traction`): driven-wheel slip from `GetWheel` angular speed trims
   horsepower via `veh.audioTC` in `ApplyPerformance` (strong light cars like the Veyron spun their tyres off the line); it may cut to
-  `floor` 0.25 at launch, rising to `floorFast` 0.6 by 16 m/s (no hard speed cut-off: that held cars at 1/4 power, then gave it all back);
-  the lock at speed eases to x0.65 between 60 and 80 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`). `audio_engine_accel_log`
+  `floor` 0.25 at launch, rising to `floorFast` 0.6 by 16 m/s; while sliding (`veh.audioSlide` from sv_stability: tail out / over-rotating,
+  not in a handbrake drift) it cuts at `slideCut` down to `slideFloor` 0.2 at any speed (no hard speed cut-off: that held cars at 1/4 power, then gave it all back);
+  the lock at speed eases to x0.8 between 60 and 80 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`). `audio_engine_accel_log`
   logs Source's gear/rpm (GetOperatingParams), slip and trims while driving. Also spiked detection from the `vehiclescript` keyvalue, per-car ESC steering. `E.SetParams` = checked SetVehicleParams.
 - `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling. The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
 
@@ -97,6 +108,8 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
 - Lua 5.1/LuaJIT idiom bug to avoid: `x and (y == "1") or nil` returns nil for false (this broke the BOV toggle once).
 - PERP's vehicle scripts (workshop 3792392486) are a server download: mounted only on the PERP server. A jeep spawned with a
   missing vehiclescript has no physics and can't drive; sh_perp's spawn entries fall back to `scripts/vehicles/audio_engine/test_car.txt`.
+  For 1:1 local testing, `addons/perp_vehicle_scripts_local/` (outside this repo, never shipped) holds a copy of the pack's
+  `scripts/vehicles`: cars then spawn on their real scripts and `perpOnto` is skipped.
 - wasmoon: never return JS `null` to Lua (crashes); use `''`.
 - Generation cost: ~2 s CPU per engine at 44.1 kHz in game (~16 s in the browser page); ~4 MB each, `audio_engine_maxsounds` cap.
 
