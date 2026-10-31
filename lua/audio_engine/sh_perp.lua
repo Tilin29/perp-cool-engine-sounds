@@ -113,17 +113,30 @@ end)
 cvars.AddChangeCallback("audio_engine_mutestock", function() E.ApplyStockMute() end, "audio_engine_perp")
 if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then E.ApplyStockMute() end -- lua refresh
 
--- spawn menu entries (sandbox and derived gamemodes; PERP's own dealer ignores them)
+-- spawn menu entries (sandbox and derived gamemodes; PERP's own dealer ignores them).
+-- PERP's vehicle scripts come in a workshop pack (3792392486) that the PERP server sends, and
+-- Garry's Mod only mounts it while connected there. A jeep without its script has no physics
+-- and can't drive, so off the server the cars fall back to a generic test script.
+local TEST_SCRIPT = "scripts/vehicles/audio_engine/test_car.txt"
+local fallback = 0
 for _, car in pairs(E.Cars) do
-	if car.perp and car.script then
+	if car.perp and car.script and file.Exists(car.model, "GAME") then
+		local script, info = car.script, "PERP base handling"
+		if not file.Exists(script, "GAME") then
+			script, info = TEST_SCRIPT, "generic test handling (PERP's vehicle scripts aren't mounted)"
+			fallback = fallback + 1
+		end
 		list.Set("Vehicles", "perp_" .. car.carId, {
 			Name = car.name,
 			Class = "prop_vehicle_jeep",
 			Category = "PERP cars (Audio Engine)",
 			Author = "PERPHeads / TDM",
-			Information = car.name .. ": PERP base handling, procedural engine sound.",
+			Information = car.name .. ": " .. info .. ", procedural engine sound.",
 			Model = car.model,
-			KeyValues = { vehiclescript = car.script },
+			KeyValues = { vehiclescript = script },
 		})
 	end
+end
+if fallback > 0 then
+	MsgN(string.format("[Audio Engine] %d PERP cars use the generic test handling: their PERP vehicle scripts aren't mounted", fallback))
 end

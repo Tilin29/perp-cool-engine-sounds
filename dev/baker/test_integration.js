@@ -4,7 +4,12 @@
     2. cl_soundbank.lua with cl_baked.lua: every car's stock engine loads from baked files,
        and every file a bank refers to exists
 
-    node test_integration.js <folder holding scripts/vehicles/ from the PERP dev content>
+    node test_integration.js <mount folder>...
+
+  Each mount folder stands for a mounted addon (holding models/, scripts/...), like the game's
+  GAME path: e.g. the extracted PERP dev pack (its scripts/vehicles/) and the TDM content
+  (workshop 2103606343/content, the car models). This addon is always mounted first.
+  Without the dev pack, every car must fall back to the generic test script.
 */
 const fs = require('fs')
 const path = require('path')
@@ -12,13 +17,26 @@ const { LuaFactory } = require('wasmoon')
 
 const ADDON = path.resolve(__dirname, '..', '..')
 const LUA = path.join(ADDON, 'lua', 'audio_engine')
-const PACK = process.argv[2]
-if (!PACK) { console.log('usage: node test_integration.js <extracted PERP dev pack>'); process.exit(2) }
+const MOUNTS = [ADDON, ...process.argv.slice(2)]
+if (MOUNTS.length < 2) { console.log('usage: node test_integration.js <mount folder>...'); process.exit(2) }
 
-// GAME path lookups: scripts/ from the PERP pack, sound/ from this addon
+// GAME path lookup: the first mount holding the file (or, for file.Find, the folder)
 function gamePath(p) {
   p = p.replace(/\\/g, '/').toLowerCase()
-  return p.startsWith('sound/') ? path.join(ADDON, p) : path.join(PACK, p)
+  for (const m of MOUNTS) if (fs.existsSync(path.join(m, p))) return path.join(m, p)
+  for (const m of MOUNTS) if (fs.existsSync(path.dirname(path.join(m, p)))) return path.join(m, p)
+  return path.join(ADDON, p)
+}
+// file.Find merges a folder across every mount
+function findAll(pat) {
+  pat = pat.replace(/\\/g, '/').toLowerCase()
+  const re = new RegExp('^' + path.basename(pat).replace(/\./g, '\\.').replace(/\*/g, '.*') + '$', 'i')
+  const out = new Set()
+  for (const m of MOUNTS) {
+    const dir = path.dirname(path.join(m, pat))
+    try { for (const f of fs.readdirSync(dir)) if (re.test(f) && fs.statSync(path.join(dir, f)).isFile()) out.add(f) } catch {}
+  }
+  return [...out].join('\n')
 }
 
 ;(async () => {
@@ -28,25 +46,27 @@ function gamePath(p) {
   g.set('__result', (v) => { res = v })
   g.set('__now', () => performance.now())
   g.set('__log', (s) => console.log('  lua:', String(s)))
-  g.set('__read', (p) => { try { return fs.readFileSync(gamePath(p), 'latin1') } catch { return null } })
+  // never hand Lua a JS null (wasmoon crashes on it): '' means "no such file"
+  g.set('__read', (p) => { try { return fs.readFileSync(gamePath(p), 'latin1') } catch { return '' } })
   g.set('__exists', (p) => fs.existsSync(gamePath(p)))
-  g.set('__find', (pat) => {
-    const dir = path.dirname(gamePath(pat))
-    const re = new RegExp('^' + path.basename(pat).replace(/\./g, '\\.').replace(/\*/g, '.*') + '$', 'i')
-    try { return fs.readdirSync(dir).filter((f) => re.test(f) && fs.statSync(path.join(dir, f)).isFile()).join('\n') } catch { return '' }
-  })
+  g.set('__find', findAll)
   const run = async (name, src) => { try { await L.doString(src) } catch (e) { throw new Error(name + ': ' + e.message) } }
   await run('bake_shim.lua', fs.readFileSync(path.join(__dirname, 'bake_shim.lua'), 'utf8'))
   await run('test shim', `
     FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY, CHAN_STATIC = 128, 8192, 256, 6
     player = { GetAll = function() return {} end }
-    LISTED = 0
-    list = { Set = function(kind, id, t) LISTED = LISTED + 1 end }
+    LISTED, FALLBACK, NOSCRIPT = 0, 0, {}
+    list = { Set = function(kind, id, t)
+      LISTED = LISTED + 1
+      local s = t.KeyValues.vehiclescript
+      if s:find("audio_engine/test_car", 1, true) then FALLBACK = FALLBACK + 1 end
+      if not file.Exists(s, "GAME") then NOSCRIPT[#NOSCRIPT + 1] = id end
+    end }
     SOUNDS = {}
     sound.Add = function(t) SOUNDS[t.name] = t end
     sound.GetProperties = function(n) return SOUNDS[n] end
     file = {
-      Read = function(p) return __read(p) end,
+      Read = function(p) local s = __read(p) if s == "" then return nil end return s end,
       Exists = function(p) return __exists(p) end,
       Find = function(pat)
         local t = {}
@@ -69,12 +89,20 @@ function gamePath(p) {
     local names, n = {}, 0
     for low, name in pairs(E.PERP_MUTED) do n = n + 1 names[#names + 1] = name end
     table.sort(names)
-    __result(n .. "\\t" .. LISTED .. "\\t" .. table.concat(names, " ", 1, math.min(12, #names)))`)
-  const [nMuted, listed, sample] = res.split('\t')
+    __result(n .. "\\t" .. LISTED .. "\\t" .. FALLBACK .. "\\t" .. table.concat(NOSCRIPT, " ") .. "\\t" ..
+      table.concat(names, " ", 1, math.min(12, #names)))`)
+  const [nMuted, listed, fallback, noScript, sample] = res.split('\t')
   console.log(`stock mute: ${nMuted} soundscripts muted, e.g. ${sample}`)
-  console.log(`spawn menu: ${listed} PERP cars listed`)
-  check(+nMuted > 100, 'expected the engine soundscripts of the registered cars to be muted')
-  check(+listed === 165, 'expected all 165 PERP cars in the spawn menu')
+  console.log(`spawn menu: ${listed} PERP cars listed, ${fallback} on the generic test script`)
+  check(+listed === 165, 'expected all 165 PERP cars in the spawn menu (are the TDM models mounted?)')
+  check(noScript === '', 'spawn entries whose vehicle script is missing (no physics in game): ' + noScript)
+  if (+nMuted > 0) {
+    check(+nMuted > 100, 'expected the engine soundscripts of the registered cars to be muted')
+    check(+fallback === 0, 'PERP scripts are mounted: no car should need the test script')
+  } else {
+    console.log('  (PERP vehicle scripts not mounted: nothing to mute, every car on the test script)')
+    check(+fallback === +listed, 'every car should fall back to the test script')
+  }
   // the bus and fire trucks must keep their engine sound
   await L.doString(`
     local keep, bad = {}, {}

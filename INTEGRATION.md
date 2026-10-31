@@ -149,13 +149,18 @@ By default a registered car is **off** when someone gets in, and the driver star
 
 Offline (from `dev/baker`, after `npm install`):
 - `node check_syntax.js`: every Lua file compiles.
-- `node test_integration.js <folder with the dev pack's scripts/>`: runs the real `sh_perp.lua` and
+- `node test_integration.js <mount folder>...` (e.g. the extracted dev pack and `workshop/content/4000/2103606343/content`;
+  leave the dev pack out to test the local fallback): runs the real `sh_perp.lua` and
   `cl_soundbank.lua`: how many soundscripts get muted, that service vehicles keep theirs, that
   all 165 cars load a baked bank and every file it names exists.
 
 In game (not done yet, nothing here has run inside Garry's Mod):
 1. Spawn a few cars from *Vehicles → PERP cars (Audio Engine)* on a sandbox dev server with the
-   PERP content mounted. Console: `[Audio Engine] muted N TDM engine sounds...`, and no
+   PERP content mounted. PERP's vehicle scripts are in workshop item 3792392486, which the PERP
+   server sends and Garry's Mod only mounts while connected to it: on a local game, subscribe to
+   it (or install it on the dev server), otherwise the spawn menu falls back to
+   `scripts/vehicles/audio_engine/test_car.txt` (generic handling, console says so) so the cars
+   still have physics and drive. Console: `[Audio Engine] muted N TDM engine sounds...`, and no
    `generated N sounds` lines for stock cars (they load baked files).
 2. Check the loops play seamlessly at a steady rpm (the WAV cue point) and that only the
    procedural engine is heard.

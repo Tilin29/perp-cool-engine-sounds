@@ -64,6 +64,9 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
 - `sound.Generate` sounds can't be freed or overridden; names are `audeng_<serial>_<name>`. Volume caps at 1, pitch 0-255 and truncates to an integer.
 - CSoundPatch volume/pitch only change once per frame. Never jump volumes; use the glide.
 - Lua 5.1/LuaJIT idiom bug to avoid: `x and (y == "1") or nil` returns nil for false (this broke the BOV toggle once).
+- PERP's vehicle scripts (workshop 3792392486) are a server download: mounted only on the PERP server. A jeep spawned with a
+  missing vehiclescript has no physics and can't drive; sh_perp's spawn entries fall back to `scripts/vehicles/audio_engine/test_car.txt`.
+- wasmoon: never return JS `null` to Lua (crashes); use `''`.
 - Generation cost: ~2 s CPU per engine at 44.1 kHz in game (~16 s in the browser page); ~4 MB each, `audio_engine_maxsounds` cap.
 
 ## Open ideas (not requested yet)

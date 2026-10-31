@@ -1,5 +1,5 @@
-// PLPD RTU - Mercedes-Benz SL65 AMG
-// Handling for Source's jeep vehicle. Engine sound is NOT set here: the PLPD Engine Lua
+// Police RTU - Mercedes-Benz SL65 AMG
+// Handling for Source's jeep vehicle. Engine sound is NOT set here: the Audio Engine Lua
 // generates it, so the engine sound states below are deliberately empty.
 
 "vehicle"

@@ -1,0 +1,127 @@
+// Audio Engine - generic test handling for any TDM car model
+// Used by the spawn menu (Vehicles > PERP cars (Audio Engine)) when the car's PERP vehicle script
+// isn't mounted: PERP's scripts come in a workshop pack the PERP server sends, which Garry's Mod
+// only mounts while you're connected there. Without a script a jeep has no physics and can't drive.
+// Engine sound states are deliberately empty: the Audio Engine Lua generates the engine.
+
+"vehicle"
+{
+	"wheelsperaxle"	"2"
+	"body"
+	{
+		"countertorquefactor"	"1.0"
+		"massCenterOverride"	"0 0 -5"
+		"massoverride"		"1600"		// kg
+		"addgravity"		"0.75"
+		"maxAngularVelocity"	"200"
+	}
+	"engine"
+	{
+		"horsepower"		"320"
+		"maxrpm"		"6000"
+		"maxspeed"		"125"		// mph
+		"maxReverseSpeed"	"20"		// mph
+		"autotransmission"	"1"
+		"axleratio"		"3.2"
+		"gear"			"3.5"
+		"gear"			"2.2"
+		"gear"			"1.5"
+		"gear"			"1.1"
+		"gear"			"0.85"
+		"shiftuprpm"		"5600"
+		"shiftdownrpm"		"2600"
+	}
+	"steering"
+	{
+		"degreesSlow"		"38"
+		"degreesFast"		"14"
+		"degreesBoost"		"10"
+		"steeringExponent"	"1.4"
+		"slowcarspeed"		"20"
+		"fastcarspeed"		"60"
+		"slowSteeringRate"	"3.0"
+		"fastSteeringRate"	"1.6"
+		"steeringRestRateSlow"	"3.0"
+		"steeringRestRateFast"	"1.6"
+		"turnThrottleReduceSlow"	"0.05"
+		"turnThrottleReduceFast"	"0.5"
+		"brakeSteeringRateFactor"	"4"
+		"throttleSteeringRestRateFactor"	"2"
+		"boostSteeringRestRateFactor"	"1.7"
+		"boostSteeringRateFactor"	"1.7"
+		"powerSlideAccel"	"150"
+		"skidallowed"		"1"
+		"dustcloud"		"0"
+	}
+
+	// front axle
+	"axle"
+	{
+		"wheel"
+		{
+			"radius"	"15"
+			"mass"		"170"
+			"inertia"	"0.5"
+			"damping"	"0"
+			"rotdamping"	"0.3"
+			"material"	"jeeptire"
+			"skidmaterial"	"slidingrubbertire"
+			"brakematerial"	"brakingrubbertire"
+		}
+		"suspension"
+		{
+			"springConstant"		"110"
+			"springDamping"			"0.9"
+			"stabilizerConstant"		"120"
+			"springDampingCompression"	"5.5"
+			"maxBodyForce"			"30"
+		}
+		"torquefactor"	"0.4"
+		"brakefactor"	"0.6"
+	}
+
+	// rear axle
+	"axle"
+	{
+		"wheel"
+		{
+			"radius"	"15"
+			"mass"		"170"
+			"inertia"	"0.5"
+			"damping"	"0"
+			"rotdamping"	"0.3"
+			"material"	"jeeptire"
+			"skidmaterial"	"slidingrubbertire"
+			"brakematerial"	"brakingrubbertire"
+		}
+		"suspension"
+		{
+			"springConstant"		"105"
+			"springDamping"			"0.9"
+			"stabilizerConstant"		"110"
+			"springDampingCompression"	"5.5"
+			"maxBodyForce"			"30"
+		}
+		"torquefactor"	"0.6"
+		"brakefactor"	"0.4"
+	}
+}
+
+"vehicle_sounds"
+{
+	"crashsound"
+	{
+		"min_speed"		"350"
+		"min_speed_change"	"250"
+		"sound"			"ATV_impact_medium"
+	}
+	"crashsound"
+	{
+		"min_speed"		"450"
+		"min_speed_change"	"400"
+		"sound"			"ATV_impact_heavy"
+	}
+	"skid_lowfriction"	"ATV_skid_lowfriction"
+	"skid_normalfriction"	"ATV_skid_normalfriction"
+	"skid_highfriction"	"ATV_skid_highfriction"
+}
