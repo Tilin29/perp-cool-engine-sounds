@@ -31,7 +31,7 @@ without knowing which one PERP spawned.
 | `lua/audio_engine/sh_carlist.lua` | `E.CAR_MODELS`: all 165 cars from the engine list (`Engine Types.xlsx`) → model, PERP base script, wheel radius (read from the script). All registered at load. `E.PERP_STABILITY = false`: the steering assist stays off on PERP cars (PERP tunes their handling; spiked tyres must stay undrivable) |
 | `lua/audio_engine/sh_perp.lua` | PERP glue: mutes the TDM engine recordings of registered cars (section 4), and lists all 165 cars in the spawn menu (Vehicles → *PERP cars (Audio Engine)*) for testing in sandbox |
 | `lua/audio_engine/cl_baked.lua` | **generated** manifest of the pre-generated sounds |
-| `sound/audio_engine/e<hash>/*.wav` | **pre-generated** engine sounds: one folder per distinct stock engine (73), plus `env_<hash>/` (road, wind, turbo whistle, blow-off) |
+| `sound/audio_engine/<preset>_<redline>_<hash>/*.wav` | **pre-generated** engine sounds: one folder per distinct stock engine (73, e.g. `v8x_6500_2cf9f8`), plus `env_<hash>/` (road, wind, turbo whistle, blow-off) |
 | `lua/audio_engine/cl_soundbank.lua` | loads a baked bank when one exists for the engine's sound key, otherwise generates as before |
 | `dev/baker/` | the offline renderer (Node + wasmoon running the addon's own Lua), plus `check_syntax.js` and `test_integration.js` |
 | `dev/perp_carmodels.py` | rebuilds the car → model / script table from the PERP dev pack |
@@ -49,8 +49,10 @@ a car retuned in the `!engine` menu is generated in game (~2 s CPU, as before).
   turbo isn't one of them: it is a shared layer played on top.
 - Size: 275 MB at 44.1 kHz (3.2–4 MB per engine). `node bake.js --rate 22050` halves it.
 - A bank is only loaded when a car using that engine is near the player.
-- Folder names hash the sound key and the synth sources, so a re-bake after any synth change
-  writes new file names and no client plays a stale cached copy.
+- Folders are named `<preset>_<redline>_<hash>` after the engine, not a car: cars with the same
+  engine share one folder (`cl_baked.lua` lists the cars of each). The hash covers the sound key
+  and the synth sources, so a re-bake after any synth change writes new names and no client
+  plays a stale cached copy.
 - Without the content (or with `audio_engine_baked 0`), everything still works by generating.
 
 ## 3. Checklist: introducing it on the server

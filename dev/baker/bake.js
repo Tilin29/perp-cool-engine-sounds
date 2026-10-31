@@ -11,8 +11,9 @@
     sound/audio_engine/<dir>/*.wav      one folder per engine (+ env_<hash>/ for road, wind, turbo)
     lua/audio_engine/cl_baked.lua       what each folder holds (loop rpm points, peaks, timings)
 
-  Folder names hash the sound key and the synth sources, so after any synth change a re-bake
-  gives new file names and clients never play a stale cached copy.
+  Folders are <preset>_<redline>_<hash> (cars with the same engine share one). The hash covers the
+  sound key and the synth sources, so after any synth change a re-bake gives new file names and
+  clients never play a stale cached copy.
 */
 const fs = require('fs')
 const path = require('path')

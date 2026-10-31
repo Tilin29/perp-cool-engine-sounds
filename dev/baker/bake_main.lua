@@ -22,7 +22,10 @@ function BAKE.list(version)
 		assert(not cfg.id:find("%.0_") and not cfg.id:find("%d%.%d*0_"), "non-canonical sound key " .. cfg.id)
 		local e = byKey[cfg.id]
 		if not e then
-			e = { key = cfg.id, cfg = cfg, cars = {}, dir = "e" .. fnv(cfg.id .. "|" .. version) }
+			-- readable folder: <preset>_<redline>_<hash>. Cars that share an engine share the folder;
+			-- the hash (sound key + synth version) keeps a re-bake from reusing a cached file name
+			local dir = string.format("%s_%d_%s", cfg.profile.preset, cfg.redline, fnv(cfg.id .. "|" .. version):sub(1, 6))
+			e = { key = cfg.id, cfg = cfg, cars = {}, dir = dir:lower():gsub("[^%w_]", "_") }
 			byKey[cfg.id] = e
 			keys[#keys + 1] = cfg.id
 		end
