@@ -38,7 +38,7 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   Neutral (Space+W rev) latches until W or S is pressed. The limiter loop (cl_engine) plays only while W is held near redline.
   Fitted gearing respaces the box (`E.FitGearCount`): ~1 gear per `E.KMH_PER_GEAR` 40 km/h of top speed, enough that no step
   exceeds `E.GEAR_STEP_MAX` 2.3, at most the box's count; 1st reaches `E.FIRST_GEAR_MIN` 25 km/h / 28% of top speed: PERP's 163 cars
-  share TDM's generic 5-speed, so only their top speed (30-145 mph) is per car. `CAR_GEARS[name]` overrides the count (Veyrons 6).
+  share TDM's generic 5-speed, so only their top speed (30-145 mph) is per car. `CAR_GEARS[name]` overrides the count (Veyrons, Furai: 5 like their PERP scripts).
   Gear end speeds are evenly spaced in speed^`E.GEAR_SPREAD` 1.5 (lowered if a step would pass the max): evenly spaced ratios
   flew through low gears and pulled forever in the last. HUD speed defaults to mph (`audio_engine_units`).
   Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.

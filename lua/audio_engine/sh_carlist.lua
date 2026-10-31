@@ -315,10 +315,11 @@ E.CAR_BOV = {
 }
 
 -- gear count with fitted gearing (sh_presets.lua E.FitGearCount), where one per 40 km/h of
--- top speed is too few. Runtime only: no re-bake
+-- top speed gives another count than the car's PERP script. Runtime only: no re-bake
 E.CAR_GEARS = {
-	["Bugatti Veyron 16.4"] = 6,
-	["Bugatti Veyron SS"] = 6,
+	["Bugatti Veyron 16.4"] = 5,
+	["Bugatti Veyron SS"] = 5,
+	["Mazda Furai"] = 5,
 }
 
 --[[

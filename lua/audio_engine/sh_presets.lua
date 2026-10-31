@@ -245,7 +245,7 @@ end
 	forever in the last one. Spread 2 would give every gear the same time at full power; 1.5
 	leaves the top gears a little longer, like a real box. If that makes a step bigger than
 	GEAR_STEP_MAX (few gears over a wide span) the spread is lowered until it fits.
-	So the Veyron (135 mph, 6 by CAR_GEARS) ends its gears at about 61, 101, 135, 164, 192 and
+	So the Veyron (135 mph, 5 by CAR_GEARS) ends its gears at about 61, 110, 150, 185 and
 	217 km/h, the M5 (81 mph) gets 3 and a 35 mph van 2. Taking the box's own ratios instead put
 	six gears into the M5's 81 mph, or cut a 5-speed down to 3 on a 155 mph car.
 ]]

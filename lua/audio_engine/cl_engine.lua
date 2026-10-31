@@ -326,10 +326,12 @@ local function updateSound(car, dt)
 	if env and env.ready then
 		local kmh = abs(car.v) * 3.6
 		rr = math.Clamp((kmh - 3) / 120, 0, 1)
-		roadVol = road * (rr ^ 1.2) * 0.7
+		-- the tyre roar eases back again past 60 km/h (about -5 dB from 160 km/h): pitched up and
+		-- at full level it was a rushing-air hiss over the engine on fast cars
+		roadVol = road * (rr ^ 1.2) * 0.7 * (1 - 0.45 * math.Clamp((kmh - 60) / 100, 0, 1))
 		-- wind stays in the background: from 80 km/h, and well under the engine even flat out
 		-- (0.06 from 60 km/h roared over the engine on fast cars)
-		windVol = wind * math.Clamp((kmh - 80) / 240, 0, 1) ^ 2 * 0.03
+		windVol = wind * math.Clamp((kmh - 80) / 240, 0, 1) ^ 2 * 0.015
 	end
 	-- each sound's real peak (measured when it was generated); the on/off layers of a band
 	-- share their firing phase so they add directly, separate sounds add by power
@@ -447,7 +449,7 @@ local function updateSound(car, dt)
 	-- It doesn't depend on the engine running (a coasting car still roars).
 	if env and env.ready then
 		local dop = car.dop or 1
-		setGroup(car, "road", { env.road }, { roadVol }, math.Clamp((75 + 55 * rr) * dop, 20, 255), dt)
+		setGroup(car, "road", { env.road }, { roadVol }, math.Clamp((75 + 30 * rr) * dop, 20, 255), dt)
 		setGroup(car, "wind", { env.wind }, { windVol }, math.Clamp((85 + 35 * rr) * dop, 20, 255), dt)
 	end
 end
