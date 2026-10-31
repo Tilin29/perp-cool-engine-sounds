@@ -327,8 +327,9 @@ local function updateSound(car, dt)
 		local kmh = abs(car.v) * 3.6
 		rr = math.Clamp((kmh - 3) / 120, 0, 1)
 		roadVol = road * (rr ^ 1.2) * 0.7
-		-- wind stays in the background: faint on the motorway, only noticeable near top speed
-		windVol = wind * math.Clamp((kmh - 60) / 200, 0, 1) ^ 2 * 0.06
+		-- wind stays in the background: from 80 km/h, and well under the engine even flat out
+		-- (0.06 from 60 km/h roared over the engine on fast cars)
+		windVol = wind * math.Clamp((kmh - 80) / 240, 0, 1) ^ 2 * 0.03
 	end
 	-- each sound's real peak (measured when it was generated); the on/off layers of a band
 	-- share their firing phase so they add directly, separate sounds add by power

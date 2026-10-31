@@ -49,7 +49,9 @@ E.CAR_ENGINES = {
 	["BMW M6 2013"] = P("v8xt"),
 	["Bowler EXR-S"] = P("v8x"),
 	["Bugatti EB110"] = P("v12t"),
-	["Bugatti Veyron 16.4"] = P("w16"),
+	-- tuned in dev/tone_studio.html
+	["Bugatti Veyron 16.4"] = P("w16", { popTone = 0.65, tone = 0.4, gurgle = 0.2 },
+		{ f1 = 66, f2 = 486, f3 = 224, w = 0.88, o1 = 0.23, o05 = 0.42 }),
 	["Bugatti Veyron SS"] = P("w16"),
 	["Cadillac Escalade 2012"] = P("v8x"),
 	["Chevrolet Blazer"] = P("v6", { redline = 5000 }),
