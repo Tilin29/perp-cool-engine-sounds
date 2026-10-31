@@ -62,7 +62,7 @@ E.ENGINE_PRESETS = {
 	{ id = "v12na",  name = "V12",                                      layout = "v12",     pitch = 1.00, tone = 0.60, idle = 1000, redline = 8000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.25, popTone = 0.3,  gearbox = "seven" },
 	{ id = "v12t",   name = "V12 · turbo",                              layout = "v12",     pitch = 1.00, tone = 0.50, idle = 900,  redline = 8000,  realism = 1, turbo = true,  bov = true,  pops = 0.3,  gurgle = 0.25, popTone = 0.25, gearbox = "close" },
 	{ id = "f12",    name = "Flat-12 (180° V12)",                       layout = "flat12",  pitch = 1.00, tone = 0.60, idle = 1000, redline = 7200,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.3,  popTone = 0.3,  gearbox = "close" },
-	{ id = "w16",    name = "W16 · quad-turbo",                         layout = "w16",     pitch = 1.00, tone = 0.45, idle = 750,  redline = 6600,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.2,  popTone = 0.2,  gearbox = "seven" },
+	{ id = "w16",    name = "W16 · quad-turbo",                         layout = "w16",     pitch = 0.90, tone = 0.50, idle = 750,  redline = 6600,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.2,  gearbox = "seven" },
 	-- V10
 	{ id = "v10",    name = "V10",                                      layout = "v10",     pitch = 1.00, tone = 0.65, idle = 950,  redline = 8500,  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.4,  gearbox = "close" },
 	{ id = "v10l",   name = "V10 · big-block (Viper, Ram SRT-10)",      layout = "v10",     pitch = 0.90, tone = 0.55, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.45, popTone = 0.3,  gearbox = "road" },
@@ -337,6 +337,12 @@ function E.ResolveProfile(car, prof)
 		fmt(r), fmt(prof.gurgle), fmt(prof.popTone) }
 	-- the car's silencer (economy cars); only in the key when set, so other keys stay as they were
 	if (car.muffle or 0) > 0 then key[#key + 1] = "m" .. fmt(car.muffle) end
+	-- the car's own exhaust voice (sh_carlist.lua character): likewise only when set
+	if type(car.character) == "table" then
+		local c = {}
+		for _, k in ipairs({ "f1", "f2", "f3", "w", "o1", "o05" }) do c[#c + 1] = car.character[k] and fmt(car.character[k]) or "" end
+		key[#key + 1] = "c" .. table.concat(c, ",")
+	end
 	cfg.soundKey = table.concat(key, "_")
 	cfg.id = cfg.soundKey
 	-- the same engine at any redline: its rpm bands are the same sound, so a baked bank with a

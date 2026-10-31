@@ -41,7 +41,7 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   share TDM's generic 5-speed, so only their top speed (30-145 mph) is per car. `CAR_GEARS[name]` overrides the count (Veyrons 6).
   Gear end speeds are evenly spaced in speed^`E.GEAR_SPREAD` 1.5 (lowered if a step would pass the max): evenly spaced ratios
   flew through low gears and pulled forever in the last. HUD speed defaults to mph (`audio_engine_units`).
-  Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.5; coasting lugRpm 0.4.
+  Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
   gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (whine only, near silent at low speed; electric bands keep
   natural levels, no per-band loudness matching). `RenderEVHumLoop`: the steady low-speed EV hum (env bank `evhum`), played by
@@ -101,6 +101,10 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   - Source files: `template.html`, `host.js`, `bridge.lua`, `gmod_shim.lua`.
   - `build.py` inlines everything. It needs wasmoon@1.16.0 from npm; set the path at the top.
   - Output: `rev_bench.html`.
+- Tone Studio (`dev/tone_studio/`: `studio.lua`, `worker.js`, `template.html`): `node dev/tone_studio/build.js [--test]` builds
+  `dev/tone_studio.html` (self-contained, opens from disk; uses dev/baker's wasmoon). Renders any car with the real synth
+  (same files as the baker), draggable exhaust resonances, firing-rhythm graph, A/B vs stock; exports changes as text + JSON
+  to paste back. Per-car voice: `P(preset, stock, character)` in sh_carlist (cl_synth `Synth.CharacterFor`, part of the sound key).
 
 ## Gotchas
 - `sound.Generate` sounds can't be freed or overridden; names are `audeng_<serial>_<name>`. Volume caps at 1, pitch 0-255 and truncates to an integer.

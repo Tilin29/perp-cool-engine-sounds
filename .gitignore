@@ -8,3 +8,4 @@ sound/audio_engine/
 
 # browser test page build output
 dev/rev_bench.html
+dev/tone_studio.html

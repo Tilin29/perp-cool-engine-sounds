@@ -121,7 +121,7 @@ Synth.CHARACTER = {
 	v6      = { f1 = 88,  f2 = 360, f3 = 185, w = 0.95, o1 = 0.08, o05 = 0.07 },
 	flat6   = { f1 = 100, f2 = 450, f3 = 225, w = 0.85, o1 = 0.12, o05 = 0.10 },
 	flat12  = { f1 = 82,  f2 = 400, f3 = 200, w = 0.92, o1 = 0.08, o05 = 0.10 },
-	w16     = { f1 = 55,  f2 = 235, f3 = 125, w = 1.25, o1 = 0.16, o05 = 0.14 },
+	w16     = { f1 = 48,  f2 = 205, f3 = 110, w = 1.40, o1 = 0.24, o05 = 0.32 },   -- V8-strength low orders: the growl
 	rotary2 = { f1 = 125, f2 = 540, f3 = 270, w = 1.25, o1 = 0.00, o05 = 0.08 },
 	rotary3 = { f1 = 120, f2 = 560, f3 = 280, w = 1.20, o1 = 0.00, o05 = 0.06 },
 	electric = { f1 = 100, f2 = 400, f3 = 200, w = 1.00, o1 = 0.00, o05 = 0.00 },
@@ -160,6 +160,15 @@ local REF_SR = 44100
 local function smooth(k, sr) return 1 - (1 - k) ^ (REF_SR / sr) end
 local function decay(d, sr) return d ^ (REF_SR / sr) end
 
+-- the engine type's voice, with a car's own changes on top (cfg.character, sh_carlist.lua)
+function Synth.CharacterFor(cfg)
+	local base = Synth.CHARACTER[cfg.layout] or Synth.CHARACTER.i4
+	if type(cfg.character) ~= "table" then return base end
+	local c = {}
+	for k, v in pairs(base) do c[k] = cfg.character[k] or v end
+	return c
+end
+
 local function realismOf(cfg)
 	local R = cfg.realism or {}
 	return {
@@ -177,7 +186,7 @@ local function realismOf(cfg)
 		reverb = R.reverb or 0,
 		gurgle = cfg.gurgle or 0,
 		voice = R.voice or 0,                                   -- how much of the engine type's own voice
-		char = Synth.CHARACTER[cfg.layout] or Synth.CHARACTER.i4,
+		char = Synth.CharacterFor(cfg),
 	}
 end
 Synth.RealismOf = realismOf

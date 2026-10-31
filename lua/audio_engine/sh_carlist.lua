@@ -22,7 +22,9 @@
 AUDIO_ENGINE = AUDIO_ENGINE or {}
 local E = AUDIO_ENGINE
 
-local function P(preset, stock) return { preset = preset, stock = stock } end
+-- character: the car's own exhaust voice over its engine type's (cl_synth.lua CHARACTER: f1, f2,
+-- f3, w, o1, o05; any left out keep the type's). A new sound: re-bake. dev/tone_studio.html edits it
+local function P(preset, stock, character) return { preset = preset, stock = stock, character = character } end
 
 E.CAR_ENGINES = {
 	["Alfa Romeo 33 Stradale (1967)"] = P("v8flat", { redline = 8800 }),
@@ -397,6 +399,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		name = carName,
 		preset = e.preset,
 		stock = e.stock,
+		character = e.character,
 		stockPops = E.CAR_POPS[carName] or 0,
 		stockPopVol = E.STOCK_POP_VOLUME,
 		stockBov = E.CAR_BOV[carName] and true or false,

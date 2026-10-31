@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tone Studio</title>
+<style>
+:root {
+  --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a; --text: #e6e8ee; --muted: #8b93a5;
+  --accent: #ff8a3d; --accent2: #5cc8ff; --good: #5fd38d; --warn: #ffcc4d; --bad: #ff6b6b;
+  --bankL: #ff8a3d; --bankR: #5cc8ff; --spec: rgba(92, 200, 255, .22); --specLine: rgba(92, 200, 255, .75);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+h1 { font-size: 16px; margin: 0 8px 0 0; letter-spacing: .02em; }
+h1 span { color: var(--accent); }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+.field { display: flex; align-items: center; gap: 6px; }
+.field label { color: var(--muted); font-size: 12px; }
+input[type=text], select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+#car { width: 250px; }
+button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #1a1006; font-weight: 600; }
+button:disabled { opacity: .45; cursor: default; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 6px 11px; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--accent); color: #1a1006; font-weight: 600; }
+.seg.ab button.on[data-v=stock] { background: var(--muted); color: #111; }
+#status { color: var(--muted); font-size: 12px; min-width: 150px; }
+#status.busy { color: var(--warn); }
+#status.err { color: var(--bad); }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; padding: 16px; max-width: 1500px; margin: 0 auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+canvas { width: 100%; display: block; border-radius: 6px; background: var(--panel2); touch-action: none; }
+#voice { height: 320px; cursor: default; }
+#rhythm { height: 150px; }
+.hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+.row { display: grid; grid-template-columns: 112px 1fr 58px 18px; align-items: center; gap: 8px; margin: 6px 0; }
+.row label { font-size: 13px; }
+.row label small { display: block; color: var(--muted); font-size: 11px; }
+.row input[type=range] { width: 100%; accent-color: var(--accent); }
+.row input[type=number] { width: 58px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 3px 4px; font: inherit; font-size: 12px; }
+.row .reset { visibility: hidden; color: var(--accent); cursor: pointer; border: 0; background: none; padding: 0; font-size: 15px; }
+.row.changed .reset { visibility: visible; }
+.row.changed label { color: var(--accent); }
+.group + .group { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.meta b { color: var(--text); font-weight: 600; }
+.live { font-variant-numeric: tabular-nums; }
+#changes { list-style: none; margin: 0; padding: 0; }
+#changes li { padding: 8px 0; border-top: 1px solid var(--line); font-size: 13px; }
+#changes li:first-child { border-top: 0; }
+#changes .name { font-weight: 600; cursor: pointer; }
+#changes .name:hover { color: var(--accent); }
+#changes .diff { color: var(--muted); font-size: 12px; }
+#changes .rm { float: right; padding: 2px 8px; font-size: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.empty { color: var(--muted); font-size: 13px; }
+textarea { width: 100%; min-height: 150px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font: 12px/1.4 ui-monospace, Consolas, monospace; padding: 8px; margin-top: 10px; display: none; }
+#overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; z-index: 10; color: var(--muted); }
+@media (max-width: 980px) { main { grid-template-columns: 1fr; } #car { width: 100%; } }
+</style>
+</head>
+<body>
+<div id="overlay">Loading the addon's synth…</div>
+<header>
+  <h1>Tone <span>Studio</span></h1>
+  <div class="field"><label for="car">Car</label><input id="car" type="text" list="carlist" autocomplete="off" spellcheck="false"><datalist id="carlist"></datalist></div>
+  <div class="seg ab" id="ab"><button data-v="stock">Stock</button><button data-v="tuned" class="on">Your tune</button></div>
+  <button class="primary" id="play">▶ Play</button>
+  <div class="seg" id="mode"><button data-v="rev" class="on">Rev</button><button data-v="hold">Hold rpm</button></div>
+  <div class="field" id="holdctl" hidden>
+    <input id="rpm" type="range" min="700" max="9000" step="50" value="3000" style="width:140px">
+    <span id="rpmv" class="live">3000 rpm</span>
+    <div class="seg" id="thr"><button data-v="1" class="on">On throttle</button><button data-v="0">Off</button></div>
+  </div>
+  <div class="field"><label for="sr">Quality</label><select id="sr"><option value="44100">44.1 kHz (as baked)</option><option value="22050">22 kHz (faster)</option></select></div>
+  <span id="status"></span>
+</header>
+<main>
+  <div class="stack">
+    <section class="card">
+      <h2>Exhaust voice</h2>
+      <div class="meta"><span>Engine <b id="mEngine">–</b></span><span>Preset <b id="mPreset">–</b></span><span class="live">Now <b id="mRpm">–</b></span><span>Firing <b id="mFire">–</b></span></div>
+      <canvas id="voice"></canvas>
+      <p class="hint">Drag the three pipe resonances left or right: <b style="color:var(--accent)">Boom</b> is the deep main note, <b style="color:var(--warn)">Rasp</b> the gritty body (louder with Tone), <b style="color:var(--good)">Muffler</b> a softer chamber note. The blue fill is what's playing; dashed lines are the stock positions. Resonances only matter with Realism above 0.</p>
+    </section>
+    <section class="card">
+      <h2>Firing rhythm · one 720° cycle</h2>
+      <canvas id="rhythm"></canvas>
+      <p class="hint">Each bar is one cylinder firing, coloured by exhaust side (<b style="color:var(--bankL)">left</b> / <b style="color:var(--bankR)">right</b>). Uneven bars are what makes a burble or a growl; the two rhythm sliders shape them.</p>
+    </section>
+    <section class="card">
+      <h2>Changes to send</h2>
+      <ul id="changes"></ul>
+      <div class="actions">
+        <button class="primary" id="copy">Copy for Claude</button>
+        <button id="download">Download .json</button>
+        <button id="clear">Clear all</button>
+      </div>
+      <textarea id="exportText" readonly></textarea>
+    </section>
+  </div>
+  <aside class="card" id="controls">
+    <div class="group">
+      <h2>Sound</h2>
+      <div id="gSound"></div>
+    </div>
+    <div class="group">
+      <h2>Engine</h2>
+      <div class="row" data-k="layout"><label>Layout</label><select id="layout" style="grid-column: 2 / 4"></select><button class="reset" title="Back to stock">↺</button></div>
+      <div id="gEngine"></div>
+    </div>
+    <div class="group">
+      <h2>Voice <small style="text-transform:none;letter-spacing:0;font-weight:400">(this car only)</small></h2>
+      <div id="gChar"></div>
+    </div>
+    <div class="group">
+      <h2>Apply to</h2>
+      <div class="seg" id="scope"><button data-v="car" class="on">This car</button><button data-v="preset">All cars on its preset</button></div>
+      <p class="hint" id="scopeHint"></p>
+    </div>
+  </aside>
+</main>
+
+{{LUA_FILES}}
+<script type="text/plain" id="src-wasmoon">{{WASMOON}}</script>
+<script type="text/plain" id="src-worker">{{WORKER}}</script>
+<script type="text/plain" id="src-wasm">{{WASM_B64}}</script>
+<script>
+'use strict'
+// ---------------------------------------------------------------------------------------------
+// controls: profile fields use the game's own steps and limits (sh_presets.lua SanitizeProfile)
+// ---------------------------------------------------------------------------------------------
+const SOUND = [
+  { k: 'pitch', label: 'Pitch', sub: 'whole engine higher/lower', min: 0.5, max: 1.5, step: 0.05 },
+  { k: 'tone', label: 'Tone', sub: 'dark ↔ raspy', min: 0, max: 1, step: 0.05 },
+  { k: 'gurgle', label: 'Burble', sub: 'off-throttle', min: 0, max: 1, step: 0.05 },
+  { k: 'realism', label: 'Realism', sub: 'uses the voice below', min: 0, max: 1, step: 0.1 },
+  { k: 'popTone', label: 'Pop tone', sub: 'muffled ↔ sharp', min: 0, max: 1, step: 0.05 },
+]
+const ENGINE = [
+  { k: 'idle', label: 'Idle', sub: 'rpm', min: 500, max: 1500, step: 25 },
+  { k: 'redline', label: 'Redline', sub: 'rpm', min: 3500, max: 12000, step: 100 },
+]
+const CHAR = [
+  { k: 'f1', label: 'Boom', sub: 'main pipe, Hz', min: 25, max: 250, step: 1 },
+  { k: 'f2', label: 'Rasp', sub: 'body, Hz', min: 80, max: 900, step: 1 },
+  { k: 'f3', label: 'Muffler', sub: 'chamber, Hz', min: 50, max: 500, step: 1 },
+  { k: 'w', label: 'Pulse width', sub: 'buzzy ↔ round', min: 0.6, max: 1.8, step: 0.01 },
+  { k: 'o1', label: 'Rhythm 1×', sub: 'per crank turn', min: 0, max: 0.5, step: 0.01 },
+  { k: 'o05', label: 'Rhythm ½×', sub: 'per cycle: growl', min: 0, max: 0.5, step: 0.01 },
+]
+const RESO = [
+  { k: 'f1', name: 'Boom', color: 'var(--accent)' },
+  { k: 'f2', name: 'Rasp', color: 'var(--warn)' },
+  { k: 'f3', name: 'Muffler', color: 'var(--good)' },
+]
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v.replace(/^var\((.*)\)$/, '$1')).trim()
+const $ = (id) => document.getElementById(id)
+const round = (x, step) => Math.round(Math.round(x / step) * step * 1e6) / 1e6
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x))
+
+// ---------------------------------------------------------------------------------------------
+// state
+// ---------------------------------------------------------------------------------------------
+let DATA = null
+const S = { car: null, ab: 'tuned', mode: 'rev', rpm: 3000, thr: 1, sr: 44100, scope: 'car', playing: false }
+let EDITS = {}           // car name -> { sound: {}, character: {}, scope }
+try { EDITS = JSON.parse(localStorage.getItem('toneStudio.edits') || '{}') || {} } catch (e) { EDITS = {} }
+try { const s = JSON.parse(localStorage.getItem('toneStudio.ui') || '{}'); if (s.car) S.car = s.car; if (s.sr) S.sr = s.sr } catch (e) {}
+function save() {
+  try { localStorage.setItem('toneStudio.edits', JSON.stringify(EDITS)); localStorage.setItem('toneStudio.ui', JSON.stringify({ car: S.car, sr: S.sr })) } catch (e) {}
+}
+const carInfo = (name) => DATA.cars.find((c) => c.name === name)
+const presetOf = (id) => DATA.presets.find((p) => p.id === id)
+const edit = () => (EDITS[S.car] = EDITS[S.car] || { sound: {}, character: {}, scope: S.scope })
+
+// what the car sounds like stock / with the edits
+function stockSound() { return { ...carInfo(S.car).stock } }
+function tunedSound() { return { ...stockSound(), ...(EDITS[S.car] || {}).sound } }
+// the voice a layout starts from: the engine type's, plus the car's own stock changes while it
+// keeps its stock layout (another engine type starts clean)
+function baseCharOf(car, layout) {
+  return { ...(DATA.character[layout] || DATA.character.i4), ...(layout === car.stock.layout ? car.character : {}) }
+}
+function baseChar(layout) { return baseCharOf(carInfo(S.car), layout) }
+function stockChar() { return baseChar(stockSound().layout) }
+function tunedChar() { return { ...baseChar(tunedSound().layout), ...(EDITS[S.car] || {}).character } }
+// the character the car would need in sh_carlist (only fields that differ from the engine type's)
+function charOverride(layout, ch) {
+  const def = DATA.character[layout] || DATA.character.i4, o = {}
+  for (const c of CHAR) if (Math.abs(ch[c.k] - def[c.k]) > 1e-6) o[c.k] = ch[c.k]
+  return o
+}
+function cleanEdit() {
+  const e = EDITS[S.car]
+  if (!e) return
+  const st = stockSound(), sc = baseChar(tunedSound().layout)
+  for (const k of Object.keys(e.sound)) if (e.sound[k] === st[k]) delete e.sound[k]
+  for (const k of Object.keys(e.character)) if (Math.abs(e.character[k] - sc[k]) < 1e-6) delete e.character[k]
+  if (!Object.keys(e.sound).length && !Object.keys(e.character).length) delete EDITS[S.car]
+}
+
+// ---------------------------------------------------------------------------------------------
+// worker
+// ---------------------------------------------------------------------------------------------
+let host = null, nextId = 1
+const pending = new Map()
+function startWorker() {
+  const libSrc = $('src-wasmoon').textContent, hostSrc = $('src-worker').textContent
+  const b64 = $('src-wasm').textContent.trim()
+  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  const files = [...document.querySelectorAll('script[type="text/x-lua"]')].map((s) => ({ name: s.dataset.name, src: s.textContent }))
+  const boot = '\nconst __host = StudioHost((m, t) => postMessage(m, t || []), self.wasmoon)\nonmessage = (e) => __host.onMessage(e.data)\n'
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([libSrc, '\n', hostSrc, boot], { type: 'text/javascript' })))
+    w.onmessage = (e) => onWorker(e.data)
+    w.onerror = (e) => status('Worker error: ' + e.message, 'err')
+    host = { send: (m, t) => w.postMessage(m, t || []) }
+  } catch (e) {
+    // workers blocked (some browsers on file://): run on the page, it just stutters while rendering
+    ;(0, eval)(libSrc + '\n' + hostSrc + '\nwindow.StudioHost = StudioHost')
+    const h = window.StudioHost((m) => setTimeout(() => onWorker(m)), window.wasmoon)
+    host = { send: (m) => setTimeout(() => h.onMessage(m)) }
+  }
+  host.send({ type: 'init', files, wasm: bin.buffer }, [bin.buffer])
+}
+function request(type, req, tag) {
+  return new Promise((resolve, reject) => {
+    const id = nextId++
+    pending.set(id, { resolve, reject, tag })
+    host.send({ type, id, tag, req })
+  })
+}
+function onWorker(m) {
+  if (m.type === 'log') return console.log('[lua]', m.text)
+  if (m.type === 'ready') return onReady(m.data)
+  if (m.type === 'error' && !m.id) return status(m.text, 'err')
+  const p = pending.get(m.id)
+  // a newer render of the same tag replaced this one in the worker's queue
+  for (const [id, q] of pending) if (q.tag && q.tag === m.tag && id < m.id) { q.reject('replaced'); pending.delete(id) }
+  if (!p) return
+  pending.delete(m.id)
+  if (m.type === 'error') p.reject(m.text)
+  else p.resolve(m)
+}
+
+// ---------------------------------------------------------------------------------------------
+// audio: each clip is loudness-matched like the game does (rms above 250 Hz), then a limiter
+// ---------------------------------------------------------------------------------------------
+let ctx = null, out = null, analyser = null, src = null, startAt = 0
+const clips = { stock: null, tuned: null }
+function audio() {
+  if (ctx) return ctx
+  ctx = new (window.AudioContext || window.webkitAudioContext)()
+  const lim = ctx.createDynamicsCompressor()
+  lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.08
+  analyser = ctx.createAnalyser()
+  analyser.fftSize = 16384; analyser.smoothingTimeConstant = 0.8
+  out = ctx.createGain(); out.gain.value = 0.9
+  lim.connect(analyser); analyser.connect(out); out.connect(ctx.destination)
+  audio.input = lim
+  return ctx
+}
+function loudnessGain(d, rate) {
+  // one-pole high-pass at 250 Hz is close enough to the game's biquad for matching
+  const a = Math.exp(-2 * Math.PI * 250 / rate)
+  let x1 = 0, y1 = 0, sum = 0
+  for (let i = 0; i < d.length; i++) { const y = a * (y1 + d[i] - x1); x1 = d[i]; y1 = y; sum += y * y }
+  const rms = Math.sqrt(sum / d.length) || 1e-6
+  return Math.pow(10, -21 / 20) / rms
+}
+function makeClip(m) {
+  const c = audio()
+  const buf = c.createBuffer(1, m.data.length, m.rate)
+  buf.copyToChannel(m.data, 0)
+  return { buf, gain: loudnessGain(m.data, m.rate), info: m.info, loop: m.loop, mode: S.mode }
+}
+function playing() { return clips[S.ab] }
+function startSource(offset) {
+  const clip = playing()
+  if (!clip || !S.playing) return
+  stopSource()
+  const c = audio()
+  const g = c.createGain(); g.gain.value = clip.gain
+  src = c.createBufferSource(); src.buffer = clip.buf; src.loop = true
+  src.connect(g); g.connect(audio.input)
+  const dur = clip.buf.duration
+  const off = ((offset || 0) % dur + dur) % dur
+  src.start(0, off)
+  startAt = c.currentTime - off
+  src._dur = dur
+}
+function stopSource() { if (src) { try { src.stop() } catch (e) {} src.disconnect(); src = null } }
+function position() { return src && ctx ? (ctx.currentTime - startAt) % src._dur : 0 }
+// swap clips at the same point of the timeline, so A/B compares the same moment
+function swap() { if (S.playing) startSource(position()) }
+
+// ---------------------------------------------------------------------------------------------
+// rendering
+// ---------------------------------------------------------------------------------------------
+function baseReq() { return { car: S.car, mode: S.mode, sr: S.sr, rpm: S.rpm, thr: S.thr } }
+function tunedReq() {
+  const snd = tunedSound(), ch = charOverride(snd.layout, tunedChar())
+  return { ...baseReq(), sound: (EDITS[S.car] || {}).sound || {}, character: ch }
+}
+let renderTimer = null, lastStockKey = ''
+function status(t, cls) { const s = $('status'); s.textContent = t; s.className = cls || '' }
+function scheduleRender(delay) {
+  clearTimeout(renderTimer)
+  renderTimer = setTimeout(render, delay == null ? 250 : delay)
+}
+async function render() {
+  const stockKey = JSON.stringify(baseReq())
+  const jobs = []
+  status('Rendering…', 'busy')
+  if (stockKey !== lastStockKey || !clips.stock) {
+    lastStockKey = stockKey
+    jobs.push(request('render', baseReq(), 'stock').then((m) => { clips.stock = makeClip(m); if (S.ab === 'stock') swap() }))
+  }
+  const t0 = performance.now()
+  jobs.push(request('render', tunedReq(), 'tuned').then((m) => {
+    clips.tuned = makeClip(m)
+    tunedInfo = m.info
+    if (S.ab === 'tuned') swap()
+    drawRhythm()
+    status(`Rendered in ${Math.round(performance.now() - t0)} ms`)
+  }))
+  try { await Promise.all(jobs) } catch (e) { if (e !== 'replaced') status(String(e), 'err') }
+}
+let tunedInfo = null, rhythm = { stock: null, tuned: null }
+async function updateRhythm() {
+  try {
+    const [a, b] = await Promise.all([
+      request('rhythm', { car: S.car, character: charOverride(stockSound().layout, stockChar()) }),
+      request('rhythm', { car: S.car, sound: (EDITS[S.car] || {}).sound || {}, character: charOverride(tunedSound().layout, tunedChar()) }),
+    ])
+    rhythm = { stock: a.data, tuned: b.data }
+    drawRhythm()
+  } catch (e) {}
+}
+function changed() {
+  cleanEdit(); save()
+  syncControls(); renderChanges(); updateRhythm(); scheduleRender()
+}
+
+// ---------------------------------------------------------------------------------------------
+// controls
+// ---------------------------------------------------------------------------------------------
+function makeRow(def, kind) {
+  const row = document.createElement('div')
+  row.className = 'row'; row.dataset.k = def.k
+  row.innerHTML = `<label>${def.label}<small>${def.sub}</small></label><input type="range" min="${def.min}" max="${def.max}" step="${def.step}"><input type="number" min="${def.min}" max="${def.max}" step="${def.step}"><button class="reset" title="Back to stock">↺</button>`
+  const [range, num] = row.querySelectorAll('input')
+  const set = (v) => {
+    v = round(clamp(Number(v), def.min, def.max), def.step)
+    if (!isFinite(v)) return
+    if (kind === 'char') edit().character[def.k] = v
+    else edit().sound[def.k] = v
+    changed()
+  }
+  range.addEventListener('input', () => { num.value = range.value; set(range.value) })
+  num.addEventListener('change', () => set(num.value))
+  row.querySelector('.reset').addEventListener('click', () => {
+    const e = edit()
+    if (kind === 'char') delete e.character[def.k]; else delete e.sound[def.k]
+    changed()
+  })
+  row._set = (v, isChanged) => {
+    if (document.activeElement !== range) range.value = v
+    if (document.activeElement !== num) num.value = v
+    row.classList.toggle('changed', isChanged)
+  }
+  return row
+}
+const rows = {}
+function buildControls() {
+  for (const d of SOUND) $('gSound').appendChild(rows[d.k] = makeRow(d, 'sound'))
+  for (const d of ENGINE) $('gEngine').appendChild(rows[d.k] = makeRow(d, 'sound'))
+  for (const d of CHAR) $('gChar').appendChild(rows[d.k] = makeRow(d, 'char'))
+  const sel = $('layout')
+  for (const l of DATA.layouts) sel.add(new Option(`${l.name}`, l.id))
+  sel.addEventListener('change', () => {
+    const e = edit()
+    e.sound.layout = sel.value
+    e.character = {}   // the voice starts again from the new engine type's
+    changed()
+  })
+  document.querySelector('.row[data-k=layout] .reset').addEventListener('click', () => {
+    const e = edit(); delete e.sound.layout; e.character = {}; changed()
+  })
+}
+function syncControls() {
+  const st = stockSound(), tu = tunedSound(), sc = stockChar(), tc = tunedChar()
+  for (const d of [...SOUND, ...ENGINE]) rows[d.k]._set(tu[d.k], tu[d.k] !== st[d.k])
+  for (const d of CHAR) rows[d.k]._set(round(tc[d.k], d.step), Math.abs(tc[d.k] - sc[d.k]) > 1e-6)
+  $('layout').value = tu.layout
+  document.querySelector('.row[data-k=layout]').classList.toggle('changed', tu.layout !== st.layout)
+  const car = carInfo(S.car), p = presetOf(car.preset)
+  const lay = DATA.layouts.find((l) => l.id === tu.layout)
+  $('mEngine').textContent = lay ? lay.name : tu.layout
+  $('mPreset').textContent = p ? p.name : car.preset
+  const e = EDITS[S.car]
+  S.scope = e ? e.scope || 'car' : S.scope
+  segSet('scope', S.scope)
+  const users = DATA.cars.filter((c) => c.preset === car.preset).length
+  $('scopeHint').textContent = S.scope === 'preset'
+    ? `Every car on the "${p ? p.name : car.preset}" preset (${users} car${users === 1 ? '' : 's'}) gets these changes.`
+    : (users > 1 ? `Only ${S.car}. ${users - 1} other car${users === 2 ? '' : 's'} share${users === 2 ? 's' : ''} its preset.` : `Only ${S.car}.`)
+  const rpm = $('rpm')
+  rpm.min = tu.idle; rpm.max = tu.redline
+  S.rpm = clamp(S.rpm, tu.idle, tu.redline)
+  rpm.value = S.rpm; $('rpmv').textContent = S.rpm + ' rpm'
+}
+function segSet(id, v) { for (const b of $(id).querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === String(v)) }
+function seg(id, fn) { $(id).addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { segSet(id, b.dataset.v); fn(b.dataset.v) } }) }
+
+// ---------------------------------------------------------------------------------------------
+// changes list and export
+// ---------------------------------------------------------------------------------------------
+const fmt = (v) => (typeof v === 'number' ? String(round(v, 0.001)) : String(v))
+function diffText(name) {
+  const e = EDITS[name], car = carInfo(name)
+  const parts = []
+  for (const [k, v] of Object.entries(e.sound)) parts.push(`${k} ${fmt(car.stock[k])} → ${fmt(v)}`)
+  const base = baseCharOf(car, e.sound.layout || car.stock.layout)
+  for (const [k, v] of Object.entries(e.character)) parts.push(`${k} ${fmt(base[k])} → ${fmt(v)}`)
+  return parts.join(', ')
+}
+function renderChanges() {
+  const ul = $('changes')
+  ul.innerHTML = ''
+  const names = Object.keys(EDITS).sort()
+  if (!names.length) { ul.innerHTML = '<li class="empty">No changes yet. Tune a car and it shows up here.</li>'; return }
+  for (const n of names) {
+    const li = document.createElement('li')
+    const e = EDITS[n]
+    li.innerHTML = `<button class="rm">Remove</button><div class="name"></div><div class="diff"></div>`
+    li.querySelector('.name').textContent = n + (e.scope === 'preset' ? ` (all cars on preset ${carInfo(n).preset})` : '')
+    li.querySelector('.diff').textContent = diffText(n)
+    li.querySelector('.name').addEventListener('click', () => selectCar(n))
+    li.querySelector('.rm').addEventListener('click', () => { delete EDITS[n]; save(); if (n === S.car) changed(); else renderChanges() })
+    ul.appendChild(li)
+  }
+}
+function exportData() {
+  const changes = Object.keys(EDITS).sort().map((name) => {
+    const e = EDITS[name], car = carInfo(name)
+    const layout = e.sound.layout || car.stock.layout
+    const ch = { ...baseCharOf(car, layout), ...e.character }
+    const stockLayout = car.stock.layout
+    return {
+      car: name, preset: car.preset, scope: e.scope || 'car',
+      sound: { ...e.sound }, soundStock: Object.fromEntries(Object.keys(e.sound).map((k) => [k, car.stock[k]])),
+      // the full per-car character as sh_carlist would hold it (fields that differ from the engine type)
+      character: charOverride(layout, ch), characterStock: charOverride(stockLayout, baseCharOf(car, stockLayout)),
+    }
+  })
+  return { tool: 'Audio Engine Tone Studio', version: 1, changes }
+}
+function exportText() {
+  const d = exportData()
+  const lines = ['Tone Studio changes for the Audio Engine addon. Please apply them (stock overrides in sh_carlist.lua; voice changes as the car\'s character, or on the preset where the scope says so) and re-bake.', '']
+  for (const c of d.changes) lines.push(`- ${c.car} [preset ${c.preset}, ${c.scope === 'preset' ? 'apply to every car on this preset' : 'this car only'}]: ${diffText(c.car)}`)
+  lines.push('', '```json', JSON.stringify(d, null, 2), '```')
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------------------------
+// graphs
+// ---------------------------------------------------------------------------------------------
+const FMIN = 20, FMAX = 2500
+function fitCanvas(cv) {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1
+  if (cv.width !== Math.round(r.width * dpr) || cv.height !== Math.round(r.height * dpr)) {
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr)
+  }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0)
+  return { g, w: r.width, h: r.height }
+}
+const xOf = (f, w) => (Math.log(f / FMIN) / Math.log(FMAX / FMIN)) * w
+const fOf = (x, w) => FMIN * Math.pow(FMAX / FMIN, x / w)
+// where the synth actually puts each resonance (mirrors Synth.GenRender in cl_synth.lua)
+function effective(ch, snd) {
+  const v = snd.realism, sp = Math.sqrt(snd.pitch), t = snd.tone
+  return {
+    f1: (78 + (ch.f1 - 78) * v) * sp,
+    f2: ((230 + 190 * t) * (1 - v) + ch.f2 * (0.85 + 0.3 * t) * v) * sp,
+    f3: (155 + (ch.f3 - 155) * v) * sp,
+  }
+}
+function fromEffective(k, f, snd) {
+  const v = Math.max(snd.realism, 1e-3), sp = Math.sqrt(snd.pitch), t = snd.tone
+  if (k === 'f1') return 78 + (f / sp - 78) / v
+  if (k === 'f2') return (f / sp - (230 + 190 * t) * (1 - v)) / ((0.85 + 0.3 * t) * v)
+  return 155 + (f / sp - 155) / v
+}
+// the rpm the rev clip is at, t seconds in (mirrors STUDIO.render in studio.lua)
+function rpmAt(t, idle, red) {
+  const top = red * 0.95
+  if (t < 0.7) return idle
+  if (t < 3.6) { const x = (t - 0.7) / 2.9; return idle + (top - idle) * (1 - Math.pow(1 - x, 1.6)) }
+  if (t < 6.2) { const x = (t - 3.6) / 2.6; return top + (idle - top) * (1 - Math.pow(1 - x, 2.2)) }
+  return idle
+}
+let drag = null, hover = null
+const freqData = new Float32Array(8192)
+function drawVoice() {
+  const cv = $('voice')
+  const { g, w, h } = fitCanvas(cv)
+  g.clearRect(0, 0, w, h)
+  const snd = tunedSound(), st = stockSound()
+  const top = 26, bottom = h - 22, ph = bottom - top
+  // grid
+  g.font = '11px system-ui'; g.fillStyle = css('--muted'); g.strokeStyle = css('--line'); g.lineWidth = 1
+  for (const f of [20, 30, 50, 100, 200, 300, 500, 1000, 2000]) {
+    const x = Math.round(xOf(f, w)) + 0.5
+    g.beginPath(); g.moveTo(x, top); g.lineTo(x, bottom); g.stroke()
+    g.fillText(f >= 1000 ? f / 1000 + 'k' : String(f), x + 3, h - 7)
+  }
+  g.fillText('Hz', w - 18, h - 7)
+  // spectrum of what's playing
+  if (analyser && S.playing) {
+    analyser.getFloatFrequencyData(freqData)
+    const binHz = ctx.sampleRate / analyser.fftSize
+    g.beginPath(); g.moveTo(0, bottom)
+    for (let x = 0; x <= w; x += 2) {
+      const f = fOf(x, w), b = f / binHz, i = Math.floor(b), fr = b - i
+      const db = (freqData[i] || -140) * (1 - fr) + (freqData[i + 1] || -140) * fr
+      const y = bottom - clamp((db + 105) / 85, 0, 1) * ph
+      g.lineTo(x, y)
+    }
+    g.lineTo(w, bottom); g.closePath()
+    g.fillStyle = css('--spec'); g.fill()
+    g.strokeStyle = css('--specLine'); g.lineWidth = 1; g.stroke()
+  }
+  // firing frequency markers at the current rpm
+  const rpm = currentRpm()
+  if (rpm && tunedInfo) {
+    const fire = rpm / 60 * tunedInfo.cyl / 2 * snd.pitch, half = rpm / 120 * snd.pitch
+    $('mRpm').textContent = Math.round(rpm) + ' rpm'
+    $('mFire').textContent = Math.round(fire) + ' Hz'
+    g.setLineDash([2, 4]); g.strokeStyle = css('--muted')
+    for (const [f, lbl] of [[fire, 'firing'], [half, '½ order']]) {
+      if (f < FMIN || f > FMAX) continue
+      const x = xOf(f, w)
+      g.beginPath(); g.moveTo(x, top); g.lineTo(x, bottom); g.stroke()
+      g.fillStyle = css('--muted'); g.fillText(lbl, x + 3, top + 10)
+    }
+    g.setLineDash([])
+  }
+  // resonances: stock (dashed) and tuned (handles)
+  const eS = effective(stockChar(), st), eT = effective(tunedChar(), snd)
+  const live = snd.realism > 0.001
+  for (const r of RESO) {
+    const color = css(r.color)
+    const xs = xOf(eS[r.k], w)
+    if (Math.abs(eS[r.k] - eT[r.k]) > 0.5) {
+      g.setLineDash([4, 4]); g.strokeStyle = color; g.globalAlpha = 0.5
+      g.beginPath(); g.moveTo(xs, top); g.lineTo(xs, bottom); g.stroke()
+      g.setLineDash([]); g.globalAlpha = 1
+    }
+    const x = xOf(eT[r.k], w)
+    // a soft bell for the resonance's reach
+    const grad = g.createLinearGradient(x - 40, 0, x + 40, 0)
+    grad.addColorStop(0, 'transparent'); grad.addColorStop(0.5, color); grad.addColorStop(1, 'transparent')
+    g.globalAlpha = live ? 0.16 : 0.06; g.fillStyle = grad; g.fillRect(x - 40, top, 80, ph); g.globalAlpha = 1
+    g.strokeStyle = color; g.lineWidth = (drag && drag.k === r.k) || hover === r.k ? 3 : 2
+    g.globalAlpha = live ? 1 : 0.35
+    g.beginPath(); g.moveTo(x, top + 8); g.lineTo(x, bottom); g.stroke()
+    g.beginPath(); g.arc(x, top + 8, 7, 0, Math.PI * 2); g.fillStyle = color; g.fill()
+    g.fillStyle = css('--text'); g.font = '600 12px system-ui'
+    const label = `${r.name} ${Math.round(eT[r.k])} Hz`
+    const tw = g.measureText(label).width
+    g.fillText(label, clamp(x - tw / 2, 2, w - tw - 2), top - 8)
+    g.globalAlpha = 1; g.lineWidth = 1; g.font = '11px system-ui'
+  }
+  if (!live) { g.fillStyle = css('--warn'); g.fillText('Realism is 0: the voice is off (raise Realism to use these)', 8, bottom - 8) }
+}
+function currentRpm() {
+  const snd = tunedSound()
+  if (S.mode === 'hold') return S.rpm
+  if (!S.playing || !src) return null
+  return rpmAt(position(), snd.idle, snd.redline)
+}
+function handleAt(x, w) {
+  const e = effective(tunedChar(), tunedSound())
+  let best = null, bd = 14
+  for (const r of RESO) { const d = Math.abs(xOf(e[r.k], w) - x); if (d < bd) { bd = d; best = r.k } }
+  return best
+}
+function voiceEvents() {
+  const cv = $('voice')
+  const pos = (ev) => { const r = cv.getBoundingClientRect(); return { x: ev.clientX - r.left, w: r.width } }
+  cv.addEventListener('pointerdown', (ev) => {
+    if (tunedSound().realism <= 0.001) return
+    const p = pos(ev), k = handleAt(p.x, p.w)
+    if (!k) return
+    drag = { k }; cv.setPointerCapture(ev.pointerId)
+  })
+  cv.addEventListener('pointermove', (ev) => {
+    const p = pos(ev)
+    if (!drag) { hover = handleAt(p.x, p.w); cv.style.cursor = hover ? 'ew-resize' : 'default'; return }
+    const def = CHAR.find((c) => c.k === drag.k)
+    const v = round(clamp(fromEffective(drag.k, fOf(p.x, p.w), tunedSound()), def.min, def.max), def.step)
+    edit().character[drag.k] = v
+    cleanEdit(); syncControls()
+    scheduleRender(400)
+  })
+  const end = () => { if (drag) { drag = null; changed() } }
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end)
+}
+function drawRhythm() {
+  const cv = $('rhythm')
+  const { g, w, h } = fitCanvas(cv)
+  g.clearRect(0, 0, w, h)
+  const pad = 8, bottom = h - 20, top = 10
+  g.strokeStyle = css('--line'); g.fillStyle = css('--muted'); g.font = '11px system-ui'
+  for (let a = 0; a <= 720; a += 90) {
+    const x = pad + (a / 720) * (w - 2 * pad)
+    g.beginPath(); g.moveTo(x + 0.5, top); g.lineTo(x + 0.5, bottom); g.stroke()
+    g.fillText(a + '°', clamp(x - 8, 0, w - 26), h - 5)
+  }
+  const draw = (r, ghost) => {
+    if (!r) return
+    const max = Math.max(...r.amp, 1e-6) * 1.08
+    const bw = Math.max(3, Math.min(14, (w - 2 * pad) / r.angles.length * 0.45))
+    for (let i = 0; i < r.angles.length; i++) {
+      const x = pad + (r.angles[i] / 720) * (w - 2 * pad)
+      const bh = (r.amp[i] / max) * (bottom - top)
+      if (ghost) { g.strokeStyle = css('--muted'); g.strokeRect(x - bw / 2 - 1.5, bottom - bh, bw + 3, bh) }
+      else { g.fillStyle = css(r.banks[i] === 2 ? '--bankR' : '--bankL'); g.fillRect(x - bw / 2, bottom - bh, bw, bh) }
+    }
+  }
+  draw(rhythm.tuned, false)
+  draw(rhythm.stock, true)
+}
+function loop() {
+  drawVoice()
+  requestAnimationFrame(loop)
+}
+
+// ---------------------------------------------------------------------------------------------
+// wiring
+// ---------------------------------------------------------------------------------------------
+function selectCar(name) {
+  if (!carInfo(name)) return
+  S.car = name
+  $('car').value = name
+  clips.stock = clips.tuned = null; lastStockKey = ''
+  save(); syncControls(); renderChanges(); updateRhythm(); scheduleRender(0)
+}
+function onReady(data) {
+  DATA = data
+  const dl = $('carlist')
+  for (const c of DATA.cars) dl.appendChild(new Option(c.preset, c.name))
+  buildControls()
+  $('sr').value = String(S.sr)
+  $('overlay').remove()
+  selectCar(S.car && carInfo(S.car) ? S.car : (carInfo('Bugatti Veyron 16.4') ? 'Bugatti Veyron 16.4' : DATA.cars[0].name))
+  loop()
+}
+$('car').addEventListener('change', () => { if (carInfo($('car').value)) selectCar($('car').value); else $('car').value = S.car })
+$('car').addEventListener('focus', () => $('car').select())
+seg('ab', (v) => { S.ab = v; swap() })
+seg('mode', (v) => {
+  S.mode = v; $('holdctl').hidden = v !== 'hold'
+  clips.stock = clips.tuned = null; scheduleRender(0)
+})
+seg('thr', (v) => { S.thr = Number(v); scheduleRender(0) })
+seg('scope', (v) => { S.scope = v; const e = EDITS[S.car]; if (e) { e.scope = v; save(); renderChanges() } syncControls() })
+$('rpm').addEventListener('input', () => { S.rpm = Number($('rpm').value); $('rpmv').textContent = S.rpm + ' rpm'; scheduleRender(350) })
+$('sr').addEventListener('change', () => { S.sr = Number($('sr').value); save(); clips.stock = clips.tuned = null; scheduleRender(0) })
+$('play').addEventListener('click', togglePlay)
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); togglePlay() }
+  if (e.key === 'b' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { const v = S.ab === 'stock' ? 'tuned' : 'stock'; segSet('ab', v); S.ab = v; swap() }
+})
+function togglePlay() {
+  audio(); if (ctx.state === 'suspended') ctx.resume()
+  S.playing = !S.playing
+  $('play').textContent = S.playing ? '■ Stop' : '▶ Play'
+  if (S.playing) startSource(0); else stopSource()
+}
+$('copy').addEventListener('click', async () => {
+  const t = exportText(), ta = $('exportText')
+  ta.value = t; ta.style.display = 'block'
+  try { await navigator.clipboard.writeText(t); status('Copied: paste it to Claude') } catch (e) { ta.select(); status('Select the text below and copy it') }
+})
+$('download').addEventListener('click', () => {
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(exportData(), null, 2)], { type: 'application/json' }))
+  a.download = 'tone_studio_changes.json'; a.click()
+})
+$('clear').addEventListener('click', () => { EDITS = {}; save(); changed() })
+window.addEventListener('resize', drawRhythm)
+voiceEvents()
+startWorker()
+</script>
+</body>
+</html>

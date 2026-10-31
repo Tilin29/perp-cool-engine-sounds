@@ -33,8 +33,8 @@ DT.SHIFT = {
 	-- cornering (A/D held, or let go under cornerHold s ago): no early upshifts (the car isn't
 	-- accelerating there because it turns, not because it's at top speed: it climbed through
 	-- the gears to a drone), and it changes down once the revs fall below cornerRpm
-	cornerRpm = 0.50,
-	cornerLand = 0.80, -- ... to the lowest gear that stays under this
+	cornerRpm = 0.65,
+	cornerLand = 0.88, -- ... to the lowest gear that stays under this
 	cornerHold = 0.6,
 }
 
@@ -309,7 +309,7 @@ function DT.Step(st, cfg, dt, inp)
 					if st.gear < n and wheelRpm > red * 0.97 then
 						shift(st.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
 					elseif st.gear > 1 and rpm < red * (corner and SH.cornerRpm or SH.lugRpm)
-						and rpmIn(st.gear - 1) < red * 0.75 then
+						and rpmIn(st.gear - 1) < red * (corner and SH.cornerLand or 0.75) then
 						shift(st.gear - 1, -1, 0.6)                      -- don't let it lug (or drone through a corner)
 					end
 				end
