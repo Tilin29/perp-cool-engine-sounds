@@ -291,6 +291,13 @@ function E.ResolveProfile(car, prof)
 	if (car.muffle or 0) > 0 then key[#key + 1] = "m" .. fmt(car.muffle) end
 	cfg.soundKey = table.concat(key, "_")
 	cfg.id = cfg.soundKey
+	-- the same engine at any redline: its rpm bands are the same sound, so a baked bank with a
+	-- higher redline serves it (see cl_soundbank). Not for electric motors: their whine level
+	-- follows rpm / redline.
+	if not cfg.electric then
+		table.remove(key, 5)
+		cfg.familyKey = table.concat(key, "_")
+	end
 	return cfg
 end
 

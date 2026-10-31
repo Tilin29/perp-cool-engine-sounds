@@ -352,7 +352,9 @@ local function updateSound(car, dt)
 		local pitch = math.Clamp(100 * det * rpm / L.rpm, 5, 250)
 		setGroup(car, i, { L.on, L.off }, { wi * thr, wi * (1 - thr) }, pitch, dt)
 	end
-	setGroup(car, "lim", { bank.limiter.off }, { car.limW * g }, 100 * det, dt)
+	-- a family bank (or the stock fallback) may be rendered at another redline: pitch it to ours
+	local limPitch = math.Clamp(100 * det * cfg.redline / (bank.limiter.rpm or cfg.redline), 5, 250)
+	setGroup(car, "lim", { bank.limiter.off }, { car.limW * g }, limPitch, dt)
 
 	-- turbos: the whistle rises with boost, the blow-off valve sighs when the throttle shuts
 	if turboOn then

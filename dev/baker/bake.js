@@ -11,6 +11,8 @@
     sound/audio_engine/<dir>/*.wav      one folder per engine (+ env_<hash>/ for road, wind, turbo)
     lua/audio_engine/cl_baked.lua       what each folder holds (loop rpm points, peaks, timings)
 
+  One bank per engine family: cars whose engines differ only in redline share the bank baked at
+  the family's highest redline (plus an emotion start per flare rpm, which follows redline).
   Folders are <preset>_<redline>_<hash> (cars with the same engine share one). The hash covers the
   sound key and the synth sources, so after any synth change a re-bake gives new file names and
   clients never play a stale cached copy.
@@ -134,7 +136,7 @@ async function main() {
     const [dir, engine, cars, names] = (await call(`__result(BAKE.info(${i}))`)).split('\t')
     items.push({ i, dir, engine, cars, names })
   }
-  console.log(`${n} distinct stock engines at ${RATE} Hz, synth version ${version}, ${JOBS} workers`)
+  console.log(`${n} stock engine families at ${RATE} Hz, synth version ${version}, ${JOBS} workers`)
   let todo = items
   if (ONLY) todo = items.filter((it) => it.i === parseInt(ONLY, 10))
   else if (fs.existsSync(SOUND_OUT)) {
@@ -177,7 +179,8 @@ async function main() {
     (failed ? `, ${failed} FAILED` : ''))
   if (ONLY || failed) { console.log('manifest not written'); process.exit(failed ? 1 : 0) }
   const header = await call(`__result(BAKE.header(${JSON.stringify(version)}))`)
-  const body = [header + envEntry, 'E.BAKED = {', ...entries.slice(1), '}', ''].join('\n')
+  const families = await call('__result(BAKE.familyEntry())')
+  const body = [header + envEntry, families + 'E.BAKED = {', ...entries.slice(1), '}', ''].join('\n')
   fs.writeFileSync(MANIFEST, body)
   console.log('wrote', path.relative(ADDON, MANIFEST))
 }

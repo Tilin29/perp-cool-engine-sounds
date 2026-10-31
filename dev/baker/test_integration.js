@@ -136,7 +136,9 @@ function findAll(pat) {
           for _, x in ipairs({ b.limiter.off, b.start.name, b.startEmo.name, b.stop.name }) do names[#names + 1] = x end
           for _, x in ipairs(b.pops) do names[#names + 1] = x end
           for _, x in ipairs(b.bangs) do names[#names + 1] = x end
-          if #b.layers ~= #cfg.bands then miss[#miss + 1] = cfg.id .. " band count" end
+          -- a family bank may be baked at a higher redline (more bands), never a lower one
+          if b.limiter.rpm < cfg.redline then miss[#miss + 1] = cfg.id .. " limiter below redline" end
+          if #b.layers < #cfg.bands then miss[#miss + 1] = cfg.id .. " band count" end
           for _, x in ipairs(names) do
             if not file.Exists("sound/" .. x, "GAME") then miss[#miss + 1] = x end
             if not b.peak[x] then miss[#miss + 1] = x .. " (no peak)" end

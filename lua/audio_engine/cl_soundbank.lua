@@ -25,6 +25,11 @@ local cvRate = CreateClientConVar("audio_engine_samplerate", "44100", true, fals
 local cvBudget = CreateClientConVar("audio_engine_genbudget", "6", true, false,
 	"Milliseconds per frame spent generating engine sounds", 1, 50)
 
+-- the rpm the emotion start flares to, as the name of its baked variant ("4015")
+function Bank.EmotionFlareKey(cfg)
+	return tostring(math.floor(E.Drivetrain.EmotionFlare(cfg) + 0.5))
+end
+
 local function sampleRate()
 	local r = cvRate:GetInt()
 	if r ~= 22050 and r ~= 11025 then r = 44100 end
@@ -206,6 +211,23 @@ local function build(b)
 	capLoudness(ste, sr, loudest + 1, loudestBroad + 1)
 	y()
 	b.startEmo = { name = add("starte", ste, false), fadeAt = fadeAtE, dur = durE }
+	-- the baker shares one bank between the redlines of an engine family; the emotion start
+	-- flares to a share of redline, so it renders one more per flare (b.startRedlines)
+	b.startEmoAt = {}
+	local flare0 = Bank.EmotionFlareKey(cfg)
+	for _, rl in ipairs(b.startRedlines or {}) do
+		local c = {}
+		for k, v in pairs(cfg) do c[k] = v end
+		c.redline = rl
+		local fk = Bank.EmotionFlareKey(c)
+		if fk ~= flare0 and not b.startEmoAt[fk] then
+			local sv, fa, du = Synth.RenderStart(c, sr, true, y)
+			scale(sv, bandGain[1])
+			capLoudness(sv, sr, loudest + 1, loudestBroad + 1)
+			b.startEmoAt[fk] = { name = add("starte_" .. fk, sv, false), fadeAt = fa, dur = du }
+			y()
+		end
+	end
 	local sp, spDur = Synth.RenderStop(cfg, sr, y)
 	scale(sp, bandGain[1])
 	b.stop = { name = add("stop", sp, false), dur = spDur }
@@ -388,8 +410,20 @@ local function bakedFiles(m, probe)
 	return function(stem) return dir .. stem .. ".wav" end
 end
 
+-- the baked entry for an engine: its own, or its family's (the same engine baked at a higher
+-- redline: the bands it never reaches just stay silent, the limiter is pitched down to it)
+local function bakedEntry(cfg)
+	if not E.BAKED then return nil end
+	local m = E.BAKED[cfg.id]
+	if m then return m end
+	local top = cfg.familyKey and E.BAKED_FAMILY and E.BAKED_FAMILY[cfg.familyKey]
+	m = top and E.BAKED[top]
+	if m and m.limiter >= cfg.redline then return m end
+end
+Bank.BakedEntry = bakedEntry
+
 local function bakedBank(cfg)
-	local m = E.BAKED and E.BAKED[cfg.id]
+	local m = bakedEntry(cfg)
 	local n = bakedFiles(m, "b1on")
 	if not n then return nil end
 	local b = {
@@ -400,6 +434,18 @@ local function bakedBank(cfg)
 	b.limiter = { off = n("lim"), rpm = m.limiter }
 	b.start = { name = n("start"), fadeAt = m.start.fadeAt, dur = m.start.dur }
 	b.startEmo = { name = n("starte"), fadeAt = m.startEmo.fadeAt, dur = m.startEmo.dur }
+	-- a lower redline in the family flares lower: its own emotion start, else the closest one
+	if m.startEmoAt then
+		local want = tonumber(Bank.EmotionFlareKey(cfg))
+		local best = math.abs(want - E.Drivetrain.EmotionFlare({ redline = m.limiter }))
+		for fk, s in pairs(m.startEmoAt) do
+			local d = math.abs(want - tonumber(fk))
+			if d < best then
+				best = d
+				b.startEmo = { name = n("starte_" .. fk), fadeAt = s.fadeAt, dur = s.dur }
+			end
+		end
+	end
 	b.stop = { name = n("stop"), dur = m.stop.dur }
 	for i = 1, m.pops do b.pops[i] = n("pop" .. i) end
 	for i = 1, m.bangs do b.bangs[i] = n("bang" .. i) end
@@ -515,7 +561,7 @@ local function prebuild()
 	local gen = {}
 	for _, car in pairs(E.Cars) do
 		local cfg = E.ResolveProfile(car)
-		if not (E.BAKED and E.BAKED[cfg.id]) then gen[cfg.id] = cfg end
+		if not bakedEntry(cfg) then gen[cfg.id] = cfg end
 	end
 	if table.Count(gen) <= cvMax:GetInt() then
 		for _, cfg in pairs(gen) do Bank.Get(cfg) end
