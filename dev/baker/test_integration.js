@@ -155,6 +155,29 @@ function findAll(pat) {
   const [cars, nb, baked, missing] = res.split('\t')
   console.log(`baked banks: ${cars} cars, ${nb} distinct engines, ${baked} load from baked files`)
   check(missing === '', 'missing:\n' + missing)
+  // 3. stock pops & blow-off: list names must be real cars, and only listed cars get them
+  await L.doString(`
+    local bad, pops, bov, turbo = {}, 0, 0, 0
+    for name in pairs(E.CAR_POPS) do if not E.CAR_ENGINES[name] then bad[#bad + 1] = "CAR_POPS: " .. name end end
+    for name in pairs(E.CAR_BOV) do if not E.CAR_ENGINES[name] then bad[#bad + 1] = "CAR_BOV: " .. name end end
+    for _, car in pairs(E.Cars) do
+      if car.perp then
+        local p = E.CarStockProfile(car)
+        if p.pops > 0 then pops = pops + 1 end
+        if p.turbo then turbo = turbo + 1 end
+        if p.bov then
+          bov = bov + 1
+          if not E.CAR_BOV[car.name] then bad[#bad + 1] = "unlisted BOV: " .. car.name end
+        end
+        if (p.pops > 0) ~= ((E.CAR_POPS[car.name] or 0) > 0) then bad[#bad + 1] = "pops mismatch: " .. car.name end
+      end
+    end
+    __result(pops .. "\\t" .. bov .. "\\t" .. turbo .. "\\t" .. table.concat(bad, "\\n"))`)
+  const [nPops, nBov, nTurbo, badLists] = res.split('\t')
+  console.log(`stock pops & bangs on ${nPops} of 165 cars; blow-off valve on ${nBov} of ${nTurbo} turbo cars`)
+  check(badLists === '', badLists)
+  check(+nBov === 9, 'expected the 9 listed cars to have a blow-off valve')
+
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
   process.exit(fail ? 1 : 0)
 })().catch((e) => { console.error(e); process.exit(1) })

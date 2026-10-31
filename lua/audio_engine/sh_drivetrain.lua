@@ -159,7 +159,8 @@ function DT.Step(st, cfg, dt, inp)
 		else
 			st.boost = st.boost + (want - st.boost) * min(1, dt * 5)
 		end
-		if st.lastPedal and not pedal and st.boost > 0.45 then
+		-- only a proper lift on boost vents audibly; a gentle lift stays quiet
+		if st.lastPedal and not pedal and st.boost > 0.6 then
 			st.bovEvent = st.boost
 			st.boost = st.boost * 0.4
 		end

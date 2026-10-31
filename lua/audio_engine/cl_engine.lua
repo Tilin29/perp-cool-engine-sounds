@@ -371,25 +371,28 @@ local function updateSound(car, dt)
 		local red = cfg.redline
 		local firings = st.rpm / 60 * bank.cyl / 2
 		local often = P * P * 1.6 + P * 0.4          -- gentle at the low end, a lot at the top
+		-- the big events (lift-off bang, upshift crack, limiter) go with P squared: a Rare or
+		-- Occasional car crackles now and then, only a Frequent one bangs on most lifts
+		local event = P * P
 		-- crackle on the overrun
 		if st.soundThr < 0.04 and st.rpm > red * 0.4 and not st.cut then
 			if math.random() < firings * 0.012 * often * dt then playPop(car, popVol, false) end
 		end
 		-- a bang when you lift off high in the revs (just after the throttle shuts)
-		if (car.lastThr or 0) > 0.8 and st.thr < 0.5 and st.rpm > red * 0.5 and math.random() < math.min(1, P * 1.3) then
+		if (car.lastThr or 0) > 0.8 and st.thr < 0.5 and st.rpm > red * 0.5 and math.random() < math.min(1, event * 1.5) then
 			car.bangAt = RealTime() + 0.05 + 0.15 * math.random()
 		end
 		-- upshift crack at full throttle
-		if st.gear > (car.lastGear or 0) and (car.lastGear or 0) > 0 and st.shiftKind == 1 and st.thr > 0.8 and math.random() < P * 0.8 then
+		if st.gear > (car.lastGear or 0) and (car.lastGear or 0) > 0 and st.shiftKind == 1 and st.thr > 0.8 and math.random() < event then
 			playPop(car, popVol, P > 0.5)
 		end
 		-- limiter
-		if st.limEvent and math.random() < P then playPop(car, popVol, P > 0.6 and math.random() < 0.4) end
+		if st.limEvent and math.random() < math.min(1, event * 1.5) then playPop(car, popVol, P > 0.6 and math.random() < 0.4) end
 	end
 	if car.bangAt and RealTime() >= car.bangAt then
 		car.bangAt = nil
 		playPop(car, popVol, true)
-		if math.random() < P then playPop(car, popVol * 0.8, false) end
+		if math.random() < event then playPop(car, popVol * 0.8, false) end
 	end
 	car.lastThr = st.thr
 	car.lastGear = st.gear

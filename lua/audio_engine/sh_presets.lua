@@ -245,6 +245,12 @@ function E.CarStockProfile(car)
 		for k, v in pairs(car.stock) do p[k] = v end
 		p = E.SanitizeProfile(p)
 	end
+	-- stock pops & bangs (sh_carlist.lua CAR_POPS): runtime only, so not part of the sound key
+	if car.stockPops then p.pops = math.Clamp(car.stockPops, 0, 1) end
+	if car.stockPopVol then p.popVol = math.Clamp(car.stockPopVol, 0, 2) end
+	-- stock blow-off valve (CAR_BOV): only with a turbo
+	if car.stockBov ~= nil then p.bov = (car.stockBov and p.turbo) and true or false end
+	if car.stockBovVol then p.bovVol = math.Clamp(car.stockBovVol, 0, 2) end
 	return p
 end
 

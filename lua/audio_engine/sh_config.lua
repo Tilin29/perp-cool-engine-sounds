@@ -39,6 +39,12 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 	carId = "sl65",
 	name = "SL65 AMG",
 	preset = "sl65",
+	-- stock pops & bangs and blow-off, as for the PERP cars (sh_carlist.lua CAR_POPS / CAR_BOV):
+	-- the AMG biturbo crackles now and then and recirculates its blow-off (no "pssh")
+	stockPops = 0.15,
+	stockPopVol = 0.7,
+	stockBov = false,
+	stockBovVol = 0.6,
 	topSpeed = "auto",     -- "auto" = MaxSpeed from the car's vehicle script, or a number in km/h
 
 	-- arcade gearbox shift points as fractions of redline (remove to use the defaults).

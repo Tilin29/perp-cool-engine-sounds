@@ -90,7 +90,7 @@ E.CAR_ENGINES = {
 	["Ford Mustang GT"] = P("v8x", { redline = 7000 }),
 	["Ford Raptor SVT"] = P("v8x"),
 	["Ford Shelby GT500"] = P("v8x"),
-	["Ford Transit"] = P("i4t", { redline = 4500, tone = 0.3, pops = 0 }),
+	["Ford Transit"] = P("i4t", { redline = 4500, tone = 0.3 }),
 	["GMC Sierra"] = P("v8x"),
 	["GMC Syclone"] = P("v6t", { redline = 5000 }),
 	["GMC Vandura"] = P("v8x", { redline = 5000 }),
@@ -101,9 +101,9 @@ E.CAR_ENGINES = {
 	["Honda Civic Type R 1997"] = P("i4s"),
 	["Honda S2000"] = P("i4s", { redline = 9000 }),
 	["Hudson Hornet"] = P("i6", { redline = 4500, tone = 0.4 }),
-	["Hummer H1"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35, pops = 0 }),
+	["Hummer H1"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
 	["Jaguar E-Type"] = P("i6", { redline = 6000 }),
-	["Jaguar F-Type"] = P("v8x", { redline = 6500, pops = 0.7 }),
+	["Jaguar F-Type"] = P("v8x", { redline = 6500 }),
 	["Jeep Grand Cherokee"] = P("v8x"),
 	["Jeep Wrangler"] = P("i6", { redline = 5000 }),
 	["Kia Ceed"] = P("i4"),
@@ -115,8 +115,8 @@ E.CAR_ENGINES = {
 	["Lamborghini Murcielago"] = P("v12na"),
 	["Lamborghini Murcielago LP670-4 SV"] = P("v12na"),
 	["Lamborghini Reventon Roadster"] = P("v12na"),
-	["Land Rover Defender"] = P("i4t", { redline = 4500, tone = 0.3, pops = 0 }),
-	["Land Rover Range Rover 08"] = P("v8xt", { redline = 4500, tone = 0.4, pops = 0 }),
+	["Land Rover Defender"] = P("i4t", { redline = 4500, tone = 0.3 }),
+	["Land Rover Range Rover 08"] = P("v8xt", { redline = 4500, tone = 0.4 }),
 	["Land Rover Range Rover 2012"] = P("v8xt", { redline = 6000 }),
 	["Lexus IS 300"] = P("i6"),
 	["Lexus IS F"] = P("v8s", { redline = 7000 }),
@@ -192,6 +192,124 @@ E.CAR_ENGINES = {
 	["Volvo S60"] = P("i5t"),
 }
 
+--[[
+	Stock pops & bangs: how often (0-1, the menu's "Pops & bangs" slider: under 0.25 Rare, under
+	0.5 Occasional, under 0.8 Frequent). Only cars that crackle from the factory are listed: sports
+	exhausts with an overrun map (AMG V8s, the F-Type, Italian V10s and V12s, GT3s, hot hatches),
+	rotaries, carburettor-era racers and race cars. Every other car is off. The engine presets'
+	own pop values are only the starting point when an engine is retuned in the menu.
+	Frequency and volume are runtime settings: changing them needs no re-bake.
+]]
+E.STOCK_POP_VOLUME = 0.7   -- stock pops & bangs volume (the menu's 100% is 1)
+E.CAR_POPS = {
+	-- frequent: famous for it
+	["Jaguar F-Type"] = 0.6,
+	["Mazda Furai"] = 0.6,
+	["Pagani Zonda C12"] = 0.5,
+	["Bowler EXR-S"] = 0.5,
+	-- occasional: sports exhaust, crackles on the overrun
+	["Lamborghini Murcielago LP670-4 SV"] = 0.45,
+	["Lamborghini Gallardo LP570-4 Spyder Performante"] = 0.4,
+	["Noble M600"] = 0.4,
+	["Shelby 1000"] = 0.4,
+	["Audi R8 Plus"] = 0.35,
+	["Lamborghini Reventon Roadster"] = 0.35,
+	["McLaren P1"] = 0.35,
+	["Porsche Carrera GT"] = 0.35,
+	["Mercedes SLS AMG"] = 0.35,
+	["Mazda RX7"] = 0.35,
+	["Ford Focus RS"] = 0.35,
+	["Audi R8 V10"] = 0.3,
+	["Audi R8 Spyder"] = 0.3,
+	["Lamborghini Gallardo"] = 0.3,
+	["Lamborghini Murcielago"] = 0.3,
+	["Ferrari F430"] = 0.3,
+	["Ferrari F12 Berlinetta"] = 0.3,
+	["Ferrari Enzo"] = 0.3,
+	["Ferrari LaFerrari"] = 0.3,
+	["Ferrari F50"] = 0.3,
+	["Porsche 918 Spyder"] = 0.3,
+	["Porsche 911 GT3"] = 0.3,
+	["Mercedes E63 AMG"] = 0.3,
+	["Mercedes McLaren SLR"] = 0.3,
+	["Aston Martin V12 Vantage"] = 0.3,
+	["Dodge Viper GTS"] = 0.3,
+	["Chevrolet Corvette GSC"] = 0.3,
+	["Holden HSV W427"] = 0.3,
+	["Ferrari 458 Spider"] = 0.25,
+	["McLaren F1"] = 0.25,
+	["Porsche 997 GT3"] = 0.25,
+	["Aston Martin DBS"] = 0.25,
+	["Chevrolet Camaro ZL1"] = 0.25,
+	["Chevrolet Corvette Stingray 427"] = 0.25,
+	["Holden HSV GTS"] = 0.25,
+	["Morgan Aero SS"] = 0.25,
+	["Maserati Ghibli S"] = 0.25,
+	["Alfa Romeo 33 Stradale (1967)"] = 0.25,
+	-- rare: the odd crackle
+	["Lamborghini Diablo"] = 0.2,
+	["Lamborghini Miura"] = 0.2,
+	["Ferrari 250 GTO"] = 0.2,
+	["Mercedes ML63 AMG"] = 0.2,
+	["Maserati Quattroporte Sport GT S"] = 0.2,
+	["Ford Shelby GT500"] = 0.2,
+	["Ford GT 05"] = 0.2,
+	["Audi RS4 Avant"] = 0.2,
+	["Subaru Impreza WRX STI"] = 0.2,
+	["Mini Cooper S 2011"] = 0.2,
+	["Ferrari 512 TR"] = 0.15,
+	["Aston Martin Rapide"] = 0.15,
+	["Mercedes SL65 AMG"] = 0.15,
+	["BMW M6 2013"] = 0.15,
+	["BMW 1M"] = 0.15,
+	["Lexus IS F"] = 0.15,
+	["Nissan GT-R SpecV"] = 0.15,
+	["Nissan Skyline R34"] = 0.15,
+	["Mazda RX-8"] = 0.15,
+	["Mitsubishi Lancer Evo VIII"] = 0.15,
+	["Mitsubishi Lancer Evo X"] = 0.15,
+	["Mini Coupe"] = 0.15,
+	["Ford Mustang GT"] = 0.15,
+	["Dodge Challenger 2015"] = 0.15,
+	["Ferrari 250GT"] = 0.1,
+	["Mercedes C32 AMG"] = 0.1,
+	["BMW M3 E92"] = 0.1,
+	["BMW M5 E60"] = 0.1,
+	["BMW 340i"] = 0.1,
+	["Audi S5"] = 0.1,
+	["Nissan 370Z"] = 0.1,
+	["Toyota Supra"] = 0.1,
+	["Volvo 850R"] = 0.1,
+	["Volkswagen Golf GTI 2014"] = 0.1,
+	["Alfa Romeo Giulietta"] = 0.1,
+	["Honda Civic Type R"] = 0.1,
+	["Dodge Charger SRT-8"] = 0.1,
+	["Land Rover Range Rover 2012"] = 0.1,
+	["Chevrolet Camaro SS 69"] = 0.1,
+	["Chevrolet Chevelle SS"] = 0.1,
+	["Dodge Challenger 1970"] = 0.1,
+	["Pontiac Firebird Trans Am"] = 0.1,
+}
+
+--[[
+	Stock blow-off valve: the "pssh" when the throttle shuts on boost. Most factory turbo cars
+	recirculate that air back into the intake, which you barely hear, so only cars with an
+	audible stock blow-off or wastegate sound get it. Every other turbo car keeps the turbo
+	whistle without it. Runtime only: no re-bake.
+]]
+E.STOCK_BOV_VOLUME = 0.6   -- stock blow-off volume (the menu's 100% is 1)
+E.CAR_BOV = {
+	["Bugatti Veyron 16.4"] = true,
+	["Bugatti Veyron SS"] = true,
+	["Bugatti EB110"] = true,
+	["McLaren P1"] = true,
+	["Noble M600"] = true,
+	["Nissan GT-R SpecV"] = true,
+	["Subaru Impreza WRX STI"] = true,
+	["Mitsubishi Lancer Evo VIII"] = true,
+	["Mitsubishi Lancer Evo X"] = true,
+}
+
 -- register a car's model with the engine from the list above
 function E.RegisterCarNamed(model, carName, extra)
 	local e = E.CAR_ENGINES[carName]
@@ -204,6 +322,10 @@ function E.RegisterCarNamed(model, carName, extra)
 		name = carName,
 		preset = e.preset,
 		stock = e.stock,
+		stockPops = E.CAR_POPS[carName] or 0,
+		stockPopVol = E.STOCK_POP_VOLUME,
+		stockBov = E.CAR_BOV[carName] and true or false,
+		stockBovVol = E.STOCK_BOV_VOLUME,
 		topSpeed = "auto",
 		wheelRadius = 0.33,
 		soundLevel = 85,
