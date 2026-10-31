@@ -1,0 +1,800 @@
+<title>Rev Bench · Audio Engine</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: an instrument bench. The car's own HUD and pedals on top, the in-game tuning menu below, in the menu's three cards. */
+:root {
+  --bg: #0f1216;        /* menu frame */
+  --panel: #171b21;     /* cards */
+  --face: #12151a;      /* fields, dial face */
+  --line: #2a3039;
+  --fg: #e8e3d6;
+  --muted: #8d939c;
+  --amber: #ffa53d;
+  --amber-dim: #6b4719;
+  --red: #ff4b3a;
+  --green: #5fd38a;
+  --display: "Barlow Condensed", "Roboto Condensed", "Arial Narrow", sans-serif;
+  --body: "Barlow", "Roboto", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--fg); }
+body { font-family: var(--body); font-size: 15px; line-height: 1.45; }
+.wrap {
+  max-width: 1240px; margin: 0 auto;
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 18px;
+}
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+/* header */
+.head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 20px; }
+.brand { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mark { font-family: var(--display); font-weight: 800; font-size: 34px; letter-spacing: 0.04em; line-height: 1; }
+.mark b { color: var(--amber); font-weight: 800; padding: 0 0.08em; }
+.sub { color: var(--muted); font-size: 13px; }
+.status { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px 6px 10px; font-size: 13px; min-width: 0; max-width: 100%; }
+.lamp { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
+.lamp.busy { background: var(--amber); animation: pulse 1s ease-in-out infinite; }
+.lamp.ok { background: var(--green); }
+.lamp.err { background: var(--red); }
+@keyframes pulse { 50% { opacity: 0.35 } }
+.status .bar { width: 90px; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; flex: none; }
+.status .bar i { display: block; height: 100%; width: 0; background: var(--amber); transition: width 0.2s; }
+.status .txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* cockpit */
+.cockpit { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px 16px; min-width: 0; }
+.card h2 { margin: 0 0 12px; font-family: var(--body); font-size: 12.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.hud-card { padding: 0; overflow: hidden; background: transparent; border: 0; display: flex; flex-direction: column; gap: 8px; }
+.prompt { font-family: var(--display); font-weight: 700; font-size: 22px; letter-spacing: 0.03em; text-align: center; min-height: 1.3em; color: var(--fg); }
+.prompt.starting { color: var(--amber); }
+#hud { width: 100%; height: auto; display: block; aspect-ratio: 534 / 297; max-width: 100%; }
+.drive { display: flex; flex-direction: column; gap: 14px; }
+.pedals { display: grid; grid-template-columns: 1.1fr 1fr 1fr 1fr; gap: 8px; }
+.pedal {
+  background: var(--face); border: 1px solid var(--line); border-radius: 10px; padding: 10px 8px 9px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; user-select: none; touch-action: none;
+  transition: background 0.08s, border-color 0.08s;
+}
+.pedal .k { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.pedal .n { font-family: var(--display); font-weight: 700; font-size: 19px; letter-spacing: 0.03em; }
+.pedal.on { background: var(--amber-dim); border-color: var(--amber); }
+.pedal.brake.on { background: #4a1d19; border-color: var(--red); }
+.pedal.ign.on { background: #18382a; border-color: var(--green); }
+.pedal:disabled { opacity: 0.45; cursor: not-allowed; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.field-label { font-size: 13px; color: var(--muted); margin-bottom: 5px; }
+.seg { display: flex; background: var(--face); border: 1px solid var(--line); border-radius: 9px; padding: 3px; gap: 3px; }
+.seg button { flex: 1; border: 0; background: transparent; border-radius: 6px; padding: 6px 6px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--line); color: var(--fg); }
+.meter { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cell { background: var(--face); border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; min-width: 0; }
+.cell .l { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.cell .v { font-family: var(--mono); font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cell .v.clip { color: var(--red); }
+.hint { font-size: 12.5px; color: var(--muted); }
+.hint kbd { font-family: var(--mono); font-size: 11.5px; background: var(--face); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--fg); }
+
+/* sliders (the menu's DSlider look) */
+.sl { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 2px 10px; }
+.sl label { font-size: 14.5px; }
+.sl output { font-family: var(--mono); font-weight: 600; font-size: 14px; color: var(--amber); font-variant-numeric: tabular-nums; }
+.sl input[type=range] { grid-column: 1 / -1; width: 100%; margin: 4px 0 2px; height: 18px; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; --p: 50%; }
+.sl input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--amber-dim) var(--p), var(--line) var(--p)); }
+.sl input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(to right, var(--amber-dim) var(--p), var(--line) var(--p)); }
+.sl input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--amber); border: 0; margin-top: -4px; }
+.sl input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--amber); border: 0; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+select, .num {
+  background: var(--face); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; min-width: 0; width: 100%;
+}
+.num { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.num:focus { border-color: var(--amber); outline: none; }
+.num:disabled { opacity: 0.5; }
+.check { display: flex; gap: 9px; align-items: flex-start; font-size: 14.5px; cursor: pointer; }
+.check input { accent-color: var(--amber); width: 16px; height: 16px; margin: 2px 0 0; flex: none; }
+
+/* tuning menu */
+.tune { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.tune-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.tune-head .title { font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: 0.04em; margin-right: auto; }
+.tune-head .title b { color: var(--amber); }
+.preset-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.preset-row select { flex: 1 1 280px; width: auto; font-size: 15px; }
+.btn { border-radius: 8px; padding: 7px 16px; font-weight: 700; font-size: 13.5px; letter-spacing: 0.04em; border: 1px solid var(--line); background: var(--face); cursor: pointer; }
+.btn:hover { background: var(--line); }
+.btn.primary { background: var(--amber); border-color: var(--amber); color: #1b1206; }
+.btn.primary:hover { background: #ffb964; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.stat { font-size: 13px; color: var(--muted); }
+.gear-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; }
+.gear-grid .g { display: grid; grid-template-columns: 34px 1fr; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.inline { display: grid; grid-template-columns: 1fr 96px; gap: 8px; align-items: center; }
+.footer-note { font-size: 13px; color: var(--muted); }
+.applied { color: var(--green); }
+
+details.log { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; }
+details.log summary { cursor: pointer; font-size: 13px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+#log { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; color: var(--muted); max-height: 220px; overflow: auto; margin: 10px 0 0; }
+.about { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; font-size: 14px; color: var(--muted); }
+.about h3 { margin: 0 0 6px; font-size: 12.5px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg); }
+.about ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.about code { font-family: var(--mono); font-size: 12.5px; color: var(--fg); }
+
+@media (max-width: 980px) {
+  .cockpit { grid-template-columns: minmax(0, 1fr); }
+  .cards { grid-template-columns: minmax(0, 1fr); }
+  .about { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 460px) {
+  .pedals { grid-template-columns: 1fr 1fr; }
+  .row2 { grid-template-columns: minmax(0, 1fr); }
+  .mark { font-size: 28px; }
+}
+@media (prefers-reduced-motion: reduce) { .lamp.busy { animation: none; } .status .bar i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div class="brand">
+      <div class="mark">REV<b>·</b>BENCH</div>
+      <div class="sub">Audio Engine · SL65 AMG. The addon's own Lua runs here, unchanged, generating the same sounds as in game.</div>
+    </div>
+    <div class="status" role="status" aria-live="polite">
+      <span class="lamp busy" id="lamp"></span>
+      <span class="txt" id="statusTxt">Loading the Lua VM…</span>
+      <span class="bar" id="barWrap"><i id="bar"></i></span>
+    </div>
+  </header>
+
+  <section class="cockpit">
+    <div class="card hud-card"><div class="prompt" id="prompt" aria-live="polite"></div><canvas id="hud" width="1068" height="594" aria-label="Tachometer, gear, speed and engine rpm"></canvas></div>
+    <div class="card drive">
+      <h2>Drive</h2>
+      <div class="pedals">
+        <button class="pedal ign" id="ign" disabled><span class="n">Start engine</span><span class="k">I</span></button>
+        <button class="pedal" data-key="f"><span class="n">Throttle</span><span class="k">W</span></button>
+        <button class="pedal brake" data-key="b"><span class="n">Brake</span><span class="k">S</span></button>
+        <button class="pedal brake" data-key="h"><span class="n">Handbrake</span><span class="k">Space</span></button>
+      </div>
+      <div class="hint"><kbd>I</kbd> starts the engine; the car drives once the start-up has settled to idle. Hold <kbd>W</kbd> to drive, <kbd>S</kbd> to brake or reverse, <kbd>Space</kbd>+<kbd>W</kbd> at a standstill to rev in neutral.</div>
+      <div class="row2">
+        <div>
+          <div class="field-label">Listen from</div>
+          <div class="seg" id="modeSeg">
+            <button aria-pressed="true" data-v="car">Driver's seat</button>
+            <button aria-pressed="false" data-v="road">Roadside</button>
+          </div>
+        </div>
+        <div>
+          <div class="field-label">Vehicle script</div>
+          <div class="seg" id="scriptSeg">
+            <button aria-pressed="true" data-v="addon" title="sl65amg_rtu.txt: 480 hp, 155 mph">Addon</button>
+            <button aria-pressed="false" data-v="server" title="sl65amg_cop.txt: 325 hp, 200 mph">Server</button>
+          </div>
+        </div>
+      </div>
+      <div class="meter">
+        <div class="cell"><div class="l">Output peak</div><div class="v" id="mPeak">–</div></div>
+        <div class="cell"><div class="l">Clipped</div><div class="v" id="mClip">0</div></div>
+        <div class="cell"><div class="l">Doppler</div><div class="v" id="mDop">×1.000</div></div>
+      </div>
+      <div class="row2">
+        <div class="stack" id="clientSliders"></div>
+        <div class="stack">
+          <div>
+            <div class="field-label">Sample rate (<code>audio_engine_samplerate</code>)</div>
+            <select id="sr"><option value="44100">44,100 Hz (default)</option><option value="22050">22,050 Hz (generates twice as fast)</option></select>
+          </div>
+          <label class="check"><input type="checkbox" id="emo" checked><span>Rev flare on start-up (<code>audio_engine_emotionstart</code>)</span></label>
+          <div class="hint" id="perfHint">Script: 480 hp, top speed 250 km/h.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tune" aria-label="Engine tuning menu">
+    <div class="tune-head">
+      <div class="title">REV<b>·</b>BENCH</div>
+      <div class="sub">The in-game tuning menu (<code>!engine</code>). Apply builds the new engine the same way a client does in game.</div>
+    </div>
+    <div class="preset-row">
+      <select id="preset" aria-label="Engine preset"></select>
+      <button class="btn" id="stock">Back to stock</button>
+      <button class="btn primary" id="apply">Apply to car</button>
+    </div>
+    <div class="cards">
+      <div class="card"><h2>Sound</h2><div class="stack" id="cSound"></div></div>
+      <div class="card"><h2>RPM &amp; performance</h2><div class="stack" id="cRpm"></div></div>
+      <div class="card"><h2>Gear ratios</h2><div class="stack" id="cGear"></div></div>
+    </div>
+    <div class="footer-note" id="applyNote">Applies to the car. A new engine takes a while to generate; the old sound keeps playing until it's ready.</div>
+  </section>
+
+  <details class="log"><summary>Console</summary><pre id="log"></pre></details>
+
+  <section class="about">
+    <div>
+      <h3>What runs here</h3>
+      <ul>
+        <li>The addon's Lua files, embedded unchanged: <code>sh_config</code>, <code>sh_presets</code>, <code>sh_drivetrain</code>, <code>cl_synth</code>, <code>cl_soundbank</code> and <code>cl_engine</code>. They run in a real Lua VM (Lua 5.4, compiled to WebAssembly) in a background thread.</li>
+        <li>The sounds are generated sample by sample through <code>sound.Generate</code>, exactly as each client does in game. It takes longer here (about 15–20 s per engine, against 2 s in game), because the browser's Lua has no JIT compiler.</li>
+        <li>The game's sound calls are replayed in Web Audio the way Source handles them. Volume and pitch change once per frame. Pitch is rounded down to a whole percent, volume is capped at 100%, and the output has no limiter, so anything that would clip in game clips here. Watch the Clipped counter.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>What differs from the game</h3>
+      <ul>
+        <li>Driving is a simple stand-in for Source's vehicle physics: power, grip, braking and the script's top speed. The revs and gears still come from the addon's own gearbox model.</li>
+        <li>Distance falloff uses Source's sound-level formula (85 dB). Roadside, you stand 8 m from a straight road and the car comes round every 500 m. Source's room effects aren't modelled.</li>
+        <li>One car only, and no server. The page plays the server's part: it switches the engine on and off, networks the keys and applies a tuned profile.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script type="text/plain" id="wasm-b64">{{WASM_B64}}</script>
+{{LUA_FILES}}
+<script id="wasmoon-src">{{WASMOON}}</script>
+<script id="host-src">{{HOST}}</script>
+<script>
+(() => {
+'use strict'
+const $ = (id) => document.getElementById(id)
+const logEl = $('log')
+function log(t) { logEl.textContent += t + '\n'; if (logEl.textContent.length > 20000) logEl.textContent = logEl.textContent.slice(-15000); logEl.scrollTop = logEl.scrollHeight }
+
+/* ------------------------------------------------------------------ audio: Source's CSoundPatch in Web Audio */
+const A = {
+  ctx: null, master: null, analyser: null, buffers: new Map(), patches: new Map(), dist: 40, pan: 0,
+  peak: 0, clips: 0, masterVol: 1,
+  ensure() {
+    if (!this.ctx) {
+      const C = window.AudioContext || window.webkitAudioContext
+      if (!C) return
+      this.ctx = new C()
+      this.master = this.ctx.createGain()
+      this.master.gain.value = this.masterVol
+      this.analyser = this.ctx.createAnalyser()
+      this.analyser.fftSize = 2048
+      this.master.connect(this.analyser)
+      this.analyser.connect(this.ctx.destination)
+      this.tbuf = new Float32Array(this.analyser.fftSize)
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume()
+  },
+  addBuffer(name, rate, loop, data) { this.buffers.set(name, { rate, loop, data, ab: null }) },
+  ab(name) {
+    const b = this.buffers.get(name)
+    if (!b) return null
+    if (!b.ab) {
+      b.ab = new AudioBuffer({ length: b.data.length, sampleRate: b.rate, numberOfChannels: 1 })
+      b.ab.copyToChannel(b.data, 0)
+    }
+    return b
+  },
+  // Source's SNDLVL_TO_DIST_MULT and distance gain (snd_refdb 60, snd_refdist 36 inches)
+  distGain(level) {
+    if (!level) return 1
+    const mult = Math.pow(10, (60 - level) / 20) / 36
+    const rel = this.dist * mult
+    return Math.min(1, rel > 0.1 ? 1 / rel : 10)
+  },
+  cmd(op, id, a, b) {
+    let p = this.patches.get(id)
+    if (op === 'create') { this.patches.set(id, { name: a, level: 75, vol: 1, pitch: 100, node: null }); return }
+    if (!p) return
+    const ctx = this.ctx
+    const tnow = ctx ? ctx.currentTime : 0
+    const vol = (v) => Math.max(0, Math.min(1, v))
+    const pitch = (x) => Math.max(1, Math.min(255, Math.floor(x))) / 100
+    switch (op) {
+      case 'level': p.level = a; break
+      case 'play': {
+        this.stopPatch(p)
+        p.vol = vol(a); p.pitch = b
+        if (!ctx) break
+        const buf = this.ab(p.name)
+        if (!buf) break
+        const src = ctx.createBufferSource()
+        src.buffer = buf.ab
+        if (buf.loop >= 0) { src.loop = true; src.loopStart = buf.loop / buf.rate; src.loopEnd = buf.data.length / buf.rate }
+        src.playbackRate.value = pitch(b)
+        const g = ctx.createGain(); g.gain.value = p.vol
+        const d = ctx.createGain(); d.gain.value = this.distGain(p.level)
+        const pn = ctx.createStereoPanner ? ctx.createStereoPanner() : null
+        src.connect(g); g.connect(d)
+        if (pn) { pn.pan.value = this.pan; d.connect(pn); pn.connect(this.master) } else d.connect(this.master)
+        src.start()
+        p.node = { src, g, d, pn }
+        src.onended = () => { if (p.node && p.node.src === src) p.node = null }
+        break
+      }
+      case 'vol':
+        p.vol = vol(a)
+        if (p.node) {
+          p.node.g.gain.cancelScheduledValues(tnow)
+          if (b > 0) { p.node.g.gain.setValueAtTime(p.node.g.gain.value, tnow); p.node.g.gain.linearRampToValueAtTime(p.vol, tnow + b) }
+          else p.node.g.gain.setValueAtTime(p.vol, tnow)
+        }
+        break
+      case 'pitch':
+        p.pitch = a
+        if (p.node) p.node.src.playbackRate.setValueAtTime(pitch(a), tnow)
+        break
+      case 'stop': this.stopPatch(p); break
+      case 'fade':
+        if (p.node) {
+          const n = p.node
+          n.g.gain.cancelScheduledValues(tnow)
+          n.g.gain.setValueAtTime(n.g.gain.value, tnow)
+          n.g.gain.linearRampToValueAtTime(0, tnow + Math.max(0.01, a))
+          try { n.src.stop(tnow + Math.max(0.01, a) + 0.02) } catch (e) {}
+        }
+        break
+    }
+  },
+  stopPatch(p) { if (p.node) { try { p.node.src.stop() } catch (e) {} p.node.src.disconnect(); p.node = null } },
+  // once per frame, like Source's spatialisation: distance gain and pan for every playing patch
+  spatial(dist, pan) {
+    this.dist = dist; this.pan = pan
+    if (!this.ctx) return
+    const tnow = this.ctx.currentTime
+    for (const p of this.patches.values()) {
+      if (!p.node) continue
+      p.node.d.gain.setValueAtTime(this.distGain(p.level), tnow)
+      if (p.node.pn) p.node.pn.pan.setValueAtTime(pan, tnow)
+    }
+  },
+  meter() {
+    if (!this.analyser) return null
+    this.analyser.getFloatTimeDomainData(this.tbuf)
+    let pk = 0
+    for (let i = 0; i < this.tbuf.length; i++) { const v = Math.abs(this.tbuf[i]); if (v > pk) pk = v }
+    if (pk >= 1) this.clips++
+    this.peak = Math.max(pk, this.peak * 0.97)
+    return pk
+  },
+}
+
+/* ------------------------------------------------------------------ host (worker, or this page if workers are blocked) */
+let send = null, ready = false, st = null, menu = null, scripts = null
+const pending = new Map()
+let reqId = 0
+function rpc(msg) { return new Promise((res) => { const id = ++reqId; pending.set(id, res); send({ ...msg, reqId: id }) }) }
+
+function onHost(m) {
+  switch (m.type) {
+    case 'gen': A.addBuffer(m.name, m.rate, m.loop, m.data); break
+    case 'frame':
+      for (const c of m.cmds) A.cmd(c[0], c[1], c[2], c[3])
+      A.spatial(m.dist, m.pan)
+      st = m.st
+      break
+    case 'log': log(m.text); break
+    case 'error': log('ERROR ' + m.text); setStatus('err', 'Lua error: ' + m.text, null); break
+    case 'ready': ready = true; menu = m.menu; scripts = m.scripts; buildMenu(); break
+    case 'resolved': { const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m.data) } break }
+    case 'presetProfile': { const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m.data) } break }
+  }
+}
+
+function luaFiles() {
+  return [...document.querySelectorAll('script[type="text/x-lua"]')].map((s) => ({ name: s.dataset.name, src: s.textContent }))
+}
+function wasmBytes() {
+  const b64 = $('wasm-b64').textContent.trim()
+  const bin = atob(b64)
+  const u = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i)
+  return u.buffer
+}
+function startOnPage(reason) {
+  log('Running the Lua VM on the page (' + reason + '). Generation is slower and the page may stutter while it works.')
+  const host = AudioHost((msg) => onHost(msg), window.wasmoon)
+  send = (msg) => host.onMessage(msg)
+  send({ type: 'cv', name: 'audio_engine_genbudget', value: 8 })
+  host.onMessage({ type: 'init', files: luaFiles(), wasm: wasmBytes() })
+}
+function boot() {
+  let worker = null
+  try {
+    const src = $('wasmoon-src').textContent + '\n' + $('host-src').textContent +
+      '\nconst __h = AudioHost((m, tr) => self.postMessage(m, tr || []), self.wasmoon); self.onmessage = (e) => __h.onMessage(e.data);'
+    worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })))
+  } catch (e) { return startOnPage('workers are blocked here') }
+  let alive = false
+  worker.onmessage = (e) => { alive = true; onHost(e.data) }
+  worker.onerror = (e) => { if (!alive) { worker.terminate(); startOnPage('the background thread failed to start') } else log('Worker error: ' + e.message) }
+  send = (msg, tr) => worker.postMessage(msg, tr || [])
+  send({ type: 'cv', name: 'audio_engine_genbudget', value: 12 })
+  const wasm = wasmBytes()
+  send({ type: 'init', files: luaFiles(), wasm }, [wasm])
+  setTimeout(() => { if (!alive) { worker.terminate(); startOnPage('the background thread did not answer') } }, 8000)
+}
+
+/* ------------------------------------------------------------------ status */
+function setStatus(kind, text, prog) {
+  $('lamp').className = 'lamp ' + kind
+  $('statusTxt').textContent = text
+  $('barWrap').hidden = prog == null
+  if (prog != null) $('bar').style.width = Math.round(prog * 100) + '%'
+}
+
+/* ------------------------------------------------------------------ input */
+const keys = { f: false, b: false, h: false }
+function setKey(k, v) {
+  if (keys[k] === v) return
+  keys[k] = v
+  A.ensure()
+  document.querySelectorAll('.pedal[data-key="' + k + '"]').forEach((el) => el.classList.toggle('on', v))
+  if (send) send({ type: 'keys', keys: { ...keys } })
+}
+const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', Space: 'h' }
+function typing(e) { const t = e.target; return t && (t.tagName === 'INPUT' && t.type !== 'range' && t.type !== 'checkbox' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA') }
+window.addEventListener('keydown', (e) => {
+  if (typing(e)) return
+  const k = KEYMAP[e.code]
+  if (k) { e.preventDefault(); setKey(k, true) }
+  else if (e.code === 'KeyI' && !e.repeat) toggleEngine()
+})
+window.addEventListener('keyup', (e) => { if (typing(e)) return; const k = KEYMAP[e.code]; if (k) { e.preventDefault(); setKey(k, false) } })
+window.addEventListener('blur', () => { setKey('f', false); setKey('b', false); setKey('h', false) })
+document.querySelectorAll('.pedal[data-key]').forEach((el) => {
+  const k = el.dataset.key
+  el.addEventListener('pointerdown', (e) => { e.preventDefault(); el.setPointerCapture(e.pointerId); setKey(k, true) })
+  const up = () => setKey(k, false)
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up); el.addEventListener('lostpointercapture', up)
+  el.addEventListener('keydown', (e) => { if (e.key === 'Enter') setKey(k, true) })
+  el.addEventListener('keyup', (e) => { if (e.key === 'Enter') setKey(k, false) })
+})
+let engineOn = false
+function toggleEngine() {
+  if (!st || !st[9]) return
+  A.ensure()
+  engineOn = !engineOn
+  send({ type: 'engine', on: engineOn, emotion: $('emo').checked })
+}
+$('ign').addEventListener('click', toggleEngine)
+function seg(id, fn) {
+  const el = $(id)
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return
+    el.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'))
+    b.blur(); A.ensure(); fn(b.dataset.v)
+  })
+}
+seg('modeSeg', (v) => send && send({ type: 'mode', mode: v }))
+let scriptId = 'addon'
+seg('scriptSeg', (v) => { scriptId = v; send && send({ type: 'script', script: v }); updatePerfHint(); refreshStats() })
+
+/* ------------------------------------------------------------------ small controls */
+function slider(parent, id, text, min, max, step, value, onChange, fmt) {
+  const w = document.createElement('div')
+  w.className = 'sl'
+  w.innerHTML = `<label for="${id}"></label><output for="${id}"></output><input type="range" id="${id}" min="${min}" max="${max}" step="${step}">`
+  w.querySelector('label').textContent = text
+  const inp = w.querySelector('input'), out = w.querySelector('output')
+  const show = () => {
+    const v = parseFloat(inp.value)
+    out.textContent = fmt ? fmt(v) : String(v)
+    inp.style.setProperty('--p', ((v - min) / (max - min) * 100) + '%')
+  }
+  inp.value = value
+  show()
+  inp.addEventListener('input', () => { show(); onChange(parseFloat(inp.value)) })
+  parent.appendChild(w)
+  return inp
+}
+function check(parent, id, text, value, onChange) {
+  const l = document.createElement('label')
+  l.className = 'check'
+  l.innerHTML = `<input type="checkbox" id="${id}"><span></span>`
+  l.querySelector('span').textContent = text
+  const c = l.querySelector('input')
+  c.checked = !!value
+  c.addEventListener('change', () => onChange(c.checked))
+  parent.appendChild(l)
+  return c
+}
+
+// client convars
+const cs = $('clientSliders')
+slider(cs, 'cvVol', 'Engine volume', 0, 2, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_volume', value: v }), (v) => Math.round(v * 100) + '%')
+slider(cs, 'cvRoad', 'Tyre noise', 0, 2, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_roadnoise', value: v }), (v) => v <= 0 ? 'Off' : Math.round(v * 100) + '%')
+slider(cs, 'cvWind', 'Wind noise', 0, 2, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_windnoise', value: v }), (v) => v <= 0 ? 'Off' : Math.round(v * 100) + '%')
+slider(cs, 'cvDop', 'Doppler', 0, 1, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_doppler', value: v }), (v) => v <= 0 ? 'Off' : v >= 1 ? 'Real' : Math.round(v * 100) + '%')
+slider(cs, 'master', 'Your speakers', 0, 1, 0.01, 1, (v) => { A.masterVol = v; if (A.master) A.master.gain.value = v }, (v) => Math.round(v * 100) + '%')
+$('sr').addEventListener('change', () => {
+  if (!send) return
+  // the addon regenerates every engine when this changes (cvars.AddChangeCallback)
+  send({ type: 'cv', name: 'audio_engine_samplerate', value: $('sr').value })
+})
+
+/* ------------------------------------------------------------------ tuning menu (cl_menu.lua) */
+let prof = null, stats = {}, lastResolved = null
+const fmt2 = (x) => (+x).toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+const thousands = (n) => Math.round(n).toLocaleString('en-US')
+const ord = (g) => g === 1 ? '1st' : g === 2 ? '2nd' : g === 3 ? '3rd' : g + 'th'
+const toneName = (t) => t < 0.3 ? 'Stock' : t < 0.7 ? 'Sport' : 'Straight pipe'
+function encode(p) {
+  return [p.preset, p.layout, fmt2(p.pitch), fmt2(p.tone), fmt2(p.volume), String(Math.round(p.idle)), String(Math.round(p.redline)),
+    fmt2(p.realism), p.turbo ? '1' : '0', p.gears.map(fmt2).join(','), fmt2(p.final), String(p.fit),
+    fmt2(p.accel), String(Math.round(p.vmax)), fmt2(p.pops), p.bov ? '1' : '0', fmt2(p.gurgle), fmt2(p.popVol), fmt2(p.popTone),
+    fmt2(p.turboVol ?? 1), fmt2(p.bovVol ?? 1)].join('|')
+}
+// E.CarTopSpeed with "auto": the script's MaxSpeed in km/h, to the nearest 5
+function stockTop() { const v = scripts ? scripts[scriptId].vmax : 250; return Math.min(400, Math.max(80, Math.floor(v / 5 + 0.5) * 5)) }
+function updatePerfHint() {
+  if (!scripts) return
+  const s = scripts[scriptId]
+  $('perfHint').textContent = `Script: ${s.hp} hp, top speed ${stockTop()} km/h (${s.name}).`
+}
+function copyProf(p) { const o = { ...p }; o.gears = [...p.gears]; if (o.bov == null) o.bov = false; return o }
+
+function buildMenu() {
+  prof = copyProf(menu.current)
+  const sel = $('preset')
+  sel.innerHTML = ''
+  for (const p of menu.presets) sel.add(new Option(p.name, p.id))
+  sel.add(new Option('Custom engine', 'custom'))
+  sel.onchange = async () => {
+    if (sel.value === 'custom') return
+    const keep = { accel: prof.accel, vmax: prof.vmax }
+    prof = copyProf(await rpc({ type: 'preset', preset: sel.value }))
+    prof.accel = keep.accel; prof.vmax = keep.vmax
+    rebuild()
+  }
+  $('apply').onclick = () => {
+    A.ensure()
+    send({ type: 'apply', profile: encode(prof), accel: prof.accel, vmax: prof.vmax })
+    $('applyNote').innerHTML = '<span class="applied">Applied.</span> ' + (lastResolved && !lastResolved.built ? 'Generating the new engine; the old sound keeps playing until it is ready.' : 'This engine was already generated, so it switches straight away.')
+  }
+  $('stock').onclick = async () => {
+    send({ type: 'apply', profile: '', accel: 1, vmax: 0 })
+    prof = copyProf(await rpc({ type: 'preset', preset: menu.car.preset }))
+    rebuild()
+    $('applyNote').innerHTML = '<span class="applied">Back to stock.</span>'
+  }
+  updatePerfHint()
+  rebuild()
+}
+
+function changed() { prof.preset = 'custom'; refreshStats() }
+
+let statT = null
+function refreshStats() {
+  if (!prof) return
+  clearTimeout(statT)
+  statT = setTimeout(async () => {
+    const r = await rpc({ type: 'resolve', profile: encode(prof) })
+    lastResolved = r
+    const cyl = menu.cyl[prof.layout] || 4
+    const fIdle = prof.idle / 60 * cyl / 2 * prof.pitch
+    const fRed = prof.redline / 60 * cyl / 2 * prof.pitch
+    const what = prof.layout === 'electric' ? `Electric motor · up to ${thousands(prof.redline)} rpm.` : (prof.layout === 'rotary2' || prof.layout === 'rotary3') ? `${prof.layout === 'rotary2' ? 2 : 3} rotors · fires ${Math.floor(fIdle)} Hz at idle, ${Math.floor(fRed)} Hz at redline.` : `${cyl} cylinders · fires ${Math.floor(fIdle)} Hz at idle, ${Math.floor(fRed)} Hz at redline.`
+    if (stats.engine) stats.engine.textContent = `${what} ${r.bands * 2 + 6} loops to generate (~${(0.13 * r.bands + 0.4).toFixed(1)} s of CPU per player in game).` + (r.built ? ' Already generated.' : '')
+    if (stats.gears) {
+      const K = 60 / (2 * Math.PI * menu.car.wheelRadius)
+      stats.gears.textContent = 'Top speed per gear (km/h): ' + prof.gears.map((g, i) => `${ord(i + 1)} ${Math.floor(prof.redline / (K * g * r.final) * 3.6)}`).join(' · ')
+    }
+    if (stats.final) stats.final.textContent = prof.fit > 0 ? `Final drive ${r.final.toFixed(2)} (fitted)` : 'Final drive'
+    const p = menu.presets.find((x) => x.id === prof.preset)
+    $('preset').value = p ? p.id : 'custom'
+  }, 40)
+}
+
+function rebuild() {
+  const S = $('cSound'), R = $('cRpm'), G = $('cGear')
+  S.innerHTML = ''; R.innerHTML = ''; G.innerHTML = ''; stats = {}
+  // Sound
+  const lw = document.createElement('div')
+  lw.innerHTML = '<div class="field-label">Engine layout</div>'
+  const lay = document.createElement('select'); lay.id = 'layout'
+  for (const o of menu.layouts) lay.add(new Option(o.name, o.id))
+  lay.value = prof.layout
+  lay.onchange = () => { prof.layout = lay.value; changed(); rebuild() }
+  lw.appendChild(lay); S.appendChild(lw)
+  slider(S, 'pitch', 'Pitch', 0.5, 2, 0.01, prof.pitch, (v) => { prof.pitch = v; changed() }, (v) => '×' + v.toFixed(2))
+  slider(S, 'tone', 'Exhaust tone', 0, 1, 0.01, prof.tone, (v) => { prof.tone = v; changed() }, toneName)
+  slider(S, 'volume', 'Volume', 0, 1.5, 0.01, prof.volume, (v) => { prof.volume = v; changed() }, (v) => Math.floor(v * 100 + 0.5) + '%')
+  slider(S, 'realism', 'Realism', 0, 1, 0.1, prof.realism, (v) => { prof.realism = v; changed() }, (v) => v === 0 ? 'Rev Bench' : v < 1 ? Math.round(v * 100) + '%' : 'Full')
+  slider(S, 'gurgle', 'Gurgle (off-throttle burble)', 0, 1, 0.01, prof.gurgle, (v) => { prof.gurgle = v; changed() }, (v) => v <= 0 ? 'Off' : v < 0.3 ? 'Light' : v < 0.65 ? 'Burbly' : 'Heavy')
+  slider(S, 'pops', 'Pops & bangs (how often)', 0, 1, 0.01, prof.pops, (v) => { prof.pops = v; changed() }, (v) => v <= 0 ? 'Off' : v < 0.25 ? 'Rare' : v < 0.5 ? 'Occasional' : v < 0.8 ? 'Frequent' : 'Constant')
+  slider(S, 'popVol', 'Pops & bangs volume', 0, 2, 0.01, prof.popVol, (v) => { prof.popVol = v; changed() }, (v) => Math.floor(v * 100 + 0.5) + '%')
+  slider(S, 'popTone', 'Pops & bangs tone', 0, 1, 0.01, prof.popTone, (v) => { prof.popTone = v; changed() }, (v) => v < 0.25 ? 'Muffled' : v < 0.6 ? 'Sport' : v < 0.85 ? 'Loud pipe' : 'Straight pipe')
+  check(S, 'turbo', 'Turbocharged (whistle)', prof.turbo, (v) => { prof.turbo = v; changed(); rebuild() })
+  if (prof.turbo) {
+    const pct = (v) => Math.floor(v * 100 + 0.5) + '%'
+    slider(S, 'turboVol', 'Turbo whistle volume', 0, 2, 0.01, prof.turboVol ?? 1, (v) => { prof.turboVol = v; changed() }, pct)
+    check(S, 'bov', 'Blow-off valve (pssh when you lift)', prof.bov, (v) => { prof.bov = v; changed(); rebuild() })
+    if (prof.bov) slider(S, 'bovVol', 'Blow-off valve volume', 0, 2, 0.01, prof.bovVol ?? 1, (v) => { prof.bovVol = v; changed() }, pct)
+  }
+
+  // RPM & performance
+  slider(R, 'idle', 'Idle', 500, 1500, 25, prof.idle, (v) => { prof.idle = Math.floor(v / 25 + 0.5) * 25; changed() }, (v) => thousands(Math.floor(v / 25 + 0.5) * 25))
+  slider(R, 'redline', 'Redline', 3500, prof.layout === 'electric' ? 16000 : 12000, 100, prof.redline, (v) => { prof.redline = Math.floor(v / 100 + 0.5) * 100; changed() }, (v) => thousands(Math.floor(v / 100 + 0.5) * 100))
+  slider(R, 'accel', 'Acceleration', 0.5, 2.5, 0.05, prof.accel, (v) => { prof.accel = Math.floor(v * 20 + 0.5) / 20; changed() }, (v) => '×' + (Math.floor(v * 20 + 0.5) / 20).toFixed(2))
+  const top = stockTop()
+  slider(R, 'vmax', 'Top speed', 80, 450, 5, prof.vmax > 0 ? prof.vmax : top, (v) => {
+    v = Math.floor(v / 5 + 0.5) * 5
+    prof.vmax = v === stockTop() ? 0 : v
+    changed()
+  }, (v) => { v = Math.floor(v / 5 + 0.5) * 5; return v === stockTop() ? v + ' km/h (stock)' : v + ' km/h' })
+  stats.engine = document.createElement('div'); stats.engine.className = 'stat'; R.appendChild(stats.engine)
+  const note = document.createElement('div'); note.className = 'stat'
+  note.textContent = "Acceleration and top speed change the car's real physics; the revs, gears and sound follow."
+  R.appendChild(note)
+
+  // Gear ratios
+  const topRow = document.createElement('div'); topRow.className = 'inline'
+  const gp = document.createElement('select'); gp.id = 'gearPreset'; gp.setAttribute('aria-label', 'Gearbox preset')
+  gp.add(new Option('Gearbox preset…', ''))
+  for (const g of menu.gearPresets) gp.add(new Option(g.name, g.id))
+  gp.onchange = () => {
+    const g = menu.gearPresets.find((x) => x.id === gp.value); if (!g) return
+    prof.gears = [...g.gears]; prof.final = g.final; prof.preset = 'custom'; rebuild()
+  }
+  const ng = document.createElement('input'); ng.type = 'number'; ng.className = 'num'; ng.id = 'nGears'; ng.min = 1; ng.max = 8; ng.value = prof.gears.length
+  ng.setAttribute('aria-label', 'Number of gears')
+  ng.onchange = () => {
+    const v = Math.max(1, Math.min(8, Math.floor(+ng.value || 6)))
+    if (v === prof.gears.length) return
+    while (prof.gears.length < v) prof.gears.push(Math.floor(prof.gears[prof.gears.length - 1] * 84 + 0.5) / 100)
+    while (prof.gears.length > v) prof.gears.pop()
+    prof.preset = 'custom'; rebuild()
+  }
+  topRow.append(gp, ng); G.appendChild(topRow)
+  const grid = document.createElement('div'); grid.className = 'gear-grid'
+  prof.gears.forEach((r, i) => {
+    const c = document.createElement('label'); c.className = 'g'
+    c.innerHTML = `<span>${ord(i + 1)}</span><input class="num" id="g${i}" inputmode="decimal">`
+    const te = c.querySelector('input'); te.value = r.toFixed(2)
+    te.oninput = () => { const n = parseFloat(te.value); if (n >= 0.3 && n <= 8) { prof.gears[i] = n; changed() } }
+    grid.appendChild(c)
+  })
+  G.appendChild(grid)
+  const fr = document.createElement('div'); fr.className = 'inline'
+  stats.final = document.createElement('label'); stats.final.className = 'stat'; stats.final.htmlFor = 'final'; stats.final.textContent = 'Final drive'
+  const fin = document.createElement('input'); fin.className = 'num'; fin.id = 'final'; fin.inputMode = 'decimal'; fin.value = (+prof.final).toFixed(2); fin.disabled = prof.fit !== 0
+  fin.oninput = () => { const n = parseFloat(fin.value); if (n >= 2 && n <= 6) { prof.final = n; changed() } }
+  fr.append(stats.final, fin); G.appendChild(fr)
+  check(G, 'fit', 'Fit gearing to the top speed (uses every gear)', prof.fit > 0, (v) => { prof.fit = v ? 1 : 0; changed(); rebuild() })
+  stats.gears = document.createElement('div'); stats.gears.className = 'stat'; G.appendChild(stats.gears)
+  refreshStats()
+}
+
+/* ------------------------------------------------------------------ HUD (cl_hud.lua) */
+const C = { panel: 'rgba(23,27,33,0.92)', face: '#12151a', line: '#2a3039', fg: '#e8e3d6', muted: '#8d939c', amber: '#ffa53d', glow: 'rgba(255,165,61,0.2)', red: '#ff4b3a', green: '#5fd38a' }
+const LED_AT = [0.74, 0.81, 0.87, 0.92, 0.96], LED_COL = [C.green, C.green, C.amber, C.amber, C.red]
+const cv = $('hud'), g2 = cv.getContext('2d')
+let disp = 0, blink = 0, brk = 0, lastT = performance.now()
+function rr(x, y, w, h, r, fill) { g2.beginPath(); g2.roundRect ? g2.roundRect(x, y, w, h, r) : g2.rect(x, y, w, h); g2.fillStyle = fill; g2.fill() }
+function box(x, y, w, h, s) { rr(x - 1, y - 1, w + 2, h + 2, 10 * s, C.line); rr(x, y, w, h, 10 * s, C.face) }
+function txt(t, font, x, y, col, ax, ay) { g2.font = font; g2.fillStyle = col; g2.textAlign = ax || 'left'; g2.textBaseline = ay || 'top'; g2.fillText(t, x, y) }
+function line(x1, y1, x2, y2, w, col) { g2.beginPath(); g2.moveTo(x1, y1); g2.lineTo(x2, y2); g2.lineWidth = w; g2.strokeStyle = col; g2.lineCap = 'butt'; g2.stroke() }
+function drawTach(cx, cy, R, s, rpm, redline) {
+  const stepMajor = (redline + 500 > 12000) ? 2000 : 1000
+  const maxR = Math.ceil((redline + 500) / stepMajor) * stepMajor
+  const a0 = Math.PI * 0.75, sw = Math.PI * 1.5
+  const ang = (r) => a0 + sw * Math.max(0, Math.min(maxR, r)) / maxR
+  const k = R / 194
+  g2.beginPath(); g2.arc(cx, cy, R + 2 * k, 0, Math.PI * 2); g2.fillStyle = C.line; g2.fill()
+  g2.beginPath(); g2.arc(cx, cy, R, 0, Math.PI * 2); g2.fillStyle = C.face; g2.fill()
+  g2.beginPath(); g2.arc(cx, cy, R - 14 * k, ang(redline), ang(maxR)); g2.lineWidth = 10 * k; g2.strokeStyle = C.red; g2.stroke()
+  const minor = stepMajor / 4
+  for (let r = 0; r <= maxR; r += minor) {
+    const a = ang(r), major = r % stepMajor === 0, half = r % (stepMajor / 2) === 0
+    const len = (major ? 18 : half ? 11 : 6) * k
+    const c = Math.cos(a), sn = Math.sin(a)
+    const col = r >= redline ? C.red : (major ? C.fg : C.muted)
+    line(cx + c * (R - 8 * k), cy + sn * (R - 8 * k), cx + c * (R - 8 * k - len), cy + sn * (R - 8 * k - len), (major ? 3 : 1.5) * k, col)
+    if (major) txt(String(r / 1000), `700 ${Math.round(20 * s)}px ${DISPLAY}`, cx + c * (R - 44 * k), cy + sn * (R - 44 * k), r >= redline ? C.red : C.fg, 'center', 'middle')
+  }
+  txt('x1000 r/min', `600 ${Math.round(13 * s)}px Barlow, sans-serif`, cx, cy + R * 0.34, C.muted, 'center', 'middle')
+  txt(thousands(rpm), `600 ${Math.round(17 * s)}px "IBM Plex Mono", monospace`, cx, cy + R * 0.52, C.fg, 'center', 'middle')
+  const a = ang(rpm), c = Math.cos(a), sn = Math.sin(a)
+  const bx = cx - c * 16 * k, by = cy - sn * 16 * k, tx = cx + c * (R - 22 * k), ty = cy + sn * (R - 22 * k)
+  line(bx, by, tx, ty, 12 * k, C.glow)
+  line(bx, by, tx, ty, 4.5 * k, C.amber)
+  g2.beginPath(); g2.arc(cx, cy, 11 * k, 0, Math.PI * 2); g2.fillStyle = C.line; g2.fill()
+  g2.beginPath(); g2.arc(cx, cy, 4 * k, 0, Math.PI * 2); g2.fillStyle = C.amber; g2.fill()
+}
+const DISPLAY = '"Barlow Condensed", "Arial Narrow", sans-serif'
+function drawHud() {
+  const tn = performance.now(), dt = Math.min(0.1, (tn - lastT) / 1000); lastT = tn
+  const s = cv.width / 534
+  const W = cv.width, H = cv.height
+  g2.clearRect(0, 0, W, H)
+  const rpm = st ? st[0] : 0, gearN = st ? st[1] : 0, on = st ? st[2] : 0, phase = st ? st[3] : '', thr = st ? st[4] : 0, v = st ? st[5] : 0
+  const limHold = st ? st[6] : 0, redline = st ? st[7] : 6000
+  disp += (rpm - disp) * Math.min(1, dt * 18)
+  blink += dt
+  const pad = 18 * s, R = 120 * s, ledH = 9 * s, colW = 236 * s
+  rr(0, 0, W, H, 14 * s, C.line); rr(1, 1, W - 2, H - 2, 14 * s, C.panel)
+  const frac = disp / redline, limiter = limHold > 0 || frac > 0.985
+  const ledW = 26 * s, ledGap = 10 * s, cx = pad + R, lx = cx - (5 * ledW + 4 * ledGap) / 2
+  for (let i = 0; i < 5; i++) {
+    const lit = limiter ? (blink % 0.14 < 0.07) : (frac >= LED_AT[i])
+    rr(lx + i * (ledW + ledGap), pad, ledW, ledH, 3 * s, lit ? LED_COL[i] : C.line)
+  }
+  const cy = pad + ledH + 12 * s + R
+  drawTach(cx, cy, R, s, disp, redline)
+  const rx = pad + 2 * R + 22 * s, ry = pad, gap = 10 * s, gearW = 92 * s, topH = 160 * s
+  box(rx, ry, gearW, topH, s)
+  txt('GEAR', `700 ${Math.round(13 * s)}px Barlow, sans-serif`, rx + 10 * s, ry + 8 * s, C.muted)
+  let gear = 'N'
+  if (!on) gear = '–'; else if (phase !== 'run') gear = 'N'; else if (gearN === -1) gear = 'R'; else if (gearN > 0) gear = String(gearN)
+  // ignition prompt, like the in-game HUD
+  const prompt = !st ? '' : !on ? 'Engine off · press I to start' : phase !== 'run' ? 'Starting…' : ''
+  $('prompt').textContent = prompt
+  $('prompt').classList.toggle('starting', !!on && phase !== 'run')
+  txt(gear, `800 ${Math.round(104 * s)}px ${DISPLAY}`, rx + gearW / 2, ry + topH / 2 + 10 * s, C.amber, 'center', 'middle')
+  const bx = rx + gearW + gap, bw = colW - gearW - gap, bh = (topH - gap) / 2
+  box(bx, ry, bw, bh, s)
+  txt('SPEED', `700 ${Math.round(13 * s)}px Barlow, sans-serif`, bx + 10 * s, ry + 8 * s, C.muted)
+  const spd = String(Math.round(Math.abs(v) * 3.6))
+  g2.font = `700 ${Math.round(44 * s)}px ${DISPLAY}`
+  const tw = g2.measureText(spd).width
+  txt(spd, g2.font, bx + 10 * s, ry + bh - 6 * s, C.fg, 'left', 'alphabetic')
+  txt('km/h', `500 ${Math.round(15 * s)}px Barlow, sans-serif`, bx + 14 * s + tw, ry + bh - 10 * s, C.muted, 'left', 'alphabetic')
+  const by2 = ry + bh + gap
+  box(bx, by2, bw, bh, s)
+  txt('ENGINE', `700 ${Math.round(13 * s)}px Barlow, sans-serif`, bx + 10 * s, by2 + 8 * s, C.muted)
+  const rt = thousands(disp)
+  g2.font = `700 ${Math.round(34 * s)}px ${DISPLAY}`
+  const rw = g2.measureText(rt).width
+  txt(rt, g2.font, bx + 10 * s, by2 + bh - 6 * s, frac >= 1 ? C.red : C.fg, 'left', 'alphabetic')
+  txt('rpm', `500 ${Math.round(15 * s)}px Barlow, sans-serif`, bx + 14 * s + rw, by2 + bh - 10 * s, C.muted, 'left', 'alphabetic')
+  const braking = (keys.b && v > 0.6) || (keys.f && v < -0.6) || keys.h
+  brk += Math.max(-dt * 8, Math.min(dt * 4, (braking ? 1 : 0) - brk))
+  const ty = ry + topH + gap, th = H - pad - ty
+  box(rx, ty, colW, th, s)
+  const barW = colW - 20 * s, barH = 8 * s
+  const tp = Math.round(thr * 100), bp = Math.round(brk * 100)
+  txt('THROTTLE ' + tp + '%', `700 ${Math.round(13 * s)}px Barlow, sans-serif`, rx + 10 * s, ty + 8 * s, C.muted)
+  rr(rx + 10 * s, ty + 26 * s, barW, barH, 4 * s, C.line)
+  if (tp > 0) rr(rx + 10 * s, ty + 26 * s, barW * thr, barH, 4 * s, C.amber)
+  txt('BRAKE ' + bp + '%', `700 ${Math.round(13 * s)}px Barlow, sans-serif`, rx + 10 * s, ty + 42 * s, C.muted)
+  rr(rx + 10 * s, ty + 60 * s, barW, barH, 4 * s, C.line)
+  if (bp > 0) rr(rx + 10 * s, ty + 60 * s, barW * brk, barH, 4 * s, C.red)
+}
+
+/* ------------------------------------------------------------------ main loop */
+function loop() {
+  drawHud()
+  if (st) {
+    const building = st[10], prog = st[11]
+    if (building) setStatus('busy', 'Generating ' + building + ' · ' + Math.round(prog * 100) + '%', prog)
+    else if (ready) setStatus('ok', (st[15] || 'Engine') + ' · ready', null)
+    const ign = $('ign')
+    ign.disabled = !st[9]
+    ign.classList.toggle('on', !!st[2])
+    ign.querySelector('.n').textContent = st[2] ? 'Engine off' : (st[9] ? 'Start engine' : 'Generating…')
+    engineOn = !!st[2]
+    $('mDop').textContent = '×' + (+st[12]).toFixed(3)
+  }
+  const pk = A.meter()
+  if (pk != null) {
+    const db = 20 * Math.log10(Math.max(A.peak, 1e-5))
+    $('mPeak').textContent = A.peak > 1e-4 ? (db > 0 ? '+' : '') + db.toFixed(1) + ' dB' : '–'
+    $('mPeak').classList.toggle('clip', A.peak >= 1)
+    $('mClip').textContent = String(A.clips)
+    $('mClip').classList.toggle('clip', A.clips > 0)
+  }
+  requestAnimationFrame(loop)
+}
+window.__audio = { A, get st() { return st } }
+requestAnimationFrame(loop)
+document.addEventListener('pointerdown', () => A.ensure(), { once: true })
+boot()
+})()
+</script>

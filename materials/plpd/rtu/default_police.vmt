@@ -1,0 +1,16 @@
+//POLICE
+"VertexlitGeneric"
+{
+	"$basetexture" "plpd/rtu/default_police"
+	"$bumpmap" "models/tdmcars/shared/skin_nm"
+	"$nodecal" "1"
+	$halflambert 0
+	"$phong" 			"1"
+	"$phongexponent" 		"15"
+	"$phongboost" 			"20"
+	"$phongfresnelranges"		"[2 1 1]"
+	$phongexponenttexture "models/tdmcars/shared/skin"
+	$phongalbedotint 1
+	$envmap "env_cubemap"
+	$envmaptint "[0.005 0.005 0.005]"
+}

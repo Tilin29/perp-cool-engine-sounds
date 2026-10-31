@@ -1,0 +1,129 @@
+--[[
+	Audio Engine - PERPHeads integration (shared)
+
+	PERP's cars are TDM Cars models driven by PERP's own vehicle scripts (scripts/vehicles/...).
+	Their "Vehicle_Sounds" states play the TDM engine recordings through soundscripts such as
+	"slsamg_idle", so with the procedural engine on top both would play. Until PERP's scripts get
+	empty engine states (see INTEGRATION.md), this mutes those soundscripts by name, on the server
+	and the clients, for every registered car: its base script, the tier copies PERP keeps next to
+	it (used/, upgrade_1/, upgrade_2/, spiked/) and its variants (<base>_cop, _taxi, _medic...).
+	A name that any other vehicle script uses too (the bus, fire trucks, tow trucks...) is left
+	alone, so those vehicles keep their sound. Crash and skid sounds are never touched.
+
+	audio_engine_mutestock 0 puts the original soundscripts back.
+
+	It also lists every PERP car in the spawn menu (Vehicles > PERP cars (Audio Engine)) with its
+	base script, for testing outside the PERP gamemode.
+]]
+
+local E = AUDIO_ENGINE
+
+local cvMute = CreateConVar("audio_engine_mutestock", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+	"1 = silence the TDM engine recordings of cars that use the procedural engine")
+
+local PACKS = { "tdmcars", "jarheads", "perp2" }
+local TIERS = { "", "used/", "upgrade_1/", "upgrade_2/", "spiked/" }
+
+-- variant scripts whose name doesn't start with their car's base script name
+E.PERP_SCRIPT_ALIASES = E.PERP_SCRIPT_ALIASES or {
+	["tdmcars/charger_cop"] = "tdmcars/chargersrt8",
+}
+
+-- soundscript names of a vehicle script's engine states, into set[lower] = original spelling
+local function stateSounds(path, set)
+	local txt = file.Read(path, "GAME")
+	if not txt then return end
+	for block in txt:gmatch('"[Ss][Tt][Aa][Tt][Ee]"%s*(%b{})') do
+		local snd = block:match('"[Ss][Oo][Uu][Nn][Dd]"%s*"([^"]*)"')
+		-- only soundscripts can be redefined; a raw path ("vehicles\...\x.wav") can't be
+		if snd and snd ~= "" and not snd:find("[%.\\/]") then set[snd:lower()] = snd end
+	end
+end
+
+local function collect()
+	local claimed = {}
+	for _, car in pairs(E.Cars) do
+		local pk, base = (car.script or ""):lower():match("^scripts/vehicles/([^/]+)/([^/]+)%.txt$")
+		if pk then claimed[pk .. "/" .. base] = { pk = pk, base = base } end
+	end
+	-- is this script one of a registered car's (its own name, or "<base>_something")?
+	local function ours(pk, name)
+		if E.PERP_SCRIPT_ALIASES[pk .. "/" .. name] or claimed[pk .. "/" .. name] then return true end
+		for _, c in pairs(claimed) do
+			if c.pk == pk and name:sub(1, #c.base + 1) == c.base .. "_" then return true end
+		end
+		return false
+	end
+
+	local mine, others = {}, {}
+	for _, pk in ipairs(PACKS) do
+		for _, tier in ipairs(TIERS) do
+			local dir = "scripts/vehicles/" .. pk .. "/" .. tier
+			for _, f in ipairs((file.Find(dir .. "*.txt", "GAME"))) do
+				local name = f:lower():gsub("%.txt$", "")
+				stateSounds(dir .. f, ours(pk, name) and mine or others)
+			end
+		end
+	end
+	-- registered cars whose script lives somewhere else (e.g. the example police car in scripts/vehicles/plpd/)
+	for _, car in pairs(E.Cars) do
+		if car.script then stateSounds(car.script, mine) end
+	end
+
+	local muted, kept = {}, 0
+	for low, name in pairs(mine) do
+		if others[low] then kept = kept + 1 else muted[low] = name end
+	end
+	return muted, kept
+end
+
+E.PERP_SAVED = E.PERP_SAVED or {}
+local NULL = "common/null.wav"
+
+function E.ApplyStockMute()
+	local muted, kept = collect()
+	E.PERP_MUTED = muted
+	local on = cvMute:GetBool()
+	local n = 0
+	for _, name in pairs(muted) do
+		local saved = E.PERP_SAVED[name]
+		if saved == nil then
+			local p = sound.GetProperties(name)
+			saved = (p and p.sound ~= NULL) and p or false
+			E.PERP_SAVED[name] = saved
+		end
+		if on then
+			sound.Add({ name = name, channel = CHAN_STATIC, volume = 1, level = 0, pitch = 100, sound = NULL })
+			n = n + 1
+		elseif saved then
+			sound.Add(saved)
+		end
+	end
+	if on then
+		MsgN(string.format("[Audio Engine] muted %d TDM engine sounds of PERP cars (%d shared with other vehicles kept)", n, kept))
+	end
+end
+
+-- TDM / PERP define their soundscripts in their own autorun files, which may load after this
+-- one: (re)apply once everything is loaded, and once more a little later
+hook.Add("InitPostEntity", "audio_engine_perp", function()
+	E.ApplyStockMute()
+	timer.Simple(3, E.ApplyStockMute)
+end)
+cvars.AddChangeCallback("audio_engine_mutestock", function() E.ApplyStockMute() end, "audio_engine_perp")
+if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then E.ApplyStockMute() end -- lua refresh
+
+-- spawn menu entries (sandbox and derived gamemodes; PERP's own dealer ignores them)
+for _, car in pairs(E.Cars) do
+	if car.perp and car.script then
+		list.Set("Vehicles", "perp_" .. car.carId, {
+			Name = car.name,
+			Class = "prop_vehicle_jeep",
+			Category = "PERP cars (Audio Engine)",
+			Author = "PERPHeads / TDM",
+			Information = car.name .. ": PERP base handling, procedural engine sound.",
+			Model = car.model,
+			KeyValues = { vehiclescript = car.script },
+		})
+	end
+end

@@ -1,0 +1,10 @@
+# npm packages for the baker (dev/baker: npm install)
+dev/baker/node_modules/
+dev/baker/bake_log.txt
+
+# generated engine sounds: rebuild with `cd dev/baker && node bake.js` (~5 min, ~275 MB)
+# lua/audio_engine/cl_baked.lua (the manifest) is committed
+sound/audio_engine/
+
+# browser test page build output
+dev/rev_bench.html
