@@ -39,8 +39,11 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   Fitted gearing respaces the box (`E.FitGearCount`): ~1 gear per `E.KMH_PER_GEAR` 40 km/h of top speed, enough that no step
   exceeds `E.GEAR_STEP_MAX` 2.3, at most the box's count; 1st reaches `E.FIRST_GEAR_MIN` 25 km/h / 28% of top speed: PERP's 163 cars
   share TDM's generic 5-speed, so only their top speed (30-145 mph) is per car. `CAR_GEARS[name]` overrides the count (Veyrons, Furai: 5 like their PERP scripts).
-  Gear end speeds are evenly spaced in speed^`E.GEAR_SPREAD` 1.5 (lowered if a step would pass the max): evenly spaced ratios
+  Gear end speeds are evenly spaced in speed^`E.GEAR_SPREAD` 2.2 (lowered if a step would pass the max): evenly spaced ratios
   flew through low gears and pulled forever in the last. HUD speed defaults to mph (`audio_engine_units`).
+  The top gear never reaches redline: at top speed it turns `E.TOP_GEAR_RPM` 0.82 (FitFinal), the gears are spaced up to
+  that gear's redline speed, and there's no lazy upshift into it: the car changes up near top speed and settles lower.
+  Cruise (`inp.cruise`): highest gear above `cruiseLand` 0.45, down only below `sagRpm`, no kickdown, steady `cruiseThr` 0.35.
   Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
   gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (whine only, near silent at low speed; electric bands keep
@@ -63,6 +66,11 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   - Engine off on entry; start key `audio_engine_startkey` (userinfo, default I) or `audio_engine_toggle`.
   - The server runs `DT.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
+- `sv_cruise.lua`: cruise control. Middle mouse on (speed rounded to 5 mph, min 10) / off, mouse wheel +-5 mph
+  (`StartCommand`: `cmd:GetMouseWheel()`). Holds W in the driver's command and trims horsepower with a PI controller
+  (`veh.audioCruisePow` in sv_handling's tick, applied in `ApplyPerformance`); lets go of W only 3 mph over (downhill).
+  Own W overrides at full power, S/Space/exit/engine off/stuck cancel. NW2 `audio_cruise` (mph) for HUD and cl_engine
+  (the local driver's keys are read locally, so the cruise W comes from the networked bits). `audio_engine_cruise`.
 - `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `veh.audioSpiked`.
   Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
   and reports any rotation as `veh.audioSlide`, so traction control cuts the power.

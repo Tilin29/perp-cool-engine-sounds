@@ -208,6 +208,14 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		draw.SimpleText(msg, "AudioHud_Num", x + W / 2, y - 10 * s, st.on and C.amber or C.fg, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
 	end
 
+	-- cruise control (sv_cruise.lua): the set speed, in the HUD's units
+	local cruise = veh:GetNW2Float("audio_cruise", 0)
+	if cruise > 0 and st.on and st.phase == "run" then
+		local mphU = cvUnits:GetString() == "mph"
+		local txt = mphU and string.format("CRUISE %d mph", cruise) or string.format("CRUISE %d km/h", math.floor(cruise * 1.609344 + 0.5))
+		draw.SimpleText(txt, "AudioHud_Num", x + W - 10 * s, y - 10 * s, C.green, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
+	end
+
 	-- shift lights
 	local frac = disp / cfg.redline
 	local limiter = st.limHold > 0 or frac > 0.985

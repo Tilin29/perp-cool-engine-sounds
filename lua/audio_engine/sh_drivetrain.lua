@@ -36,6 +36,11 @@ DT.SHIFT = {
 	cornerRpm = 0.65,
 	cornerLand = 0.88, -- ... to the lowest gear that stays under this
 	cornerHold = 0.6,
+	-- cruise control (sv_cruise.lua presses W on and off): the highest gear that keeps the revs
+	-- above cruiseLand, and down again only when they sag under sagRpm. Its presses are not
+	-- you flooring it: no kickdown (it kicked down and changed back up on every press)
+	cruiseLand = 0.45,
+	cruiseThr = 0.35,  -- the steady part throttle it sounds like while holding the speed
 }
 
 -- a car's own shift points, any it leaves out from DT.SHIFT
@@ -146,6 +151,7 @@ DT.GearRatio = gearRatio
 --[[
 	inp.fwd, inp.back, inp.hand : driver keys (W, S, Space)
 	inp.steer                   : A or D held (the gearbox holds its gear through corners)
+	inp.cruise                  : cruise control holds W (sv_cruise.lua): steady part throttle
 	inp.v                       : speed along the car's nose, m/s (negative when rolling back)
 ]]
 function DT.Step(st, cfg, dt, inp)
@@ -170,7 +176,8 @@ function DT.Step(st, cfg, dt, inp)
 	-- S while rolling forward is the brake
 	local braking = mode == "D" and inp.back and not inp.fwd and v > 0.6
 
-	st.thr = st.thr + clamp((pedal and 1 or 0) - st.thr, -dt * 7, dt * 5)
+	local want = pedal and (inp.cruise and (cfg.shift and DT.ShiftPoints(cfg.shift) or DT.SHIFT).cruiseThr or 1) or 0
+	st.thr = st.thr + clamp(want - st.thr, -dt * (inp.cruise and 1.5 or 7), dt * 5)
 	st.thrAvg = st.thrAvg + (st.thr - st.thrAvg) * min(1, dt * 2.5)
 
 	-- turbo boost: builds with load above ~1600 rpm with some lag, dumps through the
@@ -289,12 +296,19 @@ function DT.Step(st, cfg, dt, inp)
 					-- top speed) changes up early, so it still climbs into its last gear
 					local pull = clamp(st.accel / SH.pullAccel, 0, 1)
 					local upAt = red * (SH.lazyUpRpm + (SH.upRpm - SH.lazyUpRpm) * pull)
-					local lazy = not corner and st.gear < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
+					-- (not into the top gear: it changes up into that near the top speed, at upRpm
+					-- or once it stops gaining speed, then settles at lower revs)
+					local lazy = not corner and st.gear + 1 < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
+					if inp.cruise then
+						kick, cornerKick = rpm < red * SH.sagRpm, false
+						lazy = st.gear < n and rpmIn(st.gear + 1) > red * SH.cruiseLand
+					end
 					if st.gear < n and (wheelRpm > red * SH.upRpm or lazy or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then
 						shift(st.gear + 1, 1, 0.8)
 					elseif st.gear > 1 and (kick or cornerKick) then
-						-- the lowest gear that keeps the revs under kickLand (skips gears if needed)
-						local land = kick and SH.kickLand or SH.cornerLand
+						-- the lowest gear that keeps the revs under kickLand (skips gears if needed;
+						-- under cruise just one, back above cruiseLand)
+						local land = inp.cruise and SH.cruiseLand / 0.8 or kick and SH.kickLand or SH.cornerLand
 						local g = st.gear
 						while g > 1 and rpmIn(g - 1) < red * land do g = g - 1 end
 						if g < st.gear then shift(g, -1, 0.8) end
@@ -308,7 +322,7 @@ function DT.Step(st, cfg, dt, inp)
 				else
 					if st.gear < n and wheelRpm > red * 0.97 then
 						shift(st.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
-					elseif st.gear > 1 and rpm < red * (corner and SH.cornerRpm or SH.lugRpm)
+					elseif st.gear > 1 and not inp.cruise and rpm < red * (corner and SH.cornerRpm or SH.lugRpm)
 						and rpmIn(st.gear - 1) < red * (corner and SH.cornerLand or 0.75) then
 						shift(st.gear - 1, -1, 0.6)                      -- don't let it lug (or drone through a corner)
 					end

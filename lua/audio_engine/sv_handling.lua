@@ -343,6 +343,19 @@ hook.Add("Tick", "audio_engine_traction", function()
 			else
 				want = 1
 			end
+			-- cruise control (sv_cruise.lua): W held, the power trimmed to hold the set speed
+			local cp
+			if veh.audioCruise and veh.audioCruiseThr and not veh.audioCruiseOwn then
+				local C = E.CRUISE
+				local err = veh.audioCruise - v * 2.23694
+				veh.audioCruiseI = math.Clamp((veh.audioCruiseI or C.startPow) + C.ki * err * dt, C.minPow, 1)
+				cp = math.Clamp(veh.audioCruiseI + C.kp * err, C.minPow, 1)
+			end
+			if math.abs((cp or 1) - (veh.audioCruisePowSent or 1)) >= T.step or (cp == nil and veh.audioCruisePowSent ~= nil) then
+				veh.audioCruisePowSent = cp
+				veh.audioParamsDirty = true
+			end
+			veh.audioCruisePow = cp
 			-- params are re-sent only on a real change (and always when it's back to full)
 			if math.abs(want - (veh.audioTCSent or 1)) >= T.step or (want == 1 and (veh.audioTCSent or 1) ~= 1) then
 				veh.audioTCSent = want

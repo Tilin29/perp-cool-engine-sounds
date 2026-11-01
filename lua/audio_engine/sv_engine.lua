@@ -44,8 +44,9 @@ function E.ApplyPerformance(veh, prof)
 	local accel = prof and prof.accel or 1
 	local vmax = prof and prof.vmax or 0
 	local p = table.Copy(base)
+	-- audioCruisePow: cruise control's power trim (sv_cruise.lua, sv_handling.lua)
 	-- audioTC: launch traction control's power trim; audioSteerLock: the lock at speed (sv_handling.lua)
-	p.engine.horsepower = base.engine.horsepower * accel * (veh.audioTC or 1)
+	p.engine.horsepower = base.engine.horsepower * accel * (veh.audioTC or 1) * (veh.audioCruisePow or 1)
 	if p.steering and p.steering.degreesFast and veh.audioSteerLock then
 		p.steering.degreesFast = base.steering.degreesFast * veh.audioSteerLock
 	end

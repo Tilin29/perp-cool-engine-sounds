@@ -18,6 +18,7 @@ if SERVER then
 	include(base .. "sv_handling.lua")
 	include(base .. "sv_engine.lua")
 	include(base .. "sv_stability.lua")
+	include(base .. "sv_cruise.lua")
 else
 	for _, f in ipairs(client) do include(base .. f) end
 end

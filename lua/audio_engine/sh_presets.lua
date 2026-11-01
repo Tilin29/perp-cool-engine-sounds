@@ -227,9 +227,10 @@ function E.MakeBands(idle, redline, step)
 end
 
 -- final drive so top gear reaches redline at the given top speed
-function E.FitFinal(gears, redline, wheelRadius, topKmh)
+function E.FitFinal(gears, redline, wheelRadius, topKmh, fit)
 	local K = 60 / (2 * pi * wheelRadius)
-	return redline * 0.97 / ((topKmh / 3.6) * K * gears[#gears])
+	-- (with fitted gearing it turns E.TOP_GEAR_RPM x redline there, see E.FitGearCount)
+	return redline * (fit and E.TOP_GEAR_RPM or 0.97) / ((topKmh / 3.6) * K * gears[#gears])
 end
 
 --[[
@@ -242,19 +243,27 @@ end
 	1st reaches FIRST_GEAR_SHARE of the top speed (at least FIRST_GEAR_MIN km/h). The gears
 	in between end at speeds evenly spaced in speed^GEAR_SPREAD: a car gains speed slower the
 	faster it goes, so evenly spaced ratios (spread 0) flew through the low gears and pulled
-	forever in the last one. Spread 2 would give every gear the same time at full power; 1.5
-	leaves the top gears a little longer, like a real box. If that makes a step bigger than
+	forever in the last one. Spread 2 would give every gear the same time at full power, but
+	drag slows the car further near its top speed (1.5 still pulled longest in the last gear),
+	so 2.2: each gear spans less speed than the one before. If that makes a step bigger than
 	GEAR_STEP_MAX (few gears over a wide span) the spread is lowered until it fits.
-	So the Veyron (135 mph, 5 by CAR_GEARS) ends its gears at about 61, 110, 150, 185 and
-	217 km/h, the M5 (81 mph) gets 3 and a 35 mph van 2. Taking the box's own ratios instead put
+	So the Veyron (135 mph, 5 by CAR_GEARS) ends its gears at redline at about 61, 134, 186, 228
+	and 265 km/h (217 km/h top speed in 5th at 82%), the M5 (81 mph) gets 3 and a 35 mph van 2. Taking the box's own ratios instead put
 	six gears into the M5's 81 mph, or cut a 5-speed down to 3 on a 155 mph car.
 ]]
 E.FIRST_GEAR_MIN, E.FIRST_GEAR_SHARE, E.KMH_PER_GEAR, E.GEAR_STEP_MAX = 25, 0.28, 40, 2.3
-E.GEAR_SPREAD = 1.5
+E.GEAR_SPREAD = 2.2
+--[[
+	The top gear never reaches redline: at the top speed it turns TOP_GEAR_RPM x redline (E.FitFinal),
+	so the gears are spaced up to the speed the top gear would reach at redline. The gear before it
+	then reaches the top speed near redline: the car changes up as it gets there and settles at
+	lower revs in the top gear, like a real car at its top speed or cruising on the motorway.
+]]
+E.TOP_GEAR_RPM = 0.82
 function E.FitGearCount(gears, topKmh, count)
 	if #gears < 2 then return gears end
 	local v1 = max(E.FIRST_GEAR_MIN, topKmh * E.FIRST_GEAR_SHARE)
-	local span = topKmh / v1
+	local span = topKmh / E.TOP_GEAR_RPM / v1
 	local bySteps = 1 + math.ceil(math.log(span) / math.log(E.GEAR_STEP_MAX))
 	local n = math.Clamp(count or max(floor(topKmh / E.KMH_PER_GEAR + 0.5), bySteps), 2, #gears)
 	-- the speed (as a share of 1st's) where gear i ends, for a spread p (p 0 = geometric)
@@ -324,7 +333,7 @@ function E.ResolveProfile(car, prof)
 	-- the speed the car will actually reach: the profile's top speed, else the car's own
 	cfg.topSpeed = prof.vmax > 0 and prof.vmax or (tonumber(car.topSpeed) or 250)
 	cfg.gears = prof.fit > 0 and E.FitGearCount(prof.gears, cfg.topSpeed, car.gearCount) or prof.gears
-	cfg.final = prof.fit > 0 and E.FitFinal(cfg.gears, prof.redline, car.wheelRadius, cfg.topSpeed) or prof.final
+	cfg.final = prof.fit > 0 and E.FitFinal(cfg.gears, prof.redline, car.wheelRadius, cfg.topSpeed, true) or prof.final
 	cfg.reverse = prof.gears[1] * 0.9
 	-- torque converter stall speed (an electric motor is direct drive)
 	cfg.stallRpm = cfg.electric and prof.idle or (prof.idle + 0.27 * prof.redline)

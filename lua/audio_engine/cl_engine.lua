@@ -179,9 +179,13 @@ local function readInputs(car)
 		-- the local driver: use their own keys for zero latency, once we know they register
 		local lf, lb, lh = ply:KeyDown(IN_FORWARD), ply:KeyDown(IN_BACK), ply:KeyDown(IN_JUMP)
 		if lf or lb or lh then car.localKeys = true end
-		if car.localKeys then return lf, lb, lh, ply:KeyDown(IN_MOVELEFT) ~= ply:KeyDown(IN_MOVERIGHT) end
+		-- (cruise control holds W on the server: that comes in with the networked keys)
+		if car.localKeys then
+			local cruise = f and not lf and ent:GetNW2Float("audio_cruise", 0) > 0
+			return lf or cruise, lb, lh, ply:KeyDown(IN_MOVELEFT) ~= ply:KeyDown(IN_MOVERIGHT), cruise
+		end
 	end
-	return f, b, h, s
+	return f, b, h, s, f and ent:GetNW2Float("audio_cruise", 0) > 0
 end
 
 -- the listener (whoever's ears the sound reaches): position and velocity, once per frame
@@ -520,8 +524,8 @@ local function updateCar(car, dt)
 	dopplerFactor(car, dt, mine)
 	car.prox = proximityGain(car, mine)
 
-	local f, b, h, s = readInputs(car)
-	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, steer = s, v = car.v })
+	local f, b, h, s, cr = readInputs(car)
+	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, steer = s, v = car.v, cruise = cr })
 
 	updateSound(car, dt)
 
