@@ -127,7 +127,7 @@ E.CAR_ENGINES = {
 	["Maserati Ghibli S"] = P("v6t", { redline = 6500 }),
 	["Maserati Quattroporte Sport GT S"] = P("v8s", { redline = 7200 }),
 	["Mazda Furai"] = P("r3"),
-	["Mazda MX-5 2007"] = P("i4", { redline = 7000, tone = 0.5 }),
+	["Mazda MX-5 2007"] = P("i4", { redline = 7000 }),
 	["Mazda RX-8"] = P("r2"),
 	["Mazda RX7"] = P("r2t"),
 	["Mazda Speed 3 2009"] = P("i4t"),
@@ -143,7 +143,7 @@ E.CAR_ENGINES = {
 	["Mercedes SL65 AMG"] = P("sl65"),
 	["Mercedes SLS AMG"] = P("v8s", { redline = 7200 }),
 	["Mini Clubman"] = P("i4"),
-	["Mini Cooper 1965"] = P("i4", { redline = 6000, tone = 0.5 }),
+	["Mini Cooper 1965"] = P("i4", { redline = 6000 }),
 	["Mini Cooper S 2011"] = P("i4t"),
 	["Mini Coupe"] = P("i4t"),
 	["Mitsubishi Colt Ralliart"] = P("i4t"),
@@ -367,6 +367,7 @@ E.EMOTION_SOUNDLEVEL = 92
 	  tone x ECONOMY.toneScale   (darker exhaust; part of the sound, so re-bake after changing)
 	  muffle                     (a stock silencer: lower cutoffs, more treble cut; also re-bake)
 	  gurgle = 0                 (no off-throttle burble; also part of the sound)
+	  (a preset with economyTuned was tuned as an economy car: its tone and gurgle are kept)
 	  volume, soundLevel         (quieter, and carries less far; runtime)
 ]]
 E.ECONOMY_SOUND = { toneScale = 0.5, muffle = 0.7, gurgle = 0, volume = 0.8, soundLevel = 80 }
@@ -418,8 +419,10 @@ function E.RegisterCarNamed(model, carName, extra)
 		local eco, preset = E.ECONOMY_SOUND, E.EnginePreset(e.preset)
 		local stock = {}
 		for k, v in pairs(e.stock or {}) do stock[k] = v end
-		stock.tone = (stock.tone or (preset and preset.tone) or 0.4) * eco.toneScale
-		stock.gurgle = eco.gurgle
+		if not (preset and preset.economyTuned) then
+			stock.tone = (stock.tone or (preset and preset.tone) or 0.4) * eco.toneScale
+			stock.gurgle = eco.gurgle
+		end
 		cfg.stock = stock
 		cfg.volume, cfg.soundLevel, cfg.muffle, cfg.economy = eco.volume, eco.soundLevel, eco.muffle, true
 	end

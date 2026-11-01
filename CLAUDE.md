@@ -113,6 +113,8 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   `dev/tone_studio.html` (self-contained, opens from disk; uses dev/baker's wasmoon). Renders any car with the real synth
   (same files as the baker), draggable exhaust resonances, firing-rhythm graph, A/B vs stock; exports changes as text + JSON
   to paste back. Per-car voice: `P(preset, stock, character)` in sh_carlist (cl_synth `Synth.CharacterFor`, part of the sound key).
+  Preset-scope voice: a preset's own `character` (used when the car has none; i4 has one). `economyTuned` presets were tuned on an
+  economy car, so economy cars keep their tone and gurgle (no x0.5, no gurgle 0).
 
 ## Gotchas
 - `sound.Generate` sounds can't be freed or overridden; names are `audeng_<serial>_<name>`. Volume caps at 1, pitch 0-255 and truncates to an integer.

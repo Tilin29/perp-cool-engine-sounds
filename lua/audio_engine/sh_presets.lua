@@ -82,7 +82,9 @@ E.ENGINE_PRESETS = {
 	{ id = "i6t",    name = "Inline-6 · turbo",                         layout = "i6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.4,  gurgle = 0.3,  popTone = 0.25, gearbox = "road" },
 	{ id = "i5t",    name = "Inline-5 · turbo",                         layout = "i5",      pitch = 1.00, tone = 0.60, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.7,  gurgle = 0.45, popTone = 0.35, gearbox = "close" },
 	-- four, three
-	{ id = "i4",     name = "Inline-4",                                 layout = "i4",      pitch = 1.00, tone = 0.40, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.1,  popTone = 0.2,  gearbox = "eco" },
+	-- i4: tuned in Tone Studio on an economy car (its own voice, and economy cars keep its tone and burble)
+	{ id = "i4",     name = "Inline-4",                                 layout = "i4",      pitch = 1.25, tone = 0.75, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
+	  character = { f1 = 130, f2 = 647, f3 = 193, w = 1.44, o1 = 0.3, o05 = 0.15 }, economyTuned = true },
 	{ id = "i4s",    name = "Inline-4 · high-revving (Type R, S2000)",  layout = "i4",      pitch = 1.05, tone = 0.65, idle = 900,  redline = 8800,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.15, popTone = 0.3,  gearbox = "close" },
 	{ id = "i4t",    name = "Inline-4 · turbo",                         layout = "i4",      pitch = 1.05, tone = 0.55, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.5,  gurgle = 0.3,  popTone = 0.3,  gearbox = "road" },
 	{ id = "i4h",    name = "Inline-4 hybrid (Prius)",                  layout = "i4",      pitch = 0.95, tone = 0.25, idle = 1000, redline = 5200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.0,  popTone = 0.1,  gearbox = "eco" },
@@ -339,6 +341,8 @@ function E.ResolveProfile(car, prof)
 	cfg.stallRpm = cfg.electric and prof.idle or (prof.idle + 0.27 * prof.redline)
 	local p = E.EnginePreset(prof.preset)
 	cfg.engineName = p and p.name or "Custom"
+	-- the exhaust voice: the car's own, else its preset's (sh_presets character), else the layout's
+	if type(car.character) ~= "table" and p and p.character then cfg.character = p.character end
 	-- everything that changes the generated sound; cars with the same key share sounds.
 	-- The turbo, blow-off valve, volumes and how often pops happen are not in it: they are
 	-- played on top at runtime, so changing them never generates a new engine.
@@ -347,9 +351,9 @@ function E.ResolveProfile(car, prof)
 	-- the car's silencer (economy cars); only in the key when set, so other keys stay as they were
 	if (car.muffle or 0) > 0 then key[#key + 1] = "m" .. fmt(car.muffle) end
 	-- the car's own exhaust voice (sh_carlist.lua character): likewise only when set
-	if type(car.character) == "table" then
+	if type(cfg.character) == "table" then
 		local c = {}
-		for _, k in ipairs({ "f1", "f2", "f3", "w", "o1", "o05" }) do c[#c + 1] = car.character[k] and fmt(car.character[k]) or "" end
+		for _, k in ipairs({ "f1", "f2", "f3", "w", "o1", "o05" }) do c[#c + 1] = cfg.character[k] and fmt(cfg.character[k]) or "" end
 		key[#key + 1] = "c" .. table.concat(c, ",")
 	end
 	cfg.soundKey = table.concat(key, "_")

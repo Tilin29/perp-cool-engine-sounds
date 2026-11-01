@@ -55,7 +55,7 @@ function STUDIO.data()
 		cars[#cars + 1] = {
 			name = name, preset = car.preset, economy = car.economy or false, muffle = car.muffle or 0,
 			stock = pick(prof, SOUND_FIELDS),
-			character = car.character and pick(car.character, CHAR_FIELDS) or {},
+			character = pick(car.character or (E.EnginePreset(car.preset) or {}).character or {}, CHAR_FIELDS),
 		}
 	end
 	table.sort(cars, function(a, b) return a.name < b.name end)
