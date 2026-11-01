@@ -46,8 +46,10 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   Cruise (`inp.cruise`): highest gear above `cruiseLand` 0.45, down only below `sagRpm`, no kickdown, steady `cruiseThr` 0.35.
   Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
-  gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (whine only, near silent at low speed; electric bands keep
-  natural levels, no per-band loudness matching). `RenderEVHumLoop`: the steady low-speed EV hum (env bank `evhum`), played by
+  gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (one faint whine: a tone of order chosen to reach
+  `EV_TOP_HZ` 450 Hz at redline, weak harmonics, a slight speed ripple so it isn't a pure sine, under a bearing/air hiss; regen whines softer off throttle; near silent at
+  low speed; bands 1.35x apart; electric bands keep natural levels, no per-band loudness matching, the top band's on loop is set
+  to `TARGET_EV_DB` -32 dB rms full band; cl_engine plays EVs and their hum at `E.EV_VOLUME` 0.1). `RenderEVHumLoop`: the steady low-speed EV hum (env bank `evhum`), played by
   cl_engine at a near-fixed pitch, fading out between 8% and 20% of redline. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`.
 - `cl_soundbank.lua`: builds a bank per soundKey in a coroutine (6 ms/frame budget). It holds:
   - one on/off-throttle loop pair per rpm band (bands ~1.26x apart), a limiter loop, start/stop one-shots, pops and bangs
@@ -94,6 +96,8 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
 ## dev/ (not needed in game)
 - `dev/baker/` (Node + wasmoon@1.16.0, `npm install` there): `node bake.js` renders all stock engines (~6 min on 5 workers) into
   `sound/audio_engine/` + `lua/audio_engine/cl_baked.lua`. Re-bake after changing cl_synth, cl_soundbank, sh_presets or the car list.
+  `node bake.js --electric` re-bakes only the electric motors + env bank (~15 s) and keeps every other entry and folder:
+  only for changes that can't touch other engines (it fails if any other engine's sound key is missing from the manifest).
   `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - Offline harnesses run under LuaJIT (`luajit file.lua` from `dev/`). Fix the hard-coded paths at the top first: they point at /home/claude/....

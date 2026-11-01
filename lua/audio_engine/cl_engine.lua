@@ -60,6 +60,9 @@ end
 	second. Loops start from silence and fade out before they stop.
 ]]
 local VOL_SLEW = 4
+-- electric motors (and their low-speed hum) play at this fraction: their banks are rendered at a
+-- workable level for 16-bit files, a real EV is far quieter than any engine
+E.EV_VOLUME = 0.1
 local function glide(cur, target, dt)
 	local nx = cur + (target - cur) * min(1, dt * 18)
 	local step = VOL_SLEW * dt
@@ -295,7 +298,7 @@ local function updateSound(car, dt)
 	car.ceiling = approach(car.ceiling or 0.66, ceiling, dt * 0.5)
 	-- revving in neutral sits a few dB above driving (driving leaves that headroom)
 	car.revGain = approach(car.revGain or 0.85, neutral and 1.2 or 0.85, dt * 2)
-	local g = master * car.loopGain * car.revGain
+	local g = master * car.loopGain * car.revGain * (cfg.electric and E.EV_VOLUME or 1)
 	local rpm = max(st.rpm, 50)
 	local layers = bank.layers
 	local n = #layers
@@ -352,7 +355,7 @@ local function updateSound(car, dt)
 	if cfg.electric and env and env.ready and env.evhum and st.on and st.phase == "run" then
 		local fade = 1 - math.Clamp((humSpd - 0.08) / 0.12, 0, 1)
 		local moving = math.Clamp(abs(car.v) / 2, 0, 1)   -- a little softer standing still
-		humVol = g * 0.5 * fade * (0.7 + 0.3 * moving)
+		humVol = g * 0.3 * fade * (0.7 + 0.3 * moving)
 	end
 	local thrE = car.thrS
 	local est2 = (car.limW * g * pk(bank.limiter.off)) ^ 2

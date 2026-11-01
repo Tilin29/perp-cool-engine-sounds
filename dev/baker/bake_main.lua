@@ -56,7 +56,8 @@ end
 function BAKE.info(i)
 	local e = BAKE.items[i]
 	-- one string: wasmoon leaks stack slots on multiple return values
-	return table.concat({ e.dir, e.cfg.engineName or "?", #e.cars, table.concat(e.cars, ", ") }, "\t")
+	return table.concat({ e.dir, e.cfg.engineName or "?", #e.cars, table.concat(e.cars, ", "),
+		e.cfg.electric and "1" or "0", e.key }, "\t")
 end
 
 local function run(b)

@@ -217,7 +217,8 @@ end
 -- profile -> the config the synth, sound bank and rpm model use
 ---------------------------------------------------------------------------
 -- rpm points that get their own generated loop: ~1.26x apart from just above idle to redline
--- (an electric motor's whine is a few pure tones that pitch-shift cleanly: fewer, wider bands)
+-- (an electric motor's whine is a few tones that pitch-shift cleanly: fewer, wider bands, though
+-- not so wide that its body resonances move far)
 function E.MakeBands(idle, redline, step)
 	step = step or 1.26
 	local lo = idle * 1.07
@@ -322,7 +323,7 @@ function E.ResolveProfile(car, prof)
 	cfg.layout, cfg.pitch, cfg.tone = prof.layout, prof.pitch, prof.tone
 	cfg.volume = prof.volume * (car.volume or 1)
 	cfg.idle, cfg.redline = prof.idle, prof.redline
-	cfg.bands = E.MakeBands(prof.idle, prof.redline, prof.layout == "electric" and 1.7 or nil)
+	cfg.bands = E.MakeBands(prof.idle, prof.redline, prof.layout == "electric" and 1.35 or nil)
 	cfg.realism = {
 		bankSpread = 1.0 * r, cylinderVar = 0.07 * r, cylinderTiming = 1.5 * r, combustionVar = 0.12 * r,
 		flowNoise = 1.0 * r, mufflerMode = 0.5 * r, mechanical = 1.0 * r, turboSoften = 0.6 * r,

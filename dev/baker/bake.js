@@ -7,6 +7,9 @@
     node bake.js --rate 22050          half the size
     node bake.js --jobs 4 --only 3     limit workers / bake just engine #3 (no manifest, for testing)
     node bake.js --list                print the engine numbers and exit
+    node bake.js --electric            re-bake only the electric motors and the shared env bank;
+                                       every other engine keeps its entry and folder from the
+                                       current manifest (only after changes to EV-only code)
 
   Output (inside the addon):
     sound/audio_engine/<dir>/*.wav      one folder per engine (+ env_<hash>/ for road, wind, turbo)
@@ -37,6 +40,15 @@ function arg(name, def) {
 const RATE = parseInt(arg('rate', '44100'), 10)
 const JOBS = parseInt(arg('jobs', String(Math.max(1, os.cpus().length - 1))), 10)
 const ONLY = arg('only', null)
+const ELECTRIC = process.argv.includes('--electric')
+
+// the current manifest's engine entries by sound key (for --electric)
+function oldEntries() {
+  const text = fs.readFileSync(MANIFEST, 'utf8')
+  const entries = new Map()
+  for (const m of text.matchAll(/^\t\[("[^"]*")\] = \{$[\s\S]*?^\t\},$/gm)) entries.set(JSON.parse(m[1]), m[0])
+  return entries
+}
 
 // anything that changes how the sound is rendered
 function synthVersion() {
@@ -134,8 +146,8 @@ async function main() {
   const n = await call(`__result(BAKE.list(${JSON.stringify(version)}))`)
   const items = []
   for (let i = 1; i <= n; i++) {
-    const [dir, engine, cars, names] = (await call(`__result(BAKE.info(${i}))`)).split('\t')
-    items.push({ i, dir, engine, cars, names })
+    const [dir, engine, cars, names, ev, key] = (await call(`__result(BAKE.info(${i}))`)).split('\t')
+    items.push({ i, dir, engine, cars, names, key, electric: ev === '1' })
   }
   if (process.argv.includes('--list')) {
     for (const it of items) console.log(`  #${it.i} ${it.dir} ${it.engine}: ${it.names}`)
@@ -143,13 +155,34 @@ async function main() {
   }
   console.log(`${n} stock engine families at ${RATE} Hz, synth version ${version}, ${JOBS} workers`)
   let todo = items
+  const entries = new Array(n + 1)
   if (ONLY) todo = items.filter((it) => it.i === parseInt(ONLY, 10))
-  else if (fs.existsSync(SOUND_OUT)) {
+  else if (ELECTRIC) {
+    // everything else stays as baked: its manifest entry and its folder must both be there
+    const old = oldEntries()
+    const keep = new Set()
+    for (const it of items) {
+      if (it.electric) continue
+      const text = old.get(it.key)
+      const dir = text && (text.match(/^\t\tdir = "([^"]+)",$/m) || [])[1]
+      if (!dir || !fs.existsSync(path.join(SOUND_OUT, dir))) {
+        console.error(`${it.engine} (${it.key}) is not in the current bake: run a full bake`)
+        process.exit(1)
+      }
+      entries[it.i] = text
+      keep.add(dir)
+    }
+    todo = items.filter((it) => it.electric)
+    // the old electric and env folders go
+    for (const d of fs.readdirSync(SOUND_OUT)) {
+      if (!keep.has(d)) fs.rmSync(path.join(SOUND_OUT, d), { recursive: true, force: true })
+    }
+    console.log(`--electric: baking ${todo.length} electric engines and the env bank, keeping ${keep.size} others`)
+  } else if (fs.existsSync(SOUND_OUT)) {
     // empty it rather than delete it (Windows refuses while anything has the folder open)
     for (const d of fs.readdirSync(SOUND_OUT)) fs.rmSync(path.join(SOUND_OUT, d), { recursive: true, force: true })
   }
 
-  const entries = new Array(n + 1)
   let envEntry = null, total = 0, done = 0, failed = 0
   const queue = todo.slice()
   const t0 = Date.now()

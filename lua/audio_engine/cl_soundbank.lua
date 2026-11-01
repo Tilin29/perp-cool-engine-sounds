@@ -153,8 +153,11 @@ end
 Bank.LimitPeaks = limitPeaks
 
 -- every engine is matched to the same loudness (rms above 250 Hz of its on-throttle loops),
--- so a V8 isn't quieter than an inline-4. Electric motors sit well below the engines.
-local TARGET_DB, TARGET_EV_DB = -21, -30
+-- so a V8 isn't quieter than an inline-4. Electric motors sit well below the engines: their
+-- top-speed on-throttle loop is set to TARGET_EV_DB rms over the whole band (most of their
+-- whine is below 250 Hz for much of the speed range, so the engines' measure would miss it).
+-- In game they're turned down further (cl_engine E.EV_VOLUME).
+local TARGET_DB, TARGET_EV_DB = -21, -32
 
 local function build(b)
 	local cfg, sr = b.cfg, b.sr
@@ -287,8 +290,16 @@ local function build(b)
 		for _, j in ipairs(jobs) do if j.name == b.layers[i].on then d = j.data end end
 		if d then lsum = lsum + 20 * math.log10(loudness(d, sr)); ln = ln + 1 end
 	end
-	local target = cfg.electric and TARGET_EV_DB or TARGET_DB
-	local gain = ln > 0 and 10 ^ ((target - lsum / ln) / 20) or 1
+	local gain = ln > 0 and 10 ^ ((TARGET_DB - lsum / ln) / 20) or 1
+	if cfg.electric then
+		for _, j in ipairs(jobs) do
+			if j.name == b.layers[nb].on then
+				local s2 = 0
+				for i = 1, #j.data do s2 = s2 + j.data[i] * j.data[i] end
+				gain = 10 ^ (TARGET_EV_DB / 20) / (math.sqrt(s2 / #j.data) + 1e-9)
+			end
+		end
+	end
 	gain = math.min(gain, 30)
 	b.limitedDb = 0
 	for _, j in ipairs(jobs) do

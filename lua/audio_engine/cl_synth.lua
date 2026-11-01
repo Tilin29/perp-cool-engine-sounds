@@ -235,45 +235,95 @@ local function reso(f, decaySec, sr)
 end
 
 --[[
-	Electric motor: no firing pulses, just the motor's whine. Tones locked to the motor speed
-	(the electrical frequency of a 4-pole-pair motor, its torque ripple, the reduction gear's
-	mesh) grow with speed and load, and a hush of air and bearings. Practically silent at low
-	speed: what you hear there is the steady low-speed hum (Synth.RenderEVHumLoop), which
-	cl_engine plays at a fixed pitch and fades out as the whine takes over.
+	Electric motor: no firing pulses, one faint whine. It is a single tone locked to the motor
+	speed with weak harmonics (so you hear one pitch, not several), under a hiss of bearings and
+	cooling air. The motor's speed ripples a little (a fraction of a percent, ~25 Hz), so the tone
+	is a narrow band rather than a perfect sine, the one thing that makes a synth whine sound
+	like a machine; all harmonics share the ripple, so it stays one pitch. The tone's order (tones per motor
+	turn) is picked so it reaches EV_TOP_HZ at redline whatever the redline, rounded to a multiple
+	of 0.5 so the loops close seamlessly over a 720 degree cycle. Its level drifts a little, the
+	housing and body colour it gently (little below 150 Hz, rolled off above ~4 kHz), and the
+	harmonics grow with load and tone. Off throttle the motor regenerates, so it still
+	whines, softer. Practically silent at low speed: there you hear the low-speed hum
+	(Synth.RenderEVHumLoop).
 ]]
+local EV_TOP_HZ = 450
+local EV_PARTIALS = {
+	-- { harmonic, level }
+	{ 1, 1.00 }, { 2, 0.18 }, { 3, 0.05 },
+}
+
+-- how the motor housing and the body pass a tone of fz Hz on
+local function evBody(fz, sr)
+	if fz > 0.45 * sr then return 0 end
+	local d1, d2 = (fz - 700) / 300, (fz - 1800) / 600
+	local r = 0.9 + 0.25 / (1 + d1 * d1) + 0.15 / (1 + d2 * d2)
+	local hi = fz / 4000
+	return r * fz * fz / (fz * fz + 22500) / (1 + hi * hi * hi * hi)
+end
+
 function Synth.EVRender(g, out, o, n)
 	local sr, K = g.sr, g.k
 	local rpmS, thrS, gain = g.rpm, g.thr, g.gain
 	local tRpm, tThr, onT = g.tRpm, g.tThr, g.on and 1 or 0
-	local p1, p2, p3, p4 = g.e1 or 0, g.e2 or 0, g.e3 or 0, g.e4 or 0
-	local nl, seed = g.nlp, g.seed
 	local redline, pitch, tone = g.redline, g.pitch, g.tone
+	local ord = g.evOrder
+	if not ord then
+		ord = max(1, floor(EV_TOP_HZ * 60 / redline * 2 + 0.5) / 2)
+		g.evOrder = ord
+	end
+	local ph = g.evPh
+	if not ph then
+		ph = {}
+		for j = 1, #EV_PARTIALS do ph[j] = (j * 2.39996) % TAU end   -- spread starting phases
+		g.evPh = ph
+	end
+	local m1, m2, h1, h2, seed = g.evM1 or 0, g.evM2 or 0, g.evH1 or 0, g.evH2 or 0, g.seed
+	local j1, j2 = g.evJ1 or 0, g.evJ2 or 0
 	local kRpm, kThr, kGain = K.rpm, K.thr, K.gain
+	local kM = 1 - exp(-TAU * 3 / sr)            -- level drift, ~3 Hz
+	local mN = 1 / (0.28 * sqrt(kM))              -- makes the twice-smoothed noise ~1 rms
+	local kJ = 1 - exp(-TAU * 25 / sr)            -- speed ripple, ~25 Hz
+	local jN = 1 / (0.28 * sqrt(kJ))
+	local kH1, kH2 = 1 - exp(-TAU * 1800 / sr), 1 - exp(-TAU * 5000 / sr)
 	local w = TAU / sr
+	local np = #EV_PARTIALS
 	for i = 0, n - 1 do
 		rpmS = rpmS + (tRpm - rpmS) * kRpm
 		thrS = thrS + (tThr - thrS) * kThr
 		gain = gain + (onT - gain) * kGain
-		local f = rpmS / 60 * pitch
+		local f = max(0, rpmS) / 60 * pitch
 		local spd = min(1, max(0, rpmS) / redline)
-		local load = 0.3 + 0.7 * thrS
-		p1 = (p1 + w * f * 4) % TAU
-		p2 = (p2 + w * f * 8) % TAU
-		-- the gear mesh: 12x keeps the top end a whine (~3 kHz), not a 6 kHz shriek
-		p3 = (p3 + w * f * 12) % TAU
-		p4 = (p4 + w * f * 9.1) % TAU
-		local s = 0.30 * spd ^ 0.7 * load * sin(p1)
-			+ 0.12 * spd * load * sin(p2)
-			+ (0.08 + 0.2 * tone) * spd ^ 1.2 * load * sin(p3)
-			+ 0.16 * spd ^ 0.8 * (0.5 + 0.5 * thrS) * sin(p4)
+		-- motor torque: full on the pedal, regeneration off it
+		local load = 0.4 + 0.6 * thrS
 		seed = bxor(seed, lshift(seed, 13)); seed = bxor(seed, rshift(seed, 17)); seed = bxor(seed, lshift(seed, 5))
-		nl = nl + (seed / 2147483648 - nl) * 0.05
-		s = s + nl * 0.08 * spd
+		local r = seed / 2147483648
+		m1 = m1 + (r - m1) * kM; m2 = m2 + (m1 - m2) * kM
+		seed = bxor(seed, lshift(seed, 13)); seed = bxor(seed, rshift(seed, 17)); seed = bxor(seed, lshift(seed, 5))
+		j1 = j1 + (seed / 2147483648 - j1) * kJ; j2 = j2 + (j1 - j2) * kJ
+		local wj = w * (1 + 0.004 * jN * j2)
+		local a = 0.18 * spd ^ 0.8 * (0.35 + 0.65 * load) * (1 + 0.05 * mN * m2)
+		local bright = (0.5 + 0.5 * load) * (0.5 + tone)
+		local s = 0
+		for j = 1, np do
+			local P = EV_PARTIALS[j]
+			local fz = f * ord * P[1]
+			local p = ph[j] + wj * fz
+			if p > TAU then p = p - TAU end
+			ph[j] = p
+			local lv = P[1] > 1 and P[2] * bright or P[2]
+			s = s + lv * evBody(fz, sr) * sin(p)
+		end
+		s = s * a
+		-- bearings and cooling air: a band of noise around 2-5 kHz
+		h1 = h1 + (r - h1) * kH1
+		h2 = h2 + ((r - h1) - h2) * kH2
+		s = s + h2 * 0.08 * spd ^ 1.2 * (0.6 + 0.4 * load)
 		out[o + i] = s * gain * 0.6
 	end
 	g.rpm, g.thr, g.gain = rpmS, thrS, gain
-	g.e1, g.e2, g.e3, g.e4 = p1, p2, p3, p4
-	g.nlp, g.seed = nl, seed
+	g.evM1, g.evM2, g.evH1, g.evH2, g.seed = m1, m2, h1, h2, seed
+	g.evJ1, g.evJ2 = j1, j2
 end
 
 -- render n samples of raw generator output into out[o] .. out[o+n-1]
@@ -1159,7 +1209,7 @@ end
 
 --[[
 	Electric low-speed hum, like the pedestrian warning sound EVs play at walking pace: a soft,
-	low tone (220 Hz with a fifth and a few harmonics) with a slow shimmer, no motor in it.
+	low tone (220 Hz and a little of its octave) in a breath of air, with a slow shimmer, no motor in it.
 	cl_engine plays it at an almost fixed pitch and fades it out by ~30 km/h. Shared by every
 	electric car (env bank).
 ]]
@@ -1177,11 +1227,8 @@ function Synth.RenderEVHumLoop(sr, yieldFn)
 		-- two slightly detuned voices beat slowly (0.5 Hz): a living hum, not a test tone
 		local shimmer = 1 + 0.15 * sin(TAU * 0.5 * t)
 		local tone = 0.50 * sin(TAU * f0 * t)
-			+ 0.22 * sin(TAU * (f0 * 2 + 0.5) * t) * shimmer
-			+ 0.16 * sin(TAU * f0 * 1.5 * t)
-			+ 0.08 * sin(TAU * f0 * 3 * t)
-			+ 0.04 * sin(TAU * f0 * 4 * t)
-		buf[i] = runBiquad(cut, tone * 0.5 + runBiquad(air, rnd()) * 0.15)
+			+ 0.10 * sin(TAU * (f0 * 2 + 0.5) * t) * shimmer
+		buf[i] = runBiquad(cut, tone * 0.5 + runBiquad(air, rnd()) * 0.25)
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
 	return makeLoop(buf, L, X), L
