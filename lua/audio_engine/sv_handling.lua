@@ -11,7 +11,7 @@
 	   tops out and handles like on the server. They're applied as ratios to test_car.txt's own
 	   values, so Source's internal units never matter.
 	2. Anti-spin setup (audio_engine_handling 1): brakes biased to the front (a locking rear
-	   spins the car), less power while steering at speed, a slightly lower centre of mass, at
+	   spins the car), at most a 20% power cut while steering at speed, a slightly lower centre of mass, at
 	   least normal grip, and more steering lock at speed. Relative changes only.
 	3. Stability assist (sv_stability.lua) for the PERP cars, with each car's own steering angles.
 	4. Launch traction control (audio_engine_traction 1). Source turns horsepower into wheel torque
@@ -22,8 +22,8 @@
 	   power; from ~36 mph to no less than 60%, so it catches slides without holding the car back.
 	   When the car slides (tail out or over-rotating, from sv_stability.lua; not in a handbrake
 	   drift) it cuts the power quickly, down to 20% at any speed, until it straightens up.
-	5. High-speed steering: the wider lock of step 2 eases back to 0.8 between ~60 and
-	   80 mph (E.HIGH_SPEED_STEER), so the car turns well at town speeds and stays calm when fast.
+	5. High-speed steering: the wider lock of step 2 tightens to 0.65 between ~40 and
+	   80 mph (E.HIGH_SPEED_STEER), so the car turns well at town speeds and holds its speed in fast turns.
 
 	A car on a spiked/ tier script (tyres shot by a stinger) gets none of it: it's meant to be
 	hard to drive.
@@ -161,7 +161,9 @@ end
 ---------------------------------------------------------------------------
 E.ANTI_SPIN = {
 	frontBrake = 0.6,       -- at least this share of the braking on the front axle
-	throttleReduceFast = 0.5, -- at least this much power cut while steering at speed
+	-- at most this much power cut while steering at speed (the scripts cut 0.5-0.9: a fast turn
+	-- lost its speed and revs; spins are caught by sv_stability and the traction control's slide cut)
+	throttleReduceFast = 0.2,
 	powerSlide = 1.0,       -- handbrake slide push x this (1 = the script's own: lower kills drifts)
 	minGravity = 1.0,       -- at least normal grip
 	lowerCentre = 0.25,     -- lower the centre of mass by this many wheel radii
@@ -178,7 +180,7 @@ local function antiSpin(p)
 		end
 	end
 	local s, b = p.steering, p.body
-	if s and s.turnThrottleReduceFast then s.turnThrottleReduceFast = math.max(s.turnThrottleReduceFast, A.throttleReduceFast) end
+	if s and s.turnThrottleReduceFast then s.turnThrottleReduceFast = math.min(s.turnThrottleReduceFast, A.throttleReduceFast) end
 	if s and s.powerSlideAccel then s.powerSlideAccel = s.powerSlideAccel * A.powerSlide end
 	if s and s.degreesFast then s.degreesFast = s.degreesFast * A.steerFast end
 	if b and b.addGravity then b.addGravity = math.max(b.addGravity, A.minGravity) end
@@ -264,8 +266,10 @@ E.TRACTION = {
 	step = 0.04,      -- only re-sends the params when the trim moved this much
 }
 
--- steering lock at speed, x the (already widened) degreesFast: 1 up to fromMph, `scale` from toMph
-E.HIGH_SPEED_STEER = { fromMph = 60, toMph = 80, scale = 0.8 }
+-- steering lock at speed, x the (already widened) degreesFast: 1 up to fromMph, `scale` from toMph.
+-- Tightens from town speeds on: a fast turn on the wide lock scrubbed off speed and revs
+-- (11 deg script x 1.3 x 0.65 = ~9 deg at 80 mph)
+E.HIGH_SPEED_STEER = { fromMph = 40, toMph = 80, scale = 0.65 }
 
 local function steerScale(mph)
 	local H = E.HIGH_SPEED_STEER

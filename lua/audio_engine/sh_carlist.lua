@@ -393,27 +393,50 @@ E.ECONOMY = {
 
 --[[
 	Cars whose model also moves body parts on the "vehicle_guage" pose parameter (wings rising,
-	vents opening), not just the dash needles. Source sets that pose from the car's speed;
-	cl_engine points it at the revs for the tach, which made these parts flap with every shift.
-	These keep Source's speed. Found by reading which bones each model's vehicle_guage sequences
-	animate (the TDM .mdl files).
+	vents opening), not just the dash needles. cl_engine points that pose at the revs for the tach,
+	which made these parts flap with every shift, and Source's own speed value folds some of them
+	back down at high speed (the R8 Plus and LaFerrari animations retract again near the top of
+	the range). On these cars the server drives the pose from speed instead (sv_engine.lua): the parts rise once the
+	car reaches E.WING_UP of its top speed and lower only under E.WING_DOWN_MPH (the gap stops them
+	flapping), the needles still sweep with speed inside each range.
+	{ rest from, rest to, up from, up to }: pose ranges where every part is fully down / fully up,
+	read from the blend animations of each model's vehicle_guage sequence (the TDM .mdl files).
 ]]
+E.WING_UP = 0.7
+E.WING_DOWN_MPH = 30
+E.WING_RATE = 0.25 -- pose range per second the parts travel
 E.GAUGE_PARTS = {
-	["Audi R8 Plus"] = true,                      -- Spoiler
-	["Audi R8 V10"] = true,                       -- Spoiler1, Spoiler2
-	["Bugatti Veyron 16.4"] = true,               -- Spoiler01-03
-	["Bugatti Veyron SS"] = true,                 -- Spoiler1, Spoiler2
-	["Ferrari Enzo"] = true,                      -- spoiler
-	["Ferrari F12 Berlinetta"] = true,            -- spoiler1, spoiler2
-	["Ferrari LaFerrari"] = true,                 -- spoiler, lower_spoiler
-	["Jaguar F-Type"] = true,                     -- spoiler
-	["Lamborghini Murcielago LP670-4 SV"] = true, -- ventl, ventr
-	["McLaren F1"] = true,                        -- spoiler
-	["Mercedes SLS AMG"] = true,                  -- spoiler1, spoiler2
-	["Mini Coupe"] = true,                        -- spoiler1, spoiler2
-	["Porsche 918 Spyder"] = true,                -- spoiler
-	["Porsche Carrera GT"] = true,                -- spoiler
+	["Audi R8 Plus"] = { 0, 0.30, 0.45, 0.70 },                      -- Spoiler (down again past 0.8)
+	["Audi R8 V10"] = { 0, 0.40, 0.75, 1 },                          -- Spoiler1, Spoiler2
+	["Bugatti Veyron 16.4"] = { 0, 0.35, 0.65, 1 },                  -- Spoiler01-03
+	["Bugatti Veyron SS"] = { 0, 0.30, 0.55, 1 },                    -- Spoiler1, Spoiler2
+	["Ferrari Enzo"] = { 0, 0.40, 0.50, 1 },                         -- spoiler
+	["Ferrari F12 Berlinetta"] = { 0.30, 0.30, 0.20, 0 },            -- spoiler1, spoiler2 (flaps open at the bottom of the range)
+	["Ferrari LaFerrari"] = { 0, 0.35, 0.45, 0.70 },                 -- spoiler, lower_spoiler (down again past 0.75)
+	["Jaguar F-Type"] = { 0, 0.35, 0.45, 1 },                        -- spoiler
+	["Lamborghini Murcielago LP670-4 SV"] = { 0, 0.45, 0.55, 1 },    -- ventl, ventr
+	["McLaren F1"] = { 0, 0.30, 0.35, 1 },                           -- spoiler
+	["Mercedes SLS AMG"] = { 0, 0.30, 0.60, 1 },                     -- spoiler1, spoiler2
+	["Mini Coupe"] = { 0, 0.35, 0.55, 1 },                           -- spoiler1, spoiler2
+	["Porsche 918 Spyder"] = { 0, 0.30, 0.50, 1 },                   -- spoiler
+	["Porsche Carrera GT"] = { 0, 0.30, 0.55, 1 },                   -- spoiler
 }
+
+-- the vehicle_guage pose for a car with parts on it (run by the server, sv_engine.lua): kmh and
+-- top speed in km/h; glides E.WING_RATE of the pose range per second (the parts take ~1-1.5 s)
+function E.WingPose(veh, gp, kmh, top, dt)
+	local f = kmh / math.max(top or 250, 40)
+	if f >= E.WING_UP then veh.audioWingUp = true elseif kmh < E.WING_DOWN_MPH * 1.609344 then veh.audioWingUp = false end
+	local want
+	if veh.audioWingUp then
+		want = gp[3] + (gp[4] - gp[3]) * math.Clamp((f - E.WING_UP) / (1 - E.WING_UP), 0, 1)
+	else
+		want = gp[1] + (gp[2] - gp[1]) * math.Clamp(f / E.WING_UP, 0, 1)
+	end
+	local cur = veh.audioWingPose or want
+	veh.audioWingPose = cur + math.Clamp(want - cur, -dt * E.WING_RATE, dt * E.WING_RATE)
+	return veh.audioWingPose
+end
 
 -- register a car's model with the engine from the list above
 function E.RegisterCarNamed(model, carName, extra)
@@ -433,7 +456,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		stockBov = E.CAR_BOV[carName] and true or false,
 		stockBovVol = E.STOCK_BOV_VOLUME,
 		emotionStart = E.CAR_EMOTION[carName] or false,
-		gaugeParts = E.GAUGE_PARTS[carName] and true or false,
+		gaugeParts = E.GAUGE_PARTS[carName],
 		gearCount = E.CAR_GEARS[carName],
 		topSpeed = "auto",
 		wheelRadius = 0.33,

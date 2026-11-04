@@ -257,3 +257,30 @@ hook.Add("PlayerSay", "audio_engine", function(ply, text)
 		return ""
 	end
 end)
+
+--[[
+	Wings and vents (E.GAUGE_PARTS cars): their parts hang off the vehicle_guage pose, which
+	Source sets from speed / the script's top speed in the driver's move (the Murcielago's vents
+	opened from half its top speed, the R8 Plus folded its wing away near the top). Setting it on
+	the client lost to that networked value now and then (the parts flickered), so the server
+	writes ours over it: every tick, and again right after the driver's move.
+]]
+hook.Add("Tick", "audio_engine_wings", function()
+	local dt = engine.TickInterval()
+	for veh in pairs(tracked) do
+		if IsValid(veh) then
+			local car = E.GetCarConfig(veh)
+			local gp = car and car.gaugeParts
+			if gp then
+				local phys = veh:GetPhysicsObject()
+				local kmh = IsValid(phys) and phys:GetVelocity():Length() * 0.09144 or 0   -- in/s -> km/h
+				veh:SetPoseParameter("vehicle_guage", E.WingPose(veh, gp, kmh, E.CarTopSpeed(veh, car), dt))
+			end
+		end
+	end
+end)
+
+hook.Add("FinishMove", "audio_engine_wings", function(ply)
+	local veh = ply:GetVehicle()
+	if IsValid(veh) and veh.audioWingPose then veh:SetPoseParameter("vehicle_guage", veh.audioWingPose) end
+end)

@@ -461,6 +461,25 @@ local function updateSound(car, dt)
 	end
 end
 
+--[[
+	The vehicle_guage pose, set right before the car is drawn. The server sets it too (Source's
+	speedometer) and networks it, and the client re-interpolates that value every frame after
+	Think, so a value set in Think only showed now and then: the Murcielago's vents flickered
+	open and shut wherever Source's value crossed their range. Keeps any existing override.
+]]
+local function guageOverride(ent)
+	if ent.audioGuageHooked then return end
+	ent.audioGuageHooked = true
+	local prev = ent.RenderOverride
+	ent.RenderOverride = function(self, flags)
+		if self.audioGuage then
+			self:SetPoseParameter("vehicle_guage", self.audioGuage)
+			self:InvalidateBoneCache()
+		end
+		if prev then prev(self, flags) else self:DrawModel(flags) end
+	end
+end
+
 local function updateCar(car, dt)
 	local ent, st = car.ent, car.st
 
@@ -532,12 +551,16 @@ local function updateCar(car, dt)
 
 	updateSound(car, dt)
 
-	-- the model's own dashboard tach needle follows the revs (not on cars whose wings/vents also
-	-- hang off that pose: those stay on Source's speed, E.GAUGE_PARTS)
-	if not cfg.gaugeParts then
+	-- the model's own dashboard tach needle follows the revs. Cars whose wings/vents also hang off
+	-- that pose (E.GAUGE_PARTS) are left alone: the server sets it from speed (sv_engine.lua),
+	-- over Source's own speedometer value, and networks it
+	if cfg.gaugeParts then
+		ent.audioGuage = nil
+	else
 		local maxR = math.ceil((cfg.redline + 500) / 1000) * 1000
-		ent:SetPoseParameter("vehicle_guage", math.Clamp(st.rpm / maxR, 0, 1))
+		ent.audioGuage = math.Clamp(st.rpm / maxR, 0, 1)
 	end
+	guageOverride(ent)
 end
 
 ---------------------------------------------------------------------------

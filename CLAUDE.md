@@ -67,7 +67,12 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - pass-by swell (`audio_engine_passby`): other cars sit up to 4.4 dB lower past 35 m, full level inside 8 m (after the headroom);
     `CAR_EMOTION` cars get sound level `E.EMOTION_SOUNDLEVEL` 92 (others 85, economy 80)
   - the `vehicle_guage` pose follows the revs (tach needle), except on `E.GAUGE_PARTS` cars (sh_carlist): 14 TDM models
-    also animate wings/vents on that pose, which flapped with the revs; they keep Source's speed-driven value
+    also animate wings/vents on that pose (flapped with the revs; Source's speed value folds the R8 Plus/LaFerrari wings back
+    down near the top). Those follow speed through per-model {rest, up} pose ranges: up from `E.WING_UP` 0.7 x top speed,
+    down under `E.WING_DOWN_MPH` 30 (`cfg.topSpeed`, km/h). The server sets that pose (`E.WingPose`, sv_engine `Tick` + `FinishMove`,
+    over Source's speed / script top speed written in the driver's move) and the client leaves it alone: set client-side it
+    lost to the networked value now and then and the parts flickered. The tach pose is applied in the car's `RenderOverride`
+    (`ent.audioGuage`, chains any existing override)
 - `sv_engine.lua`: ignition, run by the server.
   - Engine off on entry; start key `audio_engine_startkey` (userinfo, default I) or `audio_engine_toggle`.
   - The server runs `DT.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
@@ -93,7 +98,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   horsepower via `veh.audioTC` in `ApplyPerformance` (strong light cars like the Veyron spun their tyres off the line); it may cut to
   `floor` 0.25 at launch, rising to `floorFast` 0.6 by 16 m/s; while sliding (`veh.audioSlide` from sv_stability: tail out / over-rotating,
   not in a handbrake drift) it cuts at `slideCut` down to `slideFloor` 0.2 at any speed (no hard speed cut-off: that held cars at 1/4 power, then gave it all back);
-  the lock at speed eases to x0.8 between 60 and 80 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`). `audio_engine_accel_log`
+  the lock at speed tightens to x0.65 between 40 and 80 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`); the scripts'
+  power cut while steering at speed (`turnThrottleReduceFast` 0.5-0.9) is capped at `E.ANTI_SPIN.throttleReduceFast` 0.2: fast turns kept their revs. `audio_engine_accel_log`
   logs Source's gear/rpm (GetOperatingParams), slip and trims while driving. Also spiked detection from the `vehiclescript` keyvalue, per-car ESC steering. `E.SetParams` = checked SetVehicleParams.
 - `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling. The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
 
