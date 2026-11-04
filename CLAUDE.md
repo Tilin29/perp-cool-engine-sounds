@@ -73,6 +73,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     over Source's speed / script top speed written in the driver's move) and the client leaves it alone: set client-side it
     lost to the networked value now and then and the parts flickered. The tach pose is applied in the car's `RenderOverride`
     (`ent.audioGuage`, chains any existing override)
+  - brake wings `E.BRAKE_WINGS` (P1, SLR; sv_engine, bone manipulation): S held 0.5 s over 15 mph tilts the flap (P1 `spoilerbrake`
+    pose, SLR `spoiler` bone 22.5 deg: its airbrake pose compiled empty); the P1 wing sits tucked (`tuck` = per-bone pos/ang, placed
+    with the sandbox bone editor) and rises by the spoiler speed rules (`E.WingSpeedUp`) or while the flap is up.
+    `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
+    shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
 - `sv_engine.lua`: ignition, run by the server.
   - Engine off on entry; start key `audio_engine_startkey` (userinfo, default I) or `audio_engine_toggle`.
   - The server runs `DT.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.

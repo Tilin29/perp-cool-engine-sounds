@@ -399,7 +399,7 @@ E.ECONOMY = {
 	the range). On these cars the server drives the pose from speed instead (sv_engine.lua): the parts rise once the
 	car reaches E.WING_UP of its top speed and lower only under E.WING_DOWN_MPH (the gap stops them
 	flapping), the needles still sweep with speed inside each range.
-	{ rest from, rest to, up from, up to }: pose ranges where every part is fully down / fully up,
+	{ rest from, rest to, up from, up to, pose = name if not vehicle_guage }: pose ranges where every part is fully down / fully up,
 	read from the blend animations of each model's vehicle_guage sequence (the TDM .mdl files).
 ]]
 E.WING_UP = 0.7
@@ -422,19 +422,50 @@ E.GAUGE_PARTS = {
 	["Porsche Carrera GT"] = { 0, 0.30, 0.55, 1 },                   -- spoiler
 }
 
+--[[
+	Brake wings, moved by the server through bone manipulation (networked): their models have
+	no working animation for it. A brake flap tilts up once the driver has held S (no W) above
+	WING_BRAKE_MPH for WING_BRAKE_HOLD s, and folds when the braking ends.
+	  tuck: { bone, pos, ang } list: where the wing's bones sit tucked into the body (bone manipulation,
+	        taken from the sandbox bone editor with audio_engine_bonedump); they go to 0 as it rises by
+	        the same speed rules as the spoilers above (and while the brake flap is up)
+	  flapPose/flapBone+flapAng: the brake flap, as a pose (0..1) or a bone rotation (pitch yaw roll)
+	P1: the model stores its wing raised. Its flap is
+	the spoilerbrake pose (named twice in the model, the wing uses the first). SLR: its airbrake pose
+	compiled empty; the source data has the flap at 22.5 deg about its own z.
+]]
+E.WING_BRAKE_HOLD = 0.5
+E.WING_BRAKE_MPH = 15
+E.WING_MAIN_RATE = 0.8 -- share of the travel per second (~1.3 s)
+E.WING_FLAP_RATE = 2   -- brake flap up per second (~0.5 s); folds at half this
+E.BRAKE_WINGS = {
+	["McLaren P1"] = { flapPose = "spoilerbrake", tuck = {   -- placed with the bone editor (audio_engine_bonedump)
+		{ bone = "spoiler_main", pos = { 0, 9, -13 } },
+		{ bone = "spoiler", pos = { -0.34, 1.88, 0.04 }, ang = { -0.16, -24.58, 0 } },
+	} },
+	["Mercedes McLaren SLR"] = { flapBone = "spoiler", flapAng = { 0, 22.5, 0 } },
+}
+
+-- speed rule shared by all wings: up from WING_UP of the top speed, down under WING_DOWN_MPH
+function E.WingSpeedUp(veh, kmh, top)
+	local f = kmh / math.max(top or 250, 40)
+	if f >= E.WING_UP then veh.audioWingUp = true elseif kmh < E.WING_DOWN_MPH * 1.609344 then veh.audioWingUp = false end
+	return veh.audioWingUp or false, f
+end
+
 -- the vehicle_guage pose for a car with parts on it (run by the server, sv_engine.lua): kmh and
 -- top speed in km/h; glides E.WING_RATE of the pose range per second (the parts take ~1-1.5 s)
 function E.WingPose(veh, gp, kmh, top, dt)
-	local f = kmh / math.max(top or 250, 40)
-	if f >= E.WING_UP then veh.audioWingUp = true elseif kmh < E.WING_DOWN_MPH * 1.609344 then veh.audioWingUp = false end
+	local up, f = E.WingSpeedUp(veh, kmh, top)
 	local want
-	if veh.audioWingUp then
+	if up then
 		want = gp[3] + (gp[4] - gp[3]) * math.Clamp((f - E.WING_UP) / (1 - E.WING_UP), 0, 1)
 	else
 		want = gp[1] + (gp[2] - gp[1]) * math.Clamp(f / E.WING_UP, 0, 1)
 	end
 	local cur = veh.audioWingPose or want
-	veh.audioWingPose = cur + math.Clamp(want - cur, -dt * E.WING_RATE, dt * E.WING_RATE)
+	local step = dt * E.WING_RATE
+	veh.audioWingPose = cur + math.Clamp(want - cur, -step, step)
 	return veh.audioWingPose
 end
 
@@ -457,6 +488,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		stockBovVol = E.STOCK_BOV_VOLUME,
 		emotionStart = E.CAR_EMOTION[carName] or false,
 		gaugeParts = E.GAUGE_PARTS[carName],
+		brakeWing = E.BRAKE_WINGS[carName],
 		gearCount = E.CAR_GEARS[carName],
 		topSpeed = "auto",
 		wheelRadius = 0.33,

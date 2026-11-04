@@ -258,23 +258,72 @@ hook.Add("PlayerSay", "audio_engine", function(ply, text)
 	end
 end)
 
+
 --[[
 	Wings and vents (E.GAUGE_PARTS cars): their parts hang off the vehicle_guage pose, which
 	Source sets from speed / the script's top speed in the driver's move (the Murcielago's vents
 	opened from half its top speed, the R8 Plus folded its wing away near the top). Setting it on
 	the client lost to that networked value now and then (the parts flickered), so the server
 	writes ours over it: every tick, and again right after the driver's move.
+	Brake wings (E.BRAKE_WINGS: P1, SLR) are moved here too, through bone manipulation.
 ]]
+local function glide(cur, want, up, down)
+	return cur + math.Clamp(want - cur, -down, up)
+end
+
+local function vec(t) return t and Vector(t[1], t[2], t[3]) or nil end
+local function ang(t) return t and Angle(t[1], t[2], t[3]) or nil end
+
+-- bone manipulations scaled by frac, re-sent only when frac moved enough to see (they're networked)
+local function manip(veh, key, bone, frac, pos, an)
+	local id = veh:LookupBone(bone)
+	if not id then return end
+	veh.audioManipSent = veh.audioManipSent or {}
+	local sent = veh.audioManipSent[key]
+	if sent and math.abs(frac - sent) < 0.01 and (frac > 0 or sent == 0) then return end
+	veh.audioManipSent[key] = frac
+	if pos then veh:ManipulateBonePosition(id, vec(pos) * frac) end
+	if an then veh:ManipulateBoneAngles(id, ang(an) * frac) end
+end
+
+local function brakeWing(veh, bw, kmh, top, dt, braking)
+	local up = E.WingSpeedUp(veh, kmh, top)
+	veh.audioBrakeT = braking and (veh.audioBrakeT or 0) + dt or 0
+	local flapOn = veh.audioBrakeT >= E.WING_BRAKE_HOLD or (veh.audioFlapShow or 0) > CurTime()   -- (wingflap preview)
+	if bw.tuck then
+		-- the wing rises out of its tucked place (speed rules, or the flap needs it up)
+		local m = glide(veh.audioMainFrac or 0, (up or flapOn) and 1 or 0, dt * E.WING_MAIN_RATE, dt * E.WING_MAIN_RATE)
+		veh.audioMainFrac = m
+		for i, t in ipairs(bw.tuck) do manip(veh, "tuck" .. i, t.bone, 1 - m, t.pos, t.ang) end
+	end
+	local fl = glide(veh.audioFlapFrac or 0, flapOn and 1 or 0, dt * E.WING_FLAP_RATE, dt * E.WING_FLAP_RATE * 0.5)
+	veh.audioFlapFrac = fl
+	if bw.flapPose then
+		veh:SetPoseParameter(bw.flapPose, fl)
+	elseif bw.flapBone then
+		manip(veh, "flap", bw.flapBone, fl, nil, bw.flapAng)
+	end
+end
+
 hook.Add("Tick", "audio_engine_wings", function()
 	local dt = engine.TickInterval()
 	for veh in pairs(tracked) do
 		if IsValid(veh) then
 			local car = E.GetCarConfig(veh)
-			local gp = car and car.gaugeParts
-			if gp then
+			local gp, bw = car and car.gaugeParts, car and car.brakeWing
+			if gp or bw then
 				local phys = veh:GetPhysicsObject()
 				local kmh = IsValid(phys) and phys:GetVelocity():Length() * 0.09144 or 0   -- in/s -> km/h
-				veh:SetPoseParameter("vehicle_guage", E.WingPose(veh, gp, kmh, E.CarTopSpeed(veh, car), dt))
+				local top = E.CarTopSpeed(veh, car)
+				if gp then
+					veh:SetPoseParameter("vehicle_guage", E.WingPose(veh, gp, kmh, top, dt))
+				end
+				if bw then
+					local drv = veh:GetDriver()
+					local braking = IsValid(drv) and drv:KeyDown(IN_BACK) and not drv:KeyDown(IN_FORWARD)
+						and kmh > E.WING_BRAKE_MPH * 1.609344
+					brakeWing(veh, bw, kmh, top, dt, braking)
+				end
 			end
 		end
 	end
@@ -283,4 +332,48 @@ end)
 hook.Add("FinishMove", "audio_engine_wings", function(ply)
 	local veh = ply:GetVehicle()
 	if IsValid(veh) and veh.audioWingPose then veh:SetPoseParameter("vehicle_guage", veh.audioWingPose) end
+end)
+
+--[[
+	Tuning wings in game (superadmin, or the host in single player), on the car you sit in or look at:
+	  audio_engine_wingflap      shows the brake flap for 10 s
+	  audio_engine_bonedump      the car's bone manipulations (e.g. from the sandbox bone editor),
+	                             printed and written to data/audio_engine_bones.txt
+	To place a tucked wing: park the car, move the bones with the bone editor, run bonedump and put
+	the values into E.BRAKE_WINGS (tuck = { bone, pos, ang }).
+]]
+local function tuneTarget(ply)
+	if IsValid(ply) and not ply:IsSuperAdmin() and not (game.SinglePlayer() or ply:IsListenServerHost()) then return end
+	if not IsValid(ply) then return end
+	local veh = ply:GetVehicle()
+	if not (IsValid(veh) and E.GetCarConfig(veh)) then veh = ply:GetEyeTrace().Entity end
+	return IsValid(veh) and veh or nil
+end
+
+concommand.Add("audio_engine_wingflap", function(ply)
+	local veh = tuneTarget(ply)
+	local car = veh and E.GetCarConfig(veh)
+	if not (car and car.brakeWing) then
+		if IsValid(ply) then ply:PrintMessage(HUD_PRINTTALK, "[Audio Engine] sit in or look at a brake-wing car (P1, SLR)") end
+		return
+	end
+	veh.audioFlapShow = CurTime() + 10
+end)
+
+concommand.Add("audio_engine_bonedump", function(ply)
+	local veh = tuneTarget(ply)
+	if not veh then return end
+	local car = E.GetCarConfig(veh)
+	local lines = { string.format("%s  %s", car and car.name or veh:GetClass(), veh:GetModel()) }
+	for id = 0, veh:GetBoneCount() - 1 do
+		local p, a = veh:GetManipulateBonePosition(id), veh:GetManipulateBoneAngles(id)
+		if not p:IsZero() or not a:IsZero() then
+			lines[#lines + 1] = string.format('{ bone = "%s", pos = { %g, %g, %g }, ang = { %g, %g, %g } },', veh:GetBoneName(id),
+				math.Round(p.x, 2), math.Round(p.y, 2), math.Round(p.z, 2), math.Round(a.p, 2), math.Round(a.y, 2), math.Round(a.r, 2))
+		end
+	end
+	if #lines == 1 then lines[2] = "(no bone manipulations)" end
+	file.Write("audio_engine_bones.txt", table.concat(lines, "\n") .. "\n")
+	for _, l in ipairs(lines) do ply:PrintMessage(HUD_PRINTCONSOLE, l .. "\n") end
+	ply:PrintMessage(HUD_PRINTTALK, "[Audio Engine] bones written to data/audio_engine_bones.txt")
 end)
