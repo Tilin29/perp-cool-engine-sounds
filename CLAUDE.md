@@ -50,6 +50,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.
   Downshifts with W held (kick/sag/corner) judge the wheels' revs, not `st.rpm`: converter slip keeps that over ~0.47 x redline
   with W held, so a car slowed by a turn stuck in its gear. No lazy upshift while slowing (`st.accel > 0`), and slowing isn't a stall.
+  Braking downshifts are low and gentle (`brakeRpm` 0.45, `brakeLand` 0.70, `shiftSoft`: blip 0.25, rise rate 8): at 0.80/0.96 with
+  a full blip hard braking ran a sawtooth near redline that sounded cartoonish. cl_engine feeds the model the car's full speed
+  signed by the nose (`car.vDrive`), not the speed along the nose, which collapsed in a slide (revs plunged, then shot back up).
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
   gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (one faint whine: a tone of order chosen to reach
   `EV_TOP_HZ` 450 Hz at redline, weak harmonics, a slight speed ripple so it isn't a pure sine, under a bearing/air hiss; regen whines softer off throttle; near silent at
@@ -57,7 +60,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   to `TARGET_EV_DB` -32 dB rms full band; cl_engine plays EVs and their hum at `E.EV_VOLUME` 0.1). `RenderEVHumLoop`: the steady low-speed EV hum (env bank `evhum`), played by
   cl_engine at a near-fixed pitch, fading out between 8% and 20% of redline. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
   a ~1 ms thump + 35-100 ms muffler scatter, body peak 140-190 Hz, low-passed (a 0.4 ms click with light saturation sounded like
-  firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over.
+  firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over;
+  played at 0.7 x (cl_engine `popVol`, ~3 dB up on the 0.5 they used to play at).
 - `cl_soundbank.lua`: builds a bank per soundKey in a coroutine (6 ms/frame budget). It holds:
   - one on/off-throttle loop pair per rpm band (bands ~1.26x apart), a limiter loop, start/stop one-shots, pops and bangs
   - **loudness matching** (TARGET_DB -21, electric -30, measured as rms above 250 Hz of the on-throttle loops), then `limitPeaks` (look-ahead, circular for loops)
@@ -84,14 +88,17 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
     shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
 - `sv_engine.lua`: ignition, run by the server.
-  - Engine off on entry; start key `audio_engine_startkey` (userinfo, default I) or `audio_engine_toggle`.
+  - Engine off on entry; start key `audio_engine_startkey` (userinfo, default I) or `audio_engine_toggle`. Getting out leaves it
+    idling (`audio_engine_keeprunning` 1, default, not archived: a saved 0 from the old default overrode it); getting back in drives off.
   - The server runs `DT.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
-- `sv_cruise.lua`: cruise control. Middle mouse on (speed rounded to 5 mph, min 10) / off, mouse wheel +-5 mph
-  (`StartCommand`: `cmd:GetMouseWheel()`). Holds W in the driver's command and trims horsepower with a PI controller
-  (`veh.audioCruisePow` in sv_handling's tick, applied in `ApplyPerformance`); lets go of W only 3 mph over (downhill).
-  Own W overrides at full power, S/Space/exit/engine off/stuck cancel. NW2 `audio_cruise` (mph) for HUD and cl_engine
-  (the local driver's keys are read locally, so the cruise W comes from the networked bits). `audio_engine_cruise`.
+- `sv_cruise.lua`: speed limiter (was cruise control). Middle mouse on at exactly the current speed / off; mouse wheel moves the
+  limit to the next 5 mph step (`StartCommand`: `cmd:GetMouseWheel()`). The driver's own W drives: from `band` 6 mph under the limit
+  the horsepower is trimmed (`veh.audioCruisePow`, sv_handling's tick, applied in `ApplyPerformance`) by tracking a wanted acceleration
+  `k` x (mph to go), which finds the holding power for any car (a PI on the speed error overshot 1-2 mph). Over the limit (lowered,
+  downhill): power off and a braking impulse from 0.6 mph over until 0.15 (0.6 + 0.7/mph, max 3.5 m/s2: 60 to 40 mph in ~2.5 s).
+  Exit/engine off cancel. NW2 `audio_cruise` (limit, mph) for the HUD ("LIMIT"), `audio_limst` 0 free / 1 holding (sounds like
+  steady part throttle, `inp.cruise`) / 2 over (throttle shut). `audio_engine_cruise`.
 - `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `veh.audioSpiked`.
   Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
   and reports any rotation as `veh.audioSlide`, so traction control cuts the power.

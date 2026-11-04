@@ -1,33 +1,39 @@
 --[[
-	Audio Engine - cruise control (server)
+	Audio Engine - speed limiter (server)
 
-	Middle mouse button: on at the speed you're going, rounded to the nearest 5 mph (from
-	E.CRUISE.minMph), or off again. Mouse wheel while it's on: 5 mph up or down.
+	Middle mouse button: on at exactly the speed you're going, or off again. Mouse wheel while
+	it's on: the limit moves to the next 5 mph step up or down.
 
-	It holds W for the driver, in the player's own command, so Source's physics, traction
-	control and the stability assist see a driver on the throttle, and trims the engine's power
-	to hold the speed (sv_handling.lua, veh.audioCruisePow: smooth, where pressing W on and off
-	surged the car and swung the engine sound between full throttle and none). It only lets go
-	of W when the car runs coastAbove over (downhill). Holding W yourself accelerates past it
-	at full power (it comes back once you let go); S or the handbrake cancels it, as do getting
-	out, the engine stopping and the car coming to a stop against something.
+	You still drive the car: W accelerates at full power up to E.CRUISE.band under the limit,
+	then the engine's power is trimmed to hold the limit exactly (sv_handling.lua,
+	veh.audioCruisePow: smooth, no surging). Let go of W and the car coasts as usual. Over the
+	limit (it was lowered, or downhill) the power is cut and it brakes, harder the further over
+	it is, up to brakeMax: a lowered limit pulls the car down briskly, but like real brakes.
+	Getting out and the engine stopping switch it off.
 
-	The set speed goes to the car as audio_cruise (mph, 0 = off) for the HUD and the sound.
+	To the clients: audio_cruise = the limit (mph, 0 = off) for the HUD, and audio_limst =
+	0 free / 1 holding at the limit (sounds like steady part throttle) / 2 over it (throttle shut).
 ]]
 local E = AUDIO_ENGINE
 
 local cvOn = CreateConVar("audio_engine_cruise", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY,
-	"1 = cruise control on registered cars (middle mouse button; mouse wheel sets the speed)")
+	"1 = speed limiter on registered cars (middle mouse button; mouse wheel sets the limit)")
 
 E.CRUISE = {
-	step = 5,         -- mph per press / wheel notch, and what the speed rounds to
-	minMph = 10,      -- the lowest set speed
-	coastAbove = 3,   -- mph over the set speed where it lets go of W (downhill)...
-	resumeAt = 1,     -- ...and under which it holds W again
-	-- the power trim (sv_handling.lua): share of the car's power, PI on the speed error (mph)
-	kp = 0.06, ki = 0.04, minPow = 0.03, startPow = 0.35,
-	stuckMph = 3,     -- slower than this for stuckTime s (against a wall): off
-	stuckTime = 1.5,
+	step = 5,         -- mph per mouse wheel notch (the limit snaps to these steps)
+	minMph = 5,       -- the lowest limit
+	-- the power trim (sv_handling.lua), from band mph under the limit: it wants the car to gain
+	-- k x (mph still to go) mph/s and moves the power (share of the car's) at ki per mph/s of
+	-- difference, so it finds the power that holds the speed by itself, for any car. (A PI on
+	-- the speed error overshot by 1-2 mph and settled slowly.)
+	band = 6, k = 1.2, ki = 0.25, minPow = 0.02,
+	reentry = 0.1,    -- the power when the brake lets go (it's slowing to a lower speed)
+	-- over the limit: power off and braking from brakeOver mph over until under brakeOff
+	brakeOver = 0.6, brakeOff = 0.15,
+	brakeBase = 0.6,  -- m/s2 as it starts...
+	brakeGain = 0.7,  -- ...more per mph over...
+	brakeMax = 3.5,   -- ...up to this (~0.35 g): 60 to 40 mph in about 2.5 s
+	powStep = 0.02,   -- the power is re-sent to the physics when it moved this much
 }
 
 local function speedMph(veh)
@@ -45,64 +51,79 @@ local function running(veh)
 	return veh:GetNW2Bool("audio_on", false) and veh.audioStart == nil
 end
 
-local function setCruise(veh, mph)
-	veh.audioCruise, veh.audioCruiseThr, veh.audioCruiseStuck = mph, false, 0
-	veh.audioCruiseI, veh.audioCruiseOwn = E.CRUISE.startPow, false
-	veh:SetNW2Float("audio_cruise", mph or 0)
+local function setState(veh, s)
+	if veh.audioLimSt ~= s then veh.audioLimSt = s; veh:SetNW2Int("audio_limst", s) end
 end
 
--- the set speed, in steps, between minMph and the car's own top speed
-local function limit(veh, mph)
-	local C = E.CRUISE
+local function setLimit(veh, mph)
+	veh.audioCruise, veh.audioLimHold, veh.audioLimBrake = mph, false, false
+	veh.audioCruiseI = 1
+	veh:SetNW2Float("audio_cruise", mph or 0)
+	setState(veh, 0)
+end
+
+-- within minMph and the car's own top speed
+local function clampLimit(veh, mph)
 	local top = veh:GetNW2Float("audio_vmax", 0) / 1.609344
-	mph = math.floor(mph / C.step + 0.5) * C.step
-	if top > C.minMph then mph = math.min(mph, math.floor(top / C.step) * C.step) end
-	return math.max(C.minMph, mph)
+	if top > E.CRUISE.minMph then mph = math.min(mph, top) end
+	return math.max(E.CRUISE.minMph, mph)
 end
 
 hook.Add("PlayerButtonDown", "audio_engine_cruise", function(ply, button)
 	if button ~= MOUSE_MIDDLE or not cvOn:GetBool() then return end
 	local veh = drivenCar(ply)
 	if not veh then return end
-	if veh.audioCruise then setCruise(veh, nil) return end
+	if veh.audioCruise then setLimit(veh, nil) return end
 	if not running(veh) then return end
-	local mph = speedMph(veh)
-	if mph + E.CRUISE.step / 2 < E.CRUISE.minMph then return end
-	setCruise(veh, limit(veh, mph))
+	setLimit(veh, clampLimit(veh, speedMph(veh)))
 end)
 
+-- the mouse wheel moves the limit to the next step
 hook.Add("StartCommand", "audio_engine_cruise", function(ply, cmd)
 	local veh = drivenCar(ply)
 	if not veh or not veh.audioCruise then return end
-	local C = E.CRUISE
-	local buttons = cmd:GetButtons()
-	if not cvOn:GetBool() or not running(veh) or bit.band(buttons, IN_BACK + IN_JUMP) ~= 0 then
-		setCruise(veh, nil)
-		return
-	end
 	local wheel = cmd:GetMouseWheel()
-	if wheel ~= 0 then
-		local mph = limit(veh, veh.audioCruise + (wheel > 0 and C.step or -C.step))
-		if mph ~= veh.audioCruise then veh.audioCruise = mph; veh:SetNW2Float("audio_cruise", mph) end
+	if wheel == 0 then return end
+	local C, lim = E.CRUISE, veh.audioCruise
+	local mph = wheel > 0 and (math.floor(lim / C.step + 1e-3) + 1) * C.step
+		or (math.ceil(lim / C.step - 1e-3) - 1) * C.step
+	mph = clampLimit(veh, mph)
+	if mph ~= lim then veh.audioCruise = mph; veh:SetNW2Float("audio_cruise", mph) end
+end)
+
+hook.Add("Tick", "audio_engine_cruise", function()
+	local C, dt = E.CRUISE, engine.TickInterval()
+	for veh in pairs(E.TrackedVehicles or {}) do
+		if IsValid(veh) and veh.audioCruise then
+			local drv = veh:GetDriver()
+			if not cvOn:GetBool() or not IsValid(drv) or not running(veh) then
+				setLimit(veh, nil)
+			else
+				local phys = veh:GetPhysicsObject()
+				local v = speedMph(veh)
+				local over = v - veh.audioCruise
+				-- over the limit: power off and brake, harder the further over
+				if over > C.brakeOver then
+					veh.audioLimBrake = true
+				elseif veh.audioLimBrake and over < C.brakeOff then
+					veh.audioLimBrake, veh.audioCruiseI = false, C.reentry
+				end
+				-- W held near the limit: the power trim holds it (sv_handling.lua)
+				local hold = drv:KeyDown(IN_FORWARD) and over > -C.band
+				if hold and not veh.audioLimHold and not veh.audioLimBrake then veh.audioCruiseI = 1 end
+				veh.audioLimHold = hold
+				if veh.audioLimBrake and IsValid(phys) then
+					local decel = math.min(C.brakeMax, C.brakeBase + C.brakeGain * math.max(0, over - C.brakeOff))
+					local vel = phys:GetVelocity()
+					-- impulse: kg x in/s (velocities are inches/s)
+					phys:ApplyForceCenter(-vel:GetNormalized() * phys:GetMass() * decel / 0.0254 * dt)
+				end
+				setState(veh, veh.audioLimBrake and 2 or hold and 1 or 0)
+			end
+		end
 	end
-	-- the driver's own W: let them accelerate past it (full power: audioCruiseOwn)
-	veh.audioCruiseOwn = bit.band(buttons, IN_FORWARD) ~= 0
-	if veh.audioCruiseOwn then return end
-	local v = speedMph(veh)
-	if v < C.stuckMph then
-		veh.audioCruiseStuck = veh.audioCruiseStuck + engine.TickInterval()
-		if veh.audioCruiseStuck > C.stuckTime then setCruise(veh, nil) return end
-	else
-		veh.audioCruiseStuck = 0
-	end
-	if veh.audioCruiseThr then
-		if v > veh.audioCruise + C.coastAbove then veh.audioCruiseThr = false end
-	elseif v < veh.audioCruise + C.resumeAt then
-		veh.audioCruiseThr = true
-	end
-	if veh.audioCruiseThr then cmd:SetButtons(bit.bor(buttons, IN_FORWARD)) end
 end)
 
 hook.Add("PlayerLeaveVehicle", "audio_engine_cruise", function(_, veh)
-	if IsValid(veh) and veh.audioCruise then setCruise(veh, nil) end
+	if IsValid(veh) and veh.audioCruise then setLimit(veh, nil) end
 end)

@@ -126,7 +126,7 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_mutestock` | shared | 1 | silence the TDM engine recordings of cars that use the procedural engine |
 | `audio_engine_autostart` | server | 0 | 1 = start the engine when a driver gets in; 0 = the driver starts it |
 | `audio_engine_emotionstart` | server | 1 | rev flare on start-up (high-powered cars only: `CAR_EMOTION`) |
-| `audio_engine_keeprunning` | server | 0 | keep idling after the driver gets out |
+| `audio_engine_keeprunning` | server | 1 | keep idling after the driver gets out (0 = getting out switches the engine off; not saved, set it in server.cfg) |
 | `audio_engine_stability` | server | 1 | drift-friendly stability assist (all cars except spiked tyres) |
 | `audio_engine_handling` | server | 1 | anti-spin setup: front brake bias, less power while steering at speed, lower centre of mass (cars spawned after) |
 | `audio_engine_tuneaccess` | server | 1 | who can retune engines: 0 = whoever drives the car, 1 = admins, 2 = superadmins |

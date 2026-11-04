@@ -6,8 +6,9 @@
 
 local E = AUDIO_ENGINE
 
-local cvKeep = CreateConVar("audio_engine_keeprunning", "0", FCVAR_ARCHIVE,
-	"1 = cars keep idling after the driver gets out")
+-- not archived: an old saved "0" (the default before) kept switching engines off; set it in server.cfg to change it
+local cvKeep = CreateConVar("audio_engine_keeprunning", "1", FCVAR_NONE,
+	"1 = cars keep idling after the driver gets out (the driver switches them off); 0 = getting out switches the engine off")
 local cvEmotion = CreateConVar("audio_engine_emotionstart", "1", FCVAR_ARCHIVE,
 	"1 = rev flare on start-up (Rev Bench 'emotion start')")
 local cvAuto = CreateConVar("audio_engine_autostart", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED,

@@ -182,13 +182,15 @@ local function readInputs(car)
 		-- the local driver: use their own keys for zero latency, once we know they register
 		local lf, lb, lh = ply:KeyDown(IN_FORWARD), ply:KeyDown(IN_BACK), ply:KeyDown(IN_JUMP)
 		if lf or lb or lh then car.localKeys = true end
-		-- (cruise control holds W on the server: that comes in with the networked keys)
 		if car.localKeys then
-			local cruise = f and not lf and ent:GetNW2Float("audio_cruise", 0) > 0
-			return lf or cruise, lb, lh, ply:KeyDown(IN_MOVELEFT) ~= ply:KeyDown(IN_MOVERIGHT), cruise
+			f, b, h, s = lf, lb, lh, ply:KeyDown(IN_MOVELEFT) ~= ply:KeyDown(IN_MOVERIGHT)
 		end
 	end
-	return f, b, h, s, f and ent:GetNW2Float("audio_cruise", 0) > 0
+	-- speed limiter (sv_cruise.lua): holding at the limit sounds like steady part throttle;
+	-- over it the throttle is shut even with W held
+	local lim = ent:GetNW2Int("audio_limst", 0)
+	if lim == 2 then f = false end
+	return f, b, h, s, f and lim == 1
 end
 
 -- the listener (whoever's ears the sound reaches): position and velocity, once per frame
@@ -429,7 +431,8 @@ local function updateSound(car, dt)
 		or Occasional car crackles now and then, only a Frequent one bangs on most lifts.
 	]]
 	local P = cfg.profile.pops or 0
-	local popVol = master * car.loopGain * 0.5 * (cfg.profile.popVol or 1) * (car.prox or 1)
+	-- 0.7: about 3 dB over the 0.5 they were baked for (they came out a little too quiet)
+	local popVol = master * car.loopGain * 0.7 * (cfg.profile.popVol or 1) * (car.prox or 1)
 	if P > 0 and popVol > 0 and #bank.pops > 0 and st.on and st.phase == "run" then
 		local red, now = cfg.redline, RealTime()
 		local event = P * P
@@ -573,8 +576,17 @@ local function updateCar(car, dt)
 	dopplerFactor(car, dt, mine)
 	car.prox = proximityGain(car, mine)
 
+	-- the gearbox follows the wheels, and in a slide they still roll at the car's full speed: the
+	-- speed along the nose collapsed as the car went sideways, the revs plunged and shot back up
+	-- as it straightened (a cartoon "weee-ooo"). Full speed, signed by the nose, unless it has
+	-- turned mostly backwards or sideways (a spin)
+	local vFull = car.vel:Length() * 0.0254
+	local vDrive = car.v
+	if vFull > 2 and abs(car.v) > vFull * 0.3 then vDrive = (car.v >= 0 and 1 or -1) * vFull end
+	car.vDrive = car.vDrive and car.vDrive + (vDrive - car.vDrive) * min(1, dt * 10) or vDrive
+
 	local f, b, h, s, cr = readInputs(car)
-	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, steer = s, v = car.v, cruise = cr })
+	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, steer = s, v = car.vDrive, cruise = cr })
 
 	updateSound(car, dt)
 

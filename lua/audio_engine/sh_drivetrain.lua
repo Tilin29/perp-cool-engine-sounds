@@ -27,8 +27,11 @@ DT.SHIFT = {
 	kickRpm = 0.60,    -- pressing W with the revs below this kicks down...
 	sagRpm = 0.38,     -- ...and so does holding W while they sag below this
 	kickLand = 0.88,   -- kickdown picks the lowest gear that stays under this
-	brakeRpm = 0.80,   -- braking: shift down once the revs fall below this...
-	brakeLand = 0.96,  -- ...if the lower gear keeps them under this
+	-- braking: shift down once the revs fall below brakeRpm, landing under brakeLand. Low and gentle
+	-- like a road automatic: at 0.80 / 0.96 with a full blip, hard braking ran a sawtooth of revs
+	-- held near redline, every downshift a ~1000 rpm leap (it sounded cartoonish)
+	brakeRpm = 0.45,
+	brakeLand = 0.70,
 	lugRpm = 0.40,     -- coasting: shift down below this (0.30 let corners sag to a near-idle drone)
 	-- cornering (A/D held, or let go under cornerHold s ago): no early upshifts (the car isn't
 	-- accelerating there because it turns, not because it's at top speed: it climbed through
@@ -36,9 +39,9 @@ DT.SHIFT = {
 	cornerRpm = 0.65,
 	cornerLand = 0.88, -- ... to the lowest gear that stays under this
 	cornerHold = 0.6,
-	-- cruise control (sv_cruise.lua presses W on and off): the highest gear that keeps the revs
-	-- above cruiseLand, and down again only when they sag under sagRpm. Its presses are not
-	-- you flooring it: no kickdown (it kicked down and changed back up on every press)
+	-- holding at the speed limiter (sv_cruise.lua: W held, the power trimmed): the highest gear that keeps the revs
+	-- above cruiseLand, and down again only when they sag under sagRpm. Holding a speed is not
+	-- you flooring it: no kickdown
 	cruiseLand = 0.45,
 	cruiseThr = 0.35,  -- the steady part throttle it sounds like while holding the speed
 }
@@ -151,7 +154,7 @@ DT.GearRatio = gearRatio
 --[[
 	inp.fwd, inp.back, inp.hand : driver keys (W, S, Space)
 	inp.steer                   : A or D held (the gearbox holds its gear through corners)
-	inp.cruise                  : cruise control holds W (sv_cruise.lua): steady part throttle
+	inp.cruise                  : holding at the speed limiter (sv_cruise.lua): steady part throttle
 	inp.v                       : speed along the car's nose, m/s (negative when rolling back)
 ]]
 function DT.Step(st, cfg, dt, inp)
@@ -268,8 +271,9 @@ function DT.Step(st, cfg, dt, inp)
 			local rpm = st.rpm  -- the engine's actual revs
 			local corner = st.steerAgo < SH.cornerHold
 			local function rpmIn(g) return av * K * gearRatio(cfg, g) end
-			local function shift(g, kind, hold)
-				st.gear = g; st.shiftKind = kind; st.holdT = hold; st.stallT = 0
+			-- soft: a braking / coasting downshift (a small blip and a slower rise, not a racing one)
+			local function shift(g, kind, hold, soft)
+				st.gear = g; st.shiftKind = kind; st.holdT = hold; st.stallT = 0; st.shiftSoft = soft or false
 				st.shiftT = kind == 1 and 0.32 or 0.22
 			end
 			st.holdT = st.holdT - dt
@@ -319,16 +323,16 @@ function DT.Step(st, cfg, dt, inp)
 					end
 				elseif braking then
 					-- down one gear once the revs fall below brakeRpm, as long as the lower gear
-					-- lands under brakeLand: revs stay high, every downshift is a rev-matched blip
+					-- lands under brakeLand: the revs fall with the car, each downshift a small blip
 					if st.gear > 1 and rpm < red * SH.brakeRpm and rpmIn(st.gear - 1) < red * SH.brakeLand then
-						shift(st.gear - 1, -1, 0.3)
+						shift(st.gear - 1, -1, 0.3, true)
 					end
 				else
 					if st.gear < n and wheelRpm > red * 0.97 then
 						shift(st.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
 					elseif st.gear > 1 and not inp.cruise and rpm < red * (corner and SH.cornerRpm or SH.lugRpm)
 						and rpmIn(st.gear - 1) < red * (corner and SH.cornerLand or 0.75) then
-						shift(st.gear - 1, -1, 0.6)                      -- don't let it lug (or drone through a corner)
+						shift(st.gear - 1, -1, 0.6, true)                -- don't let it lug (or drone through a corner)
 					end
 				end
 				wheelRpm = rpmIn(st.gear)
@@ -342,7 +346,7 @@ function DT.Step(st, cfg, dt, inp)
 		-- top gear and faster than the gearing expects: sit just under redline, don't bounce
 		if st.gear > 0 and st.gear == #cfg.gears then target = min(target, cfg.redline * 0.985) end
 		local rate
-		if st.shiftT > 0 then rate = st.shiftKind == -1 and 16 or 7   -- downshifts snap up to the new revs
+		if st.shiftT > 0 then rate = st.shiftKind == -1 and (st.shiftSoft and 8 or 16) or 7   -- downshifts snap up to the new revs
 		elseif target > st.rpm then rate = 5 + 5 * engThr
 		else rate = 6 end
 		st.rpm = st.rpm + (target - st.rpm) * min(1, dt * rate)
@@ -352,7 +356,7 @@ function DT.Step(st, cfg, dt, inp)
 			local p = 1 - st.shiftT / 0.32
 			st.soundThr = engThr * (0.3 + 0.7 * p * p)
 		elseif st.shiftT > 0 and st.shiftKind == -1 then
-			st.soundThr = max(engThr, 0.6)      -- downshift: rev-matching throttle blip
+			st.soundThr = max(engThr, st.shiftSoft and 0.25 or 0.6)   -- downshift: rev-matching throttle blip
 		else
 			st.soundThr = engThr
 		end

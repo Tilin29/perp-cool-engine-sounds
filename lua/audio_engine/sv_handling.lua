@@ -347,15 +347,28 @@ hook.Add("Tick", "audio_engine_traction", function()
 			else
 				want = 1
 			end
-			-- cruise control (sv_cruise.lua): W held, the power trimmed to hold the set speed
+			-- speed limiter (sv_cruise.lua): W held near the limit, the power trimmed to hold it;
+			-- over it, off (it brakes there too)
 			local cp
-			if veh.audioCruise and veh.audioCruiseThr and not veh.audioCruiseOwn then
-				local C = E.CRUISE
-				local err = veh.audioCruise - v * 2.23694
-				veh.audioCruiseI = math.Clamp((veh.audioCruiseI or C.startPow) + C.ki * err * dt, C.minPow, 1)
-				cp = math.Clamp(veh.audioCruiseI + C.kp * err, C.minPow, 1)
+			if veh.audioCruise then
+				local C, mph = E.CRUISE, v * 2.23694
+				-- the car's acceleration (mph/s, smoothed)
+				local acc = veh.audioLimLastV and (mph - veh.audioLimLastV) / dt or 0
+				veh.audioLimAcc = (veh.audioLimAcc or 0) + (acc - (veh.audioLimAcc or 0)) * math.min(1, dt * 10)
+				veh.audioLimLastV = mph
+				if veh.audioLimBrake then
+					cp = C.minPow
+				elseif veh.audioLimHold then
+					-- the acceleration it wants shrinks to nothing at the limit; the power follows
+					local want = C.k * (veh.audioCruise - mph)
+					veh.audioCruiseI = math.Clamp((veh.audioCruiseI or 1) + C.ki * (want - veh.audioLimAcc) * dt, C.minPow, 1)
+					cp = veh.audioCruiseI
+				end
+			else
+				veh.audioLimLastV, veh.audioLimAcc = nil, nil
 			end
-			if math.abs((cp or 1) - (veh.audioCruisePowSent or 1)) >= T.step or (cp == nil and veh.audioCruisePowSent ~= nil) then
+			local cstep = veh.audioCruise and E.CRUISE.powStep or T.step
+			if math.abs((cp or 1) - (veh.audioCruisePowSent or 1)) >= cstep or (cp == nil and veh.audioCruisePowSent ~= nil) then
 				veh.audioCruisePowSent = cp
 				veh.audioParamsDirty = true
 			end

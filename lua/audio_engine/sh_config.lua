@@ -55,8 +55,8 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 		kickRpm = 0.60,    -- pressing W below 3,600 rpm kicks down...
 		sagRpm = 0.38,     -- ...and so does holding W while the revs sag under 2,280
 		kickLand = 0.88,   -- kickdown picks the lowest gear that stays under 5,280
-		brakeRpm = 0.80,   -- braking: shift down once the revs fall below 4,800...
-		brakeLand = 0.96,  -- ...if the lower gear keeps them under 5,760
+		brakeRpm = 0.45,   -- braking: shift down once the revs fall below 2,700...
+		brakeLand = 0.70,  -- ...if the lower gear keeps them under 4,200
 		lugRpm = 0.40,     -- coasting: shift down below 2,400
 	},
 	wheelRadius = 0.376,
