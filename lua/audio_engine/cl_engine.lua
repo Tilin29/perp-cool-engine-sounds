@@ -532,9 +532,12 @@ local function updateCar(car, dt)
 
 	updateSound(car, dt)
 
-	-- the model's own dashboard tach needle follows the revs
-	local maxR = math.ceil((cfg.redline + 500) / 1000) * 1000
-	ent:SetPoseParameter("vehicle_guage", math.Clamp(st.rpm / maxR, 0, 1))
+	-- the model's own dashboard tach needle follows the revs (not on cars whose wings/vents also
+	-- hang off that pose: those stay on Source's speed, E.GAUGE_PARTS)
+	if not cfg.gaugeParts then
+		local maxR = math.ceil((cfg.redline + 500) / 1000) * 1000
+		ent:SetPoseParameter("vehicle_guage", math.Clamp(st.rpm / maxR, 0, 1))
+	end
 end
 
 ---------------------------------------------------------------------------

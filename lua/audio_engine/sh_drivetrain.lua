@@ -281,16 +281,19 @@ function DT.Step(st, cfg, dt, inp)
 				wheelRpm = rpmIn(st.gear)
 			end
 			if st.holdT <= 0 and st.shiftT <= 0 then
-				-- flat out but no longer accelerating (top speed / drag limit)
-				if pedal and not corner and st.accel < 0.35 and wheelRpm > red * 0.55 then
+				-- flat out but no longer accelerating (top speed / drag limit); slowing down
+				-- (a turn scrubbing speed) is not that
+				if pedal and not corner and abs(st.accel) < 0.35 and wheelRpm > red * 0.55 then
 					st.stallT = st.stallT + dt
 				else
 					st.stallT = 0
 				end
 				if pedal then
-					-- kickdown when you get on it with the revs low, or if they sag while you hold it
-					local kick = (st.pressT < 0.6 and rpm < red * SH.kickRpm) or rpm < red * SH.sagRpm
-					local cornerKick = corner and rpm < red * SH.cornerRpm
+					-- kickdown when you get on it with the revs low, or if they sag while you hold it.
+					-- Judged on the wheels' revs: the engine's include converter slip, which with W
+					-- held never falls under ~0.47 x redline, so a car slowed by a turn stayed in its gear
+					local kick = (st.pressT < 0.6 and wheelRpm < red * SH.kickRpm) or wheelRpm < red * SH.sagRpm
+					local cornerKick = corner and wheelRpm < red * SH.cornerRpm
 					-- the shift point follows how hard the car pulls: flat out on a quick car it
 					-- holds each gear to upRpm, a car that only creeps faster (heavy, or near its
 					-- top speed) changes up early, so it still climbs into its last gear
@@ -298,9 +301,10 @@ function DT.Step(st, cfg, dt, inp)
 					local upAt = red * (SH.lazyUpRpm + (SH.upRpm - SH.lazyUpRpm) * pull)
 					-- (not into the top gear: it changes up into that near the top speed, at upRpm
 					-- or once it stops gaining speed, then settles at lower revs)
-					local lazy = not corner and st.gear + 1 < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
+					-- (only while it still gains speed: slowing through a turn it changed up and stuck)
+					local lazy = not corner and st.accel > 0 and st.gear + 1 < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
 					if inp.cruise then
-						kick, cornerKick = rpm < red * SH.sagRpm, false
+						kick, cornerKick = wheelRpm < red * SH.sagRpm, false
 						lazy = st.gear < n and rpmIn(st.gear + 1) > red * SH.cruiseLand
 					end
 					if st.gear < n and (wheelRpm > red * SH.upRpm or lazy or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then

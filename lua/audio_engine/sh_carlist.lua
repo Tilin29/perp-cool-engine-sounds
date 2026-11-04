@@ -391,6 +391,30 @@ E.ECONOMY = {
 	["Volkswagen New Beetle"] = true,
 }
 
+--[[
+	Cars whose model also moves body parts on the "vehicle_guage" pose parameter (wings rising,
+	vents opening), not just the dash needles. Source sets that pose from the car's speed;
+	cl_engine points it at the revs for the tach, which made these parts flap with every shift.
+	These keep Source's speed. Found by reading which bones each model's vehicle_guage sequences
+	animate (the TDM .mdl files).
+]]
+E.GAUGE_PARTS = {
+	["Audi R8 Plus"] = true,                      -- Spoiler
+	["Audi R8 V10"] = true,                       -- Spoiler1, Spoiler2
+	["Bugatti Veyron 16.4"] = true,               -- Spoiler01-03
+	["Bugatti Veyron SS"] = true,                 -- Spoiler1, Spoiler2
+	["Ferrari Enzo"] = true,                      -- spoiler
+	["Ferrari F12 Berlinetta"] = true,            -- spoiler1, spoiler2
+	["Ferrari LaFerrari"] = true,                 -- spoiler, lower_spoiler
+	["Jaguar F-Type"] = true,                     -- spoiler
+	["Lamborghini Murcielago LP670-4 SV"] = true, -- ventl, ventr
+	["McLaren F1"] = true,                        -- spoiler
+	["Mercedes SLS AMG"] = true,                  -- spoiler1, spoiler2
+	["Mini Coupe"] = true,                        -- spoiler1, spoiler2
+	["Porsche 918 Spyder"] = true,                -- spoiler
+	["Porsche Carrera GT"] = true,                -- spoiler
+}
+
 -- register a car's model with the engine from the list above
 function E.RegisterCarNamed(model, carName, extra)
 	local e = E.CAR_ENGINES[carName]
@@ -409,6 +433,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		stockBov = E.CAR_BOV[carName] and true or false,
 		stockBovVol = E.STOCK_BOV_VOLUME,
 		emotionStart = E.CAR_EMOTION[carName] or false,
+		gaugeParts = E.GAUGE_PARTS[carName] and true or false,
 		gearCount = E.CAR_GEARS[carName],
 		topSpeed = "auto",
 		wheelRadius = 0.33,

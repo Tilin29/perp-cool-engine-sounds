@@ -4,7 +4,7 @@ Garry's Mod addon for the PERPHeads server (128 players, up to ~40 cars in one a
 It started as a police RTU Mercedes SL65 AMG (TDM Cars based), and has grown into a shared engine
 system for every car. Engine sounds are **generated procedurally** by a synth ported from the "Rev Bench" web page. Every car's stock engine
 is rendered offline by that same synth (`dev/baker`) and shipped as WAVs; only engines tuned in game are generated on the client.
-Keep the synth the single source of every sound (no recordings). PERP integration log: `INTEGRATION.md`.
+Keep the synth the single source of every sound (no recordings). Porting the sounds into PERP: `PORTING.md`.
 
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu. Server: sv_engine, sv_stability.
@@ -45,6 +45,8 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   that gear's redline speed, and there's no lazy upshift into it: the car changes up near top speed and settles lower.
   Cruise (`inp.cruise`): highest gear above `cruiseLand` 0.45, down only below `sagRpm`, no kickdown, steady `cruiseThr` 0.35.
   Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.
+  Downshifts with W held (kick/sag/corner) judge the wheels' revs, not `st.rpm`: converter slip keeps that over ~0.47 x redline
+  with W held, so a car slowed by a turn stuck in its gear. No lazy upshift while slowing (`st.accel > 0`), and slowing isn't a stall.
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
   gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (one faint whine: a tone of order chosen to reach
   `EV_TOP_HZ` 450 Hz at redline, weak harmonics, a slight speed ripple so it isn't a pure sine, under a bearing/air hiss; regen whines softer off throttle; near silent at
@@ -64,6 +66,8 @@ Keep the synth the single source of every sound (no recordings). PERP integratio
   - Doppler, road/wind, turbo/BOV from the env bank, pops logic
   - pass-by swell (`audio_engine_passby`): other cars sit up to 4.4 dB lower past 35 m, full level inside 8 m (after the headroom);
     `CAR_EMOTION` cars get sound level `E.EMOTION_SOUNDLEVEL` 92 (others 85, economy 80)
+  - the `vehicle_guage` pose follows the revs (tach needle), except on `E.GAUGE_PARTS` cars (sh_carlist): 14 TDM models
+    also animate wings/vents on that pose, which flapped with the revs; they keep Source's speed-driven value
 - `sv_engine.lua`: ignition, run by the server.
   - Engine off on entry; start key `audio_engine_startkey` (userinfo, default I) or `audio_engine_toggle`.
   - The server runs `DT.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
