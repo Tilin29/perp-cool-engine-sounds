@@ -250,14 +250,15 @@ local function build(b)
 		local kinds = { "pop", "pop", "crackle", "pop", "crackle" }
 		for i, kind in ipairs(kinds) do
 			local p = Synth.RenderBackfire(cfg, sr, 1234 + i * 777, kind, y)
-			-- generated 6 dB hot and played at half volume, so the pop volume can go to 200%
-			scale(p, ref * 10 ^ (2 / 20) / rmsHead(p, math.floor(sr * 0.02)))
+			-- 4 dB under the loudest band, played at half volume so the pop volume can go to 200%
+			-- (was 2 dB over and bangs 9: they stood out over the engine like firecrackers)
+			scale(p, ref * 10 ^ (-4 / 20) / rmsHead(p, math.floor(sr * 0.02)))
 			b.pops[i] = add("pop" .. i, p, false, true)
 		end
 		b.bangs = {}
 		for i = 1, 3 do
 			local bg = Synth.RenderBackfire(cfg, sr, 4321 + i * 999, "bang", y)
-			scale(bg, ref * 10 ^ (9 / 20) / rmsHead(bg, win))
+			scale(bg, ref * 10 ^ (3 / 20) / rmsHead(bg, win))
 			b.bangs[i] = add("bang" .. i, bg, false, true)
 		end
 	end

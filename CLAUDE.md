@@ -19,6 +19,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Stock pops/BOV are per car, not per preset: `CAR_POPS[name]` (frequency, unlisted = off), `CAR_BOV[name]` (audible stock
   blow-off only), volumes `STOCK_POP_VOLUME` 0.7 / `STOCK_BOV_VOLUME` 0.6, applied in `CarStockProfile` (runtime only: no re-bake).
   Preset pops/bov are just the starting point when retuning in the menu. Big pop events scale with pops^2 (cl_engine).
+  Pop timing (cl_engine): lifting off over half redline starts a burble 0.12-0.3 s later, uneven clusters thinning out over
+  (0.8 + 2.2 x pops) s and with the revs; back on the throttle ends it; a long coast only pops now and then (a per-frame chance
+  spread lone pops over every coast: popcorn).
   `CAR_EMOTION[name]`: high-powered cars that rev-flare on start-up (`cfg.emotionStart`, picked by sv_engine; runtime only); others get the gentle start.
   `ECONOMY[name]` + `ECONOMY_SOUND`: economy cars get tone x0.5 and gurgle 0 (in the sound key: re-bake), volume 0.8, soundLevel 80.
 - `sh_perp.lua`: mutes the TDM engine soundscripts named in registered cars' PERP scripts (base + used/upgrade_1/upgrade_2/spiked
@@ -52,7 +55,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `EV_TOP_HZ` 450 Hz at redline, weak harmonics, a slight speed ripple so it isn't a pure sine, under a bearing/air hiss; regen whines softer off throttle; near silent at
   low speed; bands 1.35x apart; electric bands keep natural levels, no per-band loudness matching, the top band's on loop is set
   to `TARGET_EV_DB` -32 dB rms full band; cl_engine plays EVs and their hum at `E.EV_VOLUME` 0.1). `RenderEVHumLoop`: the steady low-speed EV hum (env bank `evhum`), played by
-  cl_engine at a near-fixed pitch, fading out between 8% and 20% of redline. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`.
+  cl_engine at a near-fixed pitch, fading out between 8% and 20% of redline. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
+  a ~1 ms thump + 35-100 ms muffler scatter, body peak 140-190 Hz, low-passed (a 0.4 ms click with light saturation sounded like
+  firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over.
 - `cl_soundbank.lua`: builds a bank per soundKey in a coroutine (6 ms/frame budget). It holds:
   - one on/off-throttle loop pair per rpm band (bands ~1.26x apart), a limiter loop, start/stop one-shots, pops and bangs
   - **loudness matching** (TARGET_DB -21, electric -30, measured as rms above 250 Hz of the on-throttle loops), then `limitPeaks` (look-ahead, circular for loops)

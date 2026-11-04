@@ -995,43 +995,56 @@ function Synth.RenderBackfire(cfg, sr, seed, kind, yieldFn)
 	-- 0 = muffled (through the silencers), 1 = sharp (straight pipe)
 	local sharp = cfg.popTone or 0.2
 
-	-- events (time, strength)
+	--[[
+		Events (time, strength). Real overrun pops aren't evenly spaced clicks: unburnt fuel lights
+		in a few exhaust pulses in a row, so they come as a ragged "b-r-rap" (a run of quick,
+		uneven pops that swells and fades) or a single pop with a weaker echo.
+	]]
 	local ev = {}
 	if kind == "crackle" then
-		local t = 0.003
-		for i = 1, 3 + floor(r01() * 3) do
-			ev[#ev + 1] = { t, 0.5 + 0.5 * r01() }
-			t = t + 0.03 + 0.07 * r01()
+		local t, count = 0.004, 4 + floor(r01() * 5)
+		for i = 1, count do
+			local x = (i - 0.5) / count
+			local swell = math.sin(math.pi * x) ^ 0.7          -- builds, then dies away
+			if i == 1 or r01() > 0.15 then                      -- now and then a pulse doesn't light
+				ev[#ev + 1] = { t, (0.35 + 0.65 * swell) * (0.6 + 0.4 * r01()) }
+			end
+			t = t + 0.018 + 0.04 * r01() * r01()                -- mostly quick, a few longer gaps
 		end
 	elseif big then
-		ev[1] = { 0.003, 1 }
-		if r01() < 0.7 then ev[2] = { 0.08 + 0.05 * r01(), 0.4 + 0.15 * r01() } end
+		ev[1] = { 0.004, 1 }
+		local t = 0.06 + 0.06 * r01()
+		for i = 1, floor(r01() * 3) do                          -- an after-pop or two
+			ev[#ev + 1] = { t, (0.45 - 0.12 * i) * (0.7 + 0.3 * r01()) }
+			t = t + 0.035 + 0.06 * r01()
+		end
 	else
-		ev[1] = { 0.003, 0.8 + 0.2 * r01() }
+		ev[1] = { 0.004, 0.8 + 0.2 * r01() }
+		if r01() < 0.35 then ev[2] = { 0.022 + 0.025 * r01(), 0.3 + 0.2 * r01() } end
 	end
 
 	--[[
-		Each pop = a direct pressure crack + the scatter: the wave rattling out through the
-		muffler chambers, a dense random burst of reflections a few tens of ms long. The
-		scatter is what makes it an exhaust "brap" instead of a firecracker's dry snap.
-		Nothing here is periodic, so nothing has a pitch.
+		Each pop = a pressure thump + the scatter: the wave rattling out through the muffler
+		chambers, a dense random burst of reflections tens of ms long. The thump rises over about
+		a millisecond and the scatter rings on: a short, sharp spike with a quick tail is what made
+		them sound like firecrackers / popcorn. Nothing here is periodic, so nothing has a pitch.
 	]]
-	local direct = lerp(0.3, 0.85, sharp)
-	local tauR, tauD = 0.0004, big and 0.003 or 0.0016
-	local scatAtk = lerp(0.002, 0.0008, sharp)
-	local scatDec = big and lerp(0.045, 0.03, sharp) or lerp(0.02, 0.012, sharp)
-	local dur = ev[#ev][1] + (big and 0.3 or 0.13)
+	local direct = lerp(0.18, 0.5, sharp)
+	local tauR, tauD = big and 0.0012 or 0.0009, big and 0.007 or 0.0042
+	local scatAtk = lerp(0.004, 0.0022, sharp)
+	local scatDec = big and lerp(0.1, 0.07, sharp) or lerp(0.05, 0.035, sharp)
+	local dur = ev[#ev][1] + (big and 0.45 or 0.24)
 	local n = floor(dur * sr)
 
 	local scatF = {
-		biquad("highpass", big and 90 or 150, sr, -3),
-		biquad("lowpass", lerp(1100, 2600, sharp), sr, -3),
+		biquad("highpass", big and 70 or 90, sr, -3),
+		biquad("lowpass", lerp(650, 1600, sharp), sr, -3),
 	}
 	local shape = {
-		biquad("highpass", big and 45 or 70, sr, -3),
-		biquad("peaking", big and 300 or 450, sr, 0.8, 5),
-		biquad("lowshelf", 150, sr, 1, big and 5 or 1),
-		biquad("lowpass", lerp(1400, 3200, sharp), sr, -3),
+		biquad("highpass", big and 40 or 55, sr, -3),
+		biquad("peaking", big and 140 or 190, sr, 0.9, 6),   -- the exhaust's body
+		biquad("lowshelf", 150, sr, 1, big and 4 or 2),
+		biquad("lowpass", lerp(1000, 2200, sharp), sr, -3),
 	}
 	local function run(fs, x)
 		for k = 1, #fs do
@@ -1050,19 +1063,19 @@ function Synth.RenderBackfire(cfg, sr, seed, kind, yieldFn)
 		local src, scat = 0, 0
 		for _, e in ipairs(ev) do
 			local dt = t - e[1]
-			if dt >= 0 and dt < 0.2 then
+			if dt >= 0 and dt < 0.4 then
 				src = src + e[2] * (1 - exp(-dt / tauR)) * exp(-dt / tauD)
 				scat = scat + e[2] * (1 - exp(-dt / scatAtk)) * exp(-dt / scatDec)
 			end
 		end
-		local x = src * direct * 2.2 + run(scatF, rnd()) * scat * 1.6
+		local x = src * direct * 2.2 + run(scatF, rnd()) * scat * 2.0
 		raw[i] = run(shape, x)
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
 
 	local peak = 1e-9
 	for i = 1, n do local a = abs(raw[i]); if a > peak then peak = a end end
-	local drive = lerp(1.2, 2.0, sharp) + (big and 0.3 or 0)
+	local drive = lerp(0.8, 1.4, sharp) + (big and 0.2 or 0)   -- less saturation: a rounder crack
 	local norm = 1 / tanh(drive)
 	local out = {}
 	for i = 1, n do out[i] = tanh(drive * raw[i] / peak) * norm end

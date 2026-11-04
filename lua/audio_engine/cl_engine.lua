@@ -419,36 +419,63 @@ local function updateSound(car, dt)
 		setGroup(car, "evhum", { env.evhum }, { humVol }, pitch, dt)
 	end
 
-	-- pops & bangs: profile "pops" = how often (0 = off), "popVol" = how loud (1 = default)
+	--[[
+		Pops & bangs: profile "pops" = how often (0 = off), "popVol" = how loud (1 = default).
+		Timed like a real overrun: lifting off high in the revs starts a burble a moment later (the
+		fuel has to reach the hot exhaust), pops in uneven clusters, thick at first and thinning out
+		as the revs fall and the seconds pass; back on the throttle ends it. A long coast only pops
+		now and then. (A per-frame chance spread lone pops evenly over every coast: popcorn.)
+		The big events (a bang to open the burble, upshift crack, limiter) go with P squared: a Rare
+		or Occasional car crackles now and then, only a Frequent one bangs on most lifts.
+	]]
 	local P = cfg.profile.pops or 0
 	local popVol = master * car.loopGain * 0.5 * (cfg.profile.popVol or 1) * (car.prox or 1)
 	if P > 0 and popVol > 0 and #bank.pops > 0 and st.on and st.phase == "run" then
-		local red = cfg.redline
-		local firings = st.rpm / 60 * bank.cyl / 2
-		local often = P * P * 1.6 + P * 0.4          -- gentle at the low end, a lot at the top
-		-- the big events (lift-off bang, upshift crack, limiter) go with P squared: a Rare or
-		-- Occasional car crackles now and then, only a Frequent one bangs on most lifts
+		local red, now = cfg.redline, RealTime()
 		local event = P * P
-		-- crackle on the overrun
-		if st.soundThr < 0.04 and st.rpm > red * 0.4 and not st.cut then
-			if math.random() < firings * 0.012 * often * dt then playPop(car, popVol, false) end
+		local overrun = st.soundThr < 0.04 and st.rpm > red * 0.35 and not st.cut
+		-- lift-off high in the revs: a burble starts, longer the higher the revs and the more it pops
+		if (car.lastThr or 0) > 0.8 and st.thr < 0.5 and st.rpm > red * 0.5 then
+			local hi = math.Clamp((st.rpm / red - 0.5) / 0.4, 0, 1)
+			car.burbleT0 = now
+			car.burbleDur = (0.8 + 2.2 * P) * (0.5 + 0.5 * hi)
+			car.popNext = now + 0.12 + 0.18 * math.random()
+			car.popBang = math.random() < event * (0.4 + 0.6 * hi)
 		end
-		-- a bang when you lift off high in the revs (just after the throttle shuts)
-		if (car.lastThr or 0) > 0.8 and st.thr < 0.5 and st.rpm > red * 0.5 and math.random() < math.min(1, event * 1.5) then
-			car.bangAt = RealTime() + 0.05 + 0.15 * math.random()
+		if st.soundThr > 0.3 then car.popNext = nil end    -- back on the throttle
+		if overrun and car.popNext and now >= car.popNext then
+			local age = (now - car.burbleT0) / car.burbleDur
+			local inten = (age < 1 and (1 - age) ^ 1.5 or 0) * math.Clamp((st.rpm / red - 0.35) / 0.5, 0, 1)
+			if inten > 0.03 then
+				if car.popBang then
+					playPop(car, popVol * (0.8 + 0.2 * math.random()), true)
+					car.popBang = false
+				else
+					playPop(car, popVol * (0.5 + 0.5 * inten) * (0.75 + 0.25 * math.random()), false)
+				end
+				-- a quick follow-up (a cluster), or a pause that grows as the burble dies away
+				if math.random() < 0.25 + 0.3 * inten then
+					car.popNext = now + 0.05 + 0.08 * math.random()
+				else
+					car.popNext = now + (0.15 + 0.5 * math.random()) / (0.3 + 1.5 * inten * P)
+				end
+			else
+				car.popNext = nil
+			end
 		end
-		-- upshift crack at full throttle
-		if st.gear > (car.lastGear or 0) and (car.lastGear or 0) > 0 and st.shiftKind == 1 and st.thr > 0.8 and math.random() < event then
-			playPop(car, popVol, P > 0.5)
+		-- a long coast at high revs: an odd pop now and then
+		if overrun and not car.popNext and st.rpm > red * 0.55 and math.random() < event * 0.25 * dt then
+			playPop(car, popVol * (0.4 + 0.3 * math.random()), false)
+		end
+		-- upshift crack, flat out high in the revs
+		if st.gear > (car.lastGear or 0) and (car.lastGear or 0) > 0 and st.shiftKind == 1 and st.thr > 0.8
+			and (car.lastRpm or 0) > red * 0.75 and math.random() < event * 0.6 then
+			playPop(car, popVol * 0.8, P > 0.7 and math.random() < 0.3)
 		end
 		-- limiter
-		if st.limEvent and math.random() < math.min(1, event * 1.5) then playPop(car, popVol, P > 0.6 and math.random() < 0.4) end
+		if st.limEvent and math.random() < event then playPop(car, popVol * 0.8, P > 0.7 and math.random() < 0.25) end
 	end
-	if car.bangAt and RealTime() >= car.bangAt then
-		car.bangAt = nil
-		playPop(car, popVol, true)
-		if math.random() < event then playPop(car, popVol * 0.8, false) end
-	end
+	car.lastRpm = st.rpm
 	car.lastThr = st.thr
 	car.lastGear = st.gear
 
