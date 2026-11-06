@@ -119,6 +119,7 @@ function IsValid(x) return x ~= nil and x ~= false end
 function PLY:IsTyping() return false end
 util = { TraceLine = function() return { Hit = false, Fraction = 1 } end }
 input = { IsKeyDown = function() return false end }
+cookie = { GetNumber = function(_, d) return d end, Set = function() end }
 gui = { IsGameUIVisible = function() return false end }
 vgui = { GetKeyboardFocus = function() return nil end }
 

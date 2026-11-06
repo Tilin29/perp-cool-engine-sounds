@@ -17,9 +17,15 @@ local cvVol = CreateClientConVar("audio_engine_volume", "1", true, false, "Engin
 local cvStartKey = CreateClientConVar("audio_engine_startkey", "i", true, false, "Key that starts/stops the engine of the car you drive (a key name such as i, k or f1; none = off)")
 local cvRoad = CreateClientConVar("audio_engine_roadnoise", "1", true, false, "Tyre roar volume (0-2)", 0, 2)
 local cvWind = CreateClientConVar("audio_engine_windnoise", "1", true, false, "Wind noise volume (0-2)", 0, 2)
-local cvDoppler = CreateClientConVar("audio_engine_doppler", "1", true, false, "Doppler pitch shift of passing cars (0 = off, 0.25 = real, 1 = default, four times real)", 0, 1)
+local cvDoppler = CreateClientConVar("audio_engine_doppler", "0.25", true, false, "Doppler pitch shift of passing cars (0 = off, 0.25 = default, real, 1 = four times real)", 0, 1)
+-- the default was 1 and clients saved it, so a new default alone wouldn't reach them: moved over
+-- once, leaving any other value someone picked
+if cookie.GetNumber("audio_engine_doppler_moved", 0) == 0 then
+	cookie.Set("audio_engine_doppler_moved", "1")
+	if cvDoppler:GetFloat() == 1 then RunConsoleCommand("audio_engine_doppler", "0.25") end
+end
 local cvPassby = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off, 1 = default)", 0, 2)
-local cvTunnel = CreateClientConVar("audio_engine_tunnel", "7", true, false, "Source DSP preset for cars in a tunnel (0 = no tunnel effect, 6 = medium tunnel, 7 = large tunnel)", 0, 133)
+local cvTunnel = CreateClientConVar("audio_engine_tunnel", "2", true, false, "Source DSP preset for cars in a tunnel (0 = no tunnel effect, 2 = default, 6 = medium tunnel, 7 = large tunnel)", 0, 133)
 
 local cars = {}
 E.ClientCars = cars
@@ -234,11 +240,11 @@ local function updateListener(dt)
 	listener.cabin = IsValid(ply:GetVehicle()) and view == ply
 end
 
--- f' = f (c + v_listener) / (c - v_source), both measured toward each other. At the real speed of
--- sound an 80 mph drive-by only bends 3-4 semitones, which hardly registers in a game, so sound
--- travels slower here: c / (audio_engine_doppler x DOPPLER_BOOST)
+-- f' = f (c + v_listener) / (c - v_source), both measured toward each other. Sound travels at
+-- c / (audio_engine_doppler x DOPPLER_BOOST): the default 0.25 is the real speed of sound, where
+-- an 80 mph drive-by bends 3-4 semitones; 1 is four times that
 local DOPPLER_BOOST = 4
--- That boost goes shrill at speed: closing at 40 m/s came out almost an octave up. Up to
+-- The full boost goes shrill at speed: closing at 40 m/s came out almost an octave up. Up to
 -- DOPPLER_KNEE semitones it's left alone (an ordinary pass), past it the shift bends over towards
 -- DOPPLER_MAX, which a head-on pass at any speed never goes over
 local DOPPLER_KNEE, DOPPLER_MAX = 4, 7
@@ -603,8 +609,8 @@ end
 	Tunnels. A spot is in a tunnel when it has a roof, walls close on two opposite sides, and a long
 	open run the other way: traced against the map only, so cars and props don't count. An overpass
 	has no walls, a street no roof, and a room no long run.
-	A car in one, or any car while you stand in one, gets Source's tunnel reverb (DSP preset
-	audio_engine_tunnel; 7 rings around 150 Hz, the way a long concrete tube does), and a car in one
+	A car in one, or any car while you stand in one, gets a Source reverb (DSP preset
+	audio_engine_tunnel, picked by ear), and a car in one
 	carries TUNNEL_LEVEL dB further. Neither is known to reach a sound already playing, so loops are
 	restarted when the room changes (setGroup).
 	All of this is for people outside a car: sitting in one, cars sound as they do anywhere else.

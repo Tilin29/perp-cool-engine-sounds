@@ -99,6 +99,7 @@ dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "audio_engine/sh_presets.
 dofile(A .. "audio_engine/cl_synth.lua"); dofile(A .. "audio_engine/cl_soundbank.lua")
 util = util or {}; util.TraceLine = function() return { Hit = false, Fraction = 1 } end
 input = { IsKeyDown = function() return false end }
+cookie = { GetNumber = function(_, d) return d end, Set = function() end }
 dofile(A .. "audio_engine/cl_engine.lua")
 
 local E = AUDIO_ENGINE
