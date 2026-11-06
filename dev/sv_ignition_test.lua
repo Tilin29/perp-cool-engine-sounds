@@ -44,14 +44,13 @@ show("spawned")
 ply.inside = true run("PlayerEnteredVehicle", ply, veh) veh.enabled = true -- Source starts it on entry
 step(0.05) show("got in (Source enabled the engine)")
 step(2) show("2 s later, no key")
-run("PlayerButtonDown", ply, KEY_K) step(0.1) show("pressed K (not the start key)")
-run("PlayerButtonDown", ply, KEY_I) step(0.05) show("pressed I")
+cmds.audio_engine_toggle(ply) step(0.05) show("pressed I")
 local t0 = now
 while not veh.audioDrivable and now - t0 < 10 do step(0.05) end
 show(string.format("drivable after %.2f s (emotion start)", now - t0))
-run("PlayerButtonDown", ply, KEY_I) step(0.5) show("pressed I again")
+cmds.audio_engine_toggle(ply) step(0.5) show("pressed I again")
 cvs.audio_engine_emotionstart.v = "0"
-run("PlayerButtonDown", ply, KEY_I) t0 = now
+cmds.audio_engine_toggle(ply) t0 = now
 while not veh.audioDrivable and now - t0 < 10 do step(0.05) end
 show(string.format("drivable after %.2f s (normal start)", now - t0))
 ply.inside = false run("PlayerLeaveVehicle", ply, veh) step(0.1) show("got out")

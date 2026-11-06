@@ -80,6 +80,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 - `cl_engine.lua`: per-car playback.
   - band crossfade with pitch; volumes glide (VOL_SLEW), which avoids per-frame zipper clicks
   - per-car headroom (ceiling 0.66 driving / 0.68 neutral, leaving room for band peaks lining up mid cross-fade, using measured peaks; pops/BOV limited with `popLoad`)
+  - Doppler pitch bends over past `DOPPLER_KNEE` 4 semitones towards `DOPPLER_MAX` 7 (`softPitch`): at four times real it was nearly an octave at 40 m/s
+  - tunnels (`inTunnel`: roof, close walls, long open run, map only; 17 traces, listener at 4 Hz, cars one per frame): only for listeners outside a car (sitting in one, nothing changes): a car in one or any car while you're in one gets DSP
+    `audio_engine_tunnel` (7 = large tunnel, `CSoundPatch:SetDSP`); a car in one carries `TUNNEL_LEVEL` 8 dB further; both inside: no pass-by drop with range.
+    SetDSP/SetSoundLevel go on before PlayEx (`startPatch`) and loops restart when the room changes (`roomGen`): not known to reach a playing sound
+  - once a second each active loop is checked with `IsPlaying` and restarted if the game dropped it (`car.revive`)
+  - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out;
+    the gearbox's speed (`car.vDrive`) moves at most `SPEED_SLEW` 40 m/s2. Dividing by the capped frame dt made stutters read as several times the real speed
   - Doppler (`audio_engine_doppler`: 1 = default and maximum, four times real, 0.25 = real; saved at 1 by old clients, so the default stays 1), road/wind, turbo/BOV from the env bank, pops logic
   - pass-by swell (`audio_engine_passby`): other cars follow (5 m / distance)^curve down to 30 m (after the headroom; start/stop one-shots too), up to x2 at 2.5 m, all by speed
     (`pace` 5-30 m/s): curve 0.35 (-5.4 dB at 30 m) to 0.7 (-10.9 dB; steep on every car, slow ones stopped carrying), the part over 1 scales with pace and is held under a 0.95 peak;
@@ -92,9 +99,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - the `vehicle_guage` pose follows the revs (tach needle), except on `E.GAUGE_PARTS` cars (sh_carlist): 14 TDM models
     also animate wings/vents on that pose (flapped with the revs; Source's speed value folds the R8 Plus/LaFerrari wings back
     down near the top). Those follow speed through per-model {rest, up} pose ranges: up from `E.WING_UP` 0.7 x top speed,
-    down under `E.WING_DOWN_MPH` 30 (`cfg.topSpeed`, km/h). The server sets that pose (`E.WingPose`, sv_engine `Tick` + `FinishMove`,
-    over Source's speed / script top speed written in the driver's move) and the client leaves it alone: set client-side it
-    lost to the networked value now and then and the parts flickered. The tach pose is applied in the car's `RenderOverride`
+    down under `E.WING_DOWN_MPH` 30 (`cfg.topSpeed`, km/h). The server picks the position (`E.WingPose`, sv_engine `Tick`) and sends it in 0.02 steps
+    (NW2 `audio_wing`); cl_engine glides to it at `E.WING_RATE`. Source writes its speed value to this pose in the driver's move: writing
+    ours over it server-side stuttered on real servers (fine in single player), set in Think it lost to the networked value. Both this and the tach pose are applied in the car's `RenderOverride`
     (`ent.audioGuage`, chains any existing override)
   - brake wings `E.BRAKE_WINGS` (P1, SLR; sv_engine, bone manipulation): S held 0.5 s over 15 mph tilts the flap (P1 `spoilerbrake`
     pose, SLR `spoiler` bone 22.5 deg: its airbrake pose compiled empty); the P1 wing sits tucked (`tuck` = per-bone pos/ang, placed
@@ -102,7 +109,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
     shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
 - `sv_engine.lua`: ignition, run by the server.
-  - Engine off on entry; start key `audio_engine_startkey` (userinfo, default I) or `audio_engine_toggle`. Getting out leaves it
+  - Engine off on entry; start key `audio_engine_startkey` (default I; polled by cl_engine, which sends `audio_engine_toggle`: the server's
+    PlayerButtonDown rides on usercmds and missed presses). A press within 1.5 s of starting can't switch it off (`START_LOCK`: at 150 ms ping a second press did). Getting out leaves it
     idling (`audio_engine_keeprunning` 1, default, not archived: a saved 0 from the old default overrode it); getting back in drives off.
   - The server runs `DT.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.

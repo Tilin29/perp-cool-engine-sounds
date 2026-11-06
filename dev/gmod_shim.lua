@@ -99,6 +99,8 @@ CAR = { pos = Vector(0, 0, 0), yaw = 0, nw = {}, pose = {} }
 function CAR:GetModel() return "models/plpd/sl65amg_rtu.mdl" end
 function CAR:GetPos() return Vector(self.pos) end
 function CAR:GetAngles() return { p = 0, y = self.yaw, r = 0 } end
+function CAR:GetUp() return Vector(0, 0, 1) end
+function CAR:IsValid() return true end
 function CAR:IsDormant() return false end
 function CAR:SetPoseParameter(k, v) self.pose[k] = v end
 function CAR:LookupAttachment() return 0 end
@@ -114,6 +116,11 @@ function PLY:EyePos() return Vector(self.eye) end
 function PLY:IsAdmin() return true end
 function GetViewEntity() return PLY end
 function IsValid(x) return x ~= nil and x ~= false end
+function PLY:IsTyping() return false end
+util = { TraceLine = function() return { Hit = false, Fraction = 1 } end }
+input = { IsKeyDown = function() return false end }
+gui = { IsGameUIVisible = function() return false end }
+vgui = { GetKeyboardFocus = function() return nil end }
 
 -- sound -------------------------------------------------------------------------------------
 -- sound.Generate calls fn(t) for every sample, like the game; the buffer is handed to JS
@@ -141,6 +148,8 @@ function CreateSound(ent, name)
 	return p
 end
 function P:SetSoundLevel(l) __snd("level", self.id, l) end
+function P:SetDSP(d) __snd("dsp", self.id, d) end
+function P:IsPlaying() return true end
 function P:PlayEx(v, pitch) __snd("play", self.id, v, pitch) end
 function P:Play() __snd("play", self.id, 1, 100) end
 function P:ChangeVolume(v, dt) __snd("vol", self.id, v, dt or 0) end

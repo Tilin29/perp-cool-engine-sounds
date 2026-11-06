@@ -142,27 +142,20 @@ hook.Add("PlayerLeaveVehicle", "audio_engine", function(ply, veh)
 	if not cvKeep:GetBool() then setEngine(veh, false) end
 end)
 
+-- the start key (audio_engine_startkey, read by cl_engine.lua) sends this too;
 -- bindable: `bind <key> audio_engine_toggle`
+-- Nothing is heard until the server's answer is back, so a second press can come in right after
+-- the first: for START_LOCK s it doesn't count, or it would switch the engine straight off again
+local START_LOCK = 1.5
 concommand.Add("audio_engine_toggle", function(ply)
 	if not IsValid(ply) then return end
 	local veh = ply:GetVehicle()
-	if not tracked[veh] or veh:GetDriver() ~= ply then return end
+	if not IsValid(veh) or not tracked[veh] or veh:GetDriver() ~= ply then return end
+	if (ply.audioKeyNext or 0) > CurTime() then return end
+	ply.audioKeyNext = CurTime() + 0.4
+	if veh:GetNW2Bool("audio_on", false) and CurTime() - veh:GetNW2Float("audio_on_t", 0) < START_LOCK then return end
 	E.ToggleEngine(veh)
 end, nil, "Switch the engine of the car you're driving on or off")
-
--- the start key: each player picks theirs with audio_engine_startkey (default I)
-hook.Add("PlayerButtonDown", "audio_engine", function(ply, button)
-	local veh = ply:GetVehicle()
-	if not IsValid(veh) or not tracked[veh] or veh:GetDriver() ~= ply then return end
-	local name = string.upper(ply:GetInfo("audio_engine_startkey") or "I")
-	if name == "" or name == "NONE" then return end
-	local key = _G["KEY_" .. name]
-	if key and button == key then
-		if (ply.audioKeyNext or 0) > CurTime() then return end
-		ply.audioKeyNext = CurTime() + 0.4
-		E.ToggleEngine(veh)
-	end
-end)
 
 hook.Add("Think", "audio_engine", function()
 	for veh in pairs(tracked) do
@@ -263,9 +256,10 @@ end)
 --[[
 	Wings and vents (E.GAUGE_PARTS cars): their parts hang off the vehicle_guage pose, which
 	Source sets from speed / the script's top speed in the driver's move (the Murcielago's vents
-	opened from half its top speed, the R8 Plus folded its wing away near the top). Setting it on
-	the client lost to that networked value now and then (the parts flickered), so the server
-	writes ours over it: every tick, and again right after the driver's move.
+	opened from half its top speed, the R8 Plus folded its wing away near the top). That pose can't
+	be held from here: on a real server Source's write and ours both reached the clients and the
+	parts stuttered. So the server only picks the position, in steps so it's sent a few times a
+	second at most, and cl_engine sets the pose right before the car is drawn, like the tach needle.
 	Brake wings (E.BRAKE_WINGS: P1, SLR) are moved here too, through bone manipulation.
 ]]
 local function glide(cur, want, up, down)
@@ -306,6 +300,8 @@ local function brakeWing(veh, bw, kmh, top, dt, braking)
 	end
 end
 
+local WING_STEP = 0.02
+
 hook.Add("Tick", "audio_engine_wings", function()
 	local dt = engine.TickInterval()
 	for veh in pairs(tracked) do
@@ -317,7 +313,7 @@ hook.Add("Tick", "audio_engine_wings", function()
 				local kmh = IsValid(phys) and phys:GetVelocity():Length() * 0.09144 or 0   -- in/s -> km/h
 				local top = E.CarTopSpeed(veh, car)
 				if gp then
-					veh:SetPoseParameter("vehicle_guage", E.WingPose(veh, gp, kmh, top, dt))
+					veh:SetNW2Float("audio_wing", math.Round(E.WingPose(veh, gp, kmh, top) / WING_STEP) * WING_STEP)
 				end
 				if bw then
 					local drv = veh:GetDriver()
@@ -328,11 +324,6 @@ hook.Add("Tick", "audio_engine_wings", function()
 			end
 		end
 	end
-end)
-
-hook.Add("FinishMove", "audio_engine_wings", function(ply)
-	local veh = ply:GetVehicle()
-	if IsValid(veh) and veh.audioWingPose then veh:SetPoseParameter("vehicle_guage", veh.audioWingPose) end
 end)
 
 --[[

@@ -468,19 +468,14 @@ function E.WingSpeedUp(veh, kmh, top)
 end
 
 -- the vehicle_guage pose for a car with parts on it (run by the server, sv_engine.lua): kmh and
--- top speed in km/h; glides E.WING_RATE of the pose range per second (the parts take ~1-1.5 s)
-function E.WingPose(veh, gp, kmh, top, dt)
+-- top speed in km/h; cl_engine glides to it at E.WING_RATE of the pose range per second (the
+-- parts take ~1-1.5 s)
+function E.WingPose(veh, gp, kmh, top)
 	local up, f = E.WingSpeedUp(veh, kmh, top)
-	local want
 	if up then
-		want = gp[3] + (gp[4] - gp[3]) * math.Clamp((f - E.WING_UP) / (1 - E.WING_UP), 0, 1)
-	else
-		want = gp[1] + (gp[2] - gp[1]) * math.Clamp(f / E.WING_UP, 0, 1)
+		return gp[3] + (gp[4] - gp[3]) * math.Clamp((f - E.WING_UP) / (1 - E.WING_UP), 0, 1)
 	end
-	local cur = veh.audioWingPose or want
-	local step = dt * E.WING_RATE
-	veh.audioWingPose = cur + math.Clamp(want - cur, -step, step)
-	return veh.audioWingPose
+	return gp[1] + (gp[2] - gp[1]) * math.Clamp(f / E.WING_UP, 0, 1)
 end
 
 -- register a car's model with the engine from the list above

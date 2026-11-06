@@ -57,6 +57,8 @@ function CreateSound(ent, name)
   function p:ChangeVolume(v) self.vol = math.min(1, v) end
   function p:ChangePitch(pi) self.pitch = pi end
   function p:Stop() self.playing = false end
+  function p:SetDSP() end
+  function p:IsPlaying() return self.playing end
   function p:FadeOut(t) self.fade = self.vol / (t * SR) end
   patches[#patches + 1] = p
   return p
@@ -78,6 +80,7 @@ local car = { pos = Vector(0, 0, 0), yaw = 0, nw = {}, removed = false }
 function car:GetModel() return "models/plpd/sl65amg_rtu.mdl" end
 function car:GetPos() return Vector(self.pos) end
 function car:GetAngles() return { p = 0, y = self.yaw, r = 0 } end
+function car:GetUp() return Vector(0, 0, 1) end
 function car:IsDormant() return false end
 function car:SetPoseParameter() end
 function car:LookupAttachment() return 0 end
@@ -94,6 +97,8 @@ bit = require("bit")
 AUDIO_ENGINE = {}
 dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "audio_engine/sh_presets.lua"); dofile(A .. "audio_engine/sh_drivetrain.lua")
 dofile(A .. "audio_engine/cl_synth.lua"); dofile(A .. "audio_engine/cl_soundbank.lua")
+util = util or {}; util.TraceLine = function() return { Hit = false, Fraction = 1 } end
+input = { IsKeyDown = function() return false end }
 dofile(A .. "audio_engine/cl_engine.lua")
 
 local E = AUDIO_ENGINE

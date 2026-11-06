@@ -117,6 +117,7 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_windnoise` | client | 1 | wind volume, 0–2 (0 = off) |
 | `audio_engine_doppler` | client | 1 | Doppler on passing cars, 0 = off, 0.25 = real, 1 = four times real (the maximum) |
 | `audio_engine_passby` | client | 1 | how much passing cars swell in loudness, 0 = off, up to 2 |
+| `audio_engine_tunnel` | client | 7 | Source DSP preset for cars in tunnels, 0 = off, 6 = medium tunnel, 7 = large tunnel |
 | `audio_engine_hud` | client | 1 | show the HUD |
 | `audio_engine_units` | client | mph | `mph` or `kmh` |
 | `audio_engine_hud_scale` | client | 1 | HUD size |

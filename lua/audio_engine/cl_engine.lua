@@ -13,12 +13,13 @@ local DT = E.Drivetrain
 local Bank = E.Bank
 
 local cvVol = CreateClientConVar("audio_engine_volume", "1", true, false, "Engine sound volume (0-2)", 0, 2)
--- sent to the server (userinfo): the key that switches the engine on and off, e.g. i, k, f1, or none
-CreateClientConVar("audio_engine_startkey", "i", true, true, "Key that starts/stops the engine of the car you drive (a key name such as i, k or f1; none = off)")
+-- the key that switches the engine on and off, e.g. i, k, f1, or none
+local cvStartKey = CreateClientConVar("audio_engine_startkey", "i", true, false, "Key that starts/stops the engine of the car you drive (a key name such as i, k or f1; none = off)")
 local cvRoad = CreateClientConVar("audio_engine_roadnoise", "1", true, false, "Tyre roar volume (0-2)", 0, 2)
 local cvWind = CreateClientConVar("audio_engine_windnoise", "1", true, false, "Wind noise volume (0-2)", 0, 2)
 local cvDoppler = CreateClientConVar("audio_engine_doppler", "1", true, false, "Doppler pitch shift of passing cars (0 = off, 0.25 = real, 1 = default, four times real)", 0, 1)
 local cvPassby = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off, 1 = default)", 0, 2)
+local cvTunnel = CreateClientConVar("audio_engine_tunnel", "7", true, false, "Source DSP preset for cars in a tunnel (0 = no tunnel effect, 6 = medium tunnel, 7 = large tunnel)", 0, 133)
 
 local cars = {}
 E.ClientCars = cars
@@ -38,10 +39,17 @@ local function getPatch(car, name)
 	local p = car.patches[name]
 	if not p then
 		p = CreateSound(car.ent, name)
-		p:SetSoundLevel(car.cfg.soundLevel or 85)
 		car.patches[name] = p
 	end
 	return p
+end
+
+-- every sound starts here: the sound level and DSP go on before it plays (see updateRoom)
+local function startPatch(car, name, vol, pitch)
+	local p = getPatch(car, name)
+	p:SetSoundLevel(car.level or car.cfg.soundLevel or 85)
+	p:SetDSP(car.dsp)
+	p:PlayEx(vol, pitch)
 end
 
 local function stopAll(car)
@@ -50,6 +58,7 @@ local function stopAll(car)
 	car.active = {}
 	car.idleT = {}
 	car.cur = {}
+	car.roomOf = {}
 	if car.oneshot then car.oneshot.patch:Stop(); car.oneshot = nil end
 end
 
@@ -80,16 +89,26 @@ local function setGroup(car, key, names, vols, pitch, dt)
 			cur = {}
 			for i = 1, #names do
 				cur[i] = glide(0, vols[i], dt)
-				getPatch(car, names[i]):PlayEx(max(cur[i], 0.001), pitch)
+				startPatch(car, names[i], max(cur[i], 0.001), pitch)
 			end
 			car.cur[key] = cur
 			car.active[key] = true
+			car.roomOf[key] = car.roomGen
 		else
+			-- restarted when the room changed, or if the game dropped the loop (out of channels
+			-- with many cars around): nothing else would start it again, the car just went silent
+			local moved = car.roomOf[key] ~= car.roomGen
+			car.roomOf[key] = car.roomGen
 			for i = 1, #names do
 				cur[i] = glide(cur[i], vols[i], dt)
 				local p = getPatch(car, names[i])
-				p:ChangeVolume(max(cur[i], 0.001), 0)
-				p:ChangePitch(pitch, 0)
+				if moved or (car.revive and not p:IsPlaying()) then
+					p:Stop()
+					startPatch(car, names[i], max(cur[i], 0.001), pitch)
+				else
+					p:ChangeVolume(max(cur[i], 0.001), 0)
+					p:ChangePitch(pitch, 0)
+				end
 			end
 		end
 	elseif car.active[key] then
@@ -115,7 +134,8 @@ end
 local function playOneShot(car, kind, name, vol, pitch, fadeAt, dur)
 	if car.oneshot then car.oneshot.patch:FadeOut(0.1) end
 	local p = CreateSound(car.ent, name)
-	p:SetSoundLevel(car.cfg.soundLevel or 85)
+	p:SetSoundLevel(car.level or car.cfg.soundLevel or 85)
+	p:SetDSP(car.dsp)
 	p:PlayEx(vol, pitch)
 	car.oneshot = { kind = kind, patch = p, t0 = RealTime(), fadeAt = fadeAt or 0, dur = dur }
 end
@@ -133,9 +153,8 @@ local function playPop(car, vol, big)
 	local pk = bank.peak and bank.peak[list[pick]] or 0.98
 	vol = min(vol, max(0.05, 0.98 - (car.busPeak or 0) - (car.popLoad or 0)) / max(pk, 0.05))
 	car.popLoad = (car.popLoad or 0) + vol * pk
-	local p = getPatch(car, list[car[key]])
-	p:Stop()
-	p:PlayEx(math.min(1, vol), math.Clamp(math.random(92, 108) * (car.dop or 1), 20, 255))
+	getPatch(car, list[car[key]]):Stop()
+	startPatch(car, list[car[key]], math.min(1, vol), math.Clamp(math.random(92, 108) * (car.dop or 1), 20, 255))
 end
 
 ---------------------------------------------------------------------------
@@ -149,7 +168,9 @@ local function newCar(ent, car)
 		loopGain = 0, thrS = 0, limW = 0,
 		-- no two cars are tuned exactly alike: +-1.5% so a row of them doesn't phase
 		detune = 1 + (math.random() - 0.5) * 0.03,
-		v = 0, lastPos = ent:GetPos(), vel = Vector(0, 0, 0), dop = 1,
+		v = 0, vel = Vector(0, 0, 0), dop = 1,
+		dsp = 0, roomGen = 0, roomOf = {}, tunnelW = 0, reviveT = RealTime() + 1,
+		sampPos = ent:GetPos(), sampT = RealTime(), sampAlong = { 0, 0, 0 }, sampFlat = { 0, 0, 0 }, vAlong = 0, vFlat = 0,
 	}
 end
 
@@ -194,7 +215,7 @@ local function readInputs(car)
 end
 
 -- the listener (whoever's ears the sound reaches): position and velocity, once per frame
-local listener = { pos = Vector(0, 0, 0), vel = Vector(0, 0, 0), ok = false }
+local listener = { pos = Vector(0, 0, 0), vel = Vector(0, 0, 0), ok = false, tunnelW = 0 }
 local SPEED_OF_SOUND = 343 / 0.0254   -- in inches/s
 
 local function updateListener(dt)
@@ -202,12 +223,13 @@ local function updateListener(dt)
 	if not IsValid(ply) then return end
 	local view = GetViewEntity()
 	local pos = (IsValid(view) and view ~= ply) and view:GetPos() or ply:EyePos()
-	if listener.ok then
-		local v = (pos - listener.pos) / dt
+	local now = RealTime()
+	if listener.ok and now > listener.t then
+		local v = (pos - listener.pos) / (now - listener.t)
 		if v:Length() > 6000 then v = listener.vel end          -- teleported / respawned
 		listener.vel = listener.vel + (v - listener.vel) * min(1, dt * 8)
 	end
-	listener.pos = pos
+	listener.pos, listener.t = pos, now
 	listener.ok = true
 	listener.cabin = IsValid(ply:GetVehicle()) and view == ply
 end
@@ -216,6 +238,19 @@ end
 -- sound an 80 mph drive-by only bends 3-4 semitones, which hardly registers in a game, so sound
 -- travels slower here: c / (audio_engine_doppler x DOPPLER_BOOST)
 local DOPPLER_BOOST = 4
+-- That boost goes shrill at speed: closing at 40 m/s came out almost an octave up. Up to
+-- DOPPLER_KNEE semitones it's left alone (an ordinary pass), past it the shift bends over towards
+-- DOPPLER_MAX, which a head-on pass at any speed never goes over
+local DOPPLER_KNEE, DOPPLER_MAX = 4, 7
+local function softPitch(ratio)
+	local semis = 12 * log(ratio) / log(2)
+	local over = abs(semis) - DOPPLER_KNEE
+	if over <= 0 then return ratio end
+	local room = DOPPLER_MAX - DOPPLER_KNEE
+	local bent = DOPPLER_KNEE + room * math.tanh(over / room)
+	return 2 ^ ((semis > 0 and bent or -bent) / 12)
+end
+
 local function dopplerFactor(car, dt, mine)
 	local amt = cvDoppler:GetFloat()
 	local target = 1
@@ -227,7 +262,7 @@ local function dopplerFactor(car, dt, mine)
 			local vs = car.vel:Dot(d)            -- source toward listener
 			local vl = -listener.vel:Dot(d)      -- listener toward source
 			local c = SPEED_OF_SOUND / (amt * DOPPLER_BOOST)
-			target = math.Clamp((c + vl) / math.max(c * 0.5, c - vs), 0.6, 1.8)
+			target = softPitch(max(c * 0.25, c + vl) / max(c * 0.5, c - vs))
 		end
 	end
 	-- quick enough to keep up with the pitch drop: a fast close pass is over in about 0.2 s
@@ -259,6 +294,7 @@ end
 	relative to the listener. A car keeping pace beside you isn't passing, and on its own speed it
 	got the whole swell and whoosh while your own engine stayed at 1, so it drowned yours out.
 	Sitting in a car, every other car is CABIN_DB down: it comes through the bodywork, yours doesn't.
+	A tunnel carries sound along it, so with both you and the car inside there's no drop with range.
 ]]
 local PASSBY_NEAR, PASSBY_REF, PASSBY_FAR = 2.5 / 0.0254, 5 / 0.0254, 30 / 0.0254   -- inches
 local PASSBY_CURVE_SLOW, PASSBY_CURVE_FAST = 0.35, 0.7
@@ -280,7 +316,8 @@ local function proximityGain(car, mine, fwd)
 	local pace = math.Clamp((ms - PASSBY_SLOW) / (PASSBY_FAST - PASSBY_SLOW), 0, 1)
 	local gain
 	if d > PASSBY_REF then
-		gain = (PASSBY_REF / d) ^ ((PASSBY_CURVE_SLOW + (PASSBY_CURVE_FAST - PASSBY_CURVE_SLOW) * pace) * amt)
+		gain = (PASSBY_REF / d) ^ ((PASSBY_CURVE_SLOW + (PASSBY_CURVE_FAST - PASSBY_CURVE_SLOW) * pace) * amt
+			* (1 - listener.tunnelW * car.tunnelW))
 	else
 		gain = 1 + ((PASSBY_REF / d) ^ amt - 1) * pace
 	end
@@ -461,9 +498,8 @@ local function updateSound(car, dt)
 			local pk = env.peak[name] or 0.98
 			vol = min(1, vol, max(0.05, 0.98 - (car.busPeak or 0) - (car.popLoad or 0)) / max(pk, 0.05))
 			car.popLoad = (car.popLoad or 0) + vol * pk
-			local p = getPatch(car, name)
-			p:Stop()
-			p:PlayEx(vol, math.Clamp(math.random(95, 105) * (car.dop or 1), 20, 255))
+			getPatch(car, name):Stop()
+			startPatch(car, name, vol, math.Clamp(math.random(95, 105) * (car.dop or 1), 20, 255))
 		end
 	elseif car.active.turbo then
 		-- turbo switched off in the menu: fade the whistle out
@@ -563,12 +599,102 @@ local function guageOverride(ent)
 	end
 end
 
+--[[
+	Tunnels. A spot is in a tunnel when it has a roof, walls close on two opposite sides, and a long
+	open run the other way: traced against the map only, so cars and props don't count. An overpass
+	has no walls, a street no roof, and a room no long run.
+	A car in one, or any car while you stand in one, gets Source's tunnel reverb (DSP preset
+	audio_engine_tunnel; 7 rings around 150 Hz, the way a long concrete tube does), and a car in one
+	carries TUNNEL_LEVEL dB further. Neither is known to reach a sound already playing, so loops are
+	restarted when the room changes (setGroup).
+	All of this is for people outside a car: sitting in one, cars sound as they do anywhere else.
+]]
+local TUNNEL_ROOF, TUNNEL_REACH = 25 / 0.0254, 50 / 0.0254   -- inches
+local TUNNEL_WIDE, TUNNEL_LONG, TUNNEL_RATIO = 30 / 0.0254, 30 / 0.0254, 2.5
+local TUNNEL_LEVEL, TUNNEL_FADE = 8, 0.6                     -- dB; s
+local TUNNEL_UP, TUNNEL_CAR_HEIGHT = Vector(0, 0, 1), Vector(0, 0, 60)
+local TUNNEL_AXES = {}
+for i = 0, 7 do TUNNEL_AXES[i + 1] = Vector(cos(i * pi / 8), sin(i * pi / 8), 0) end
+
+local tunnelTrace = { mask = MASK_SOLID_BRUSHONLY }
+local function reach(pos, dir, dist)
+	tunnelTrace.start, tunnelTrace.endpos = pos, pos + dir * dist
+	local tr = util.TraceLine(tunnelTrace)
+	if not tr.Hit or tr.HitSky then return dist end
+	return dist * tr.Fraction
+end
+
+local function inTunnel(pos)
+	if reach(pos, TUNNEL_UP, TUNNEL_ROOF) >= TUNNEL_ROOF then return false end
+	local narrow, long = math.huge, 0
+	for _, axis in ipairs(TUNNEL_AXES) do
+		local span = reach(pos, axis, TUNNEL_REACH) + reach(pos, -axis, TUNNEL_REACH)
+		narrow, long = min(narrow, span), max(long, span)
+	end
+	return narrow <= TUNNEL_WIDE and long >= max(TUNNEL_LONG, narrow * TUNNEL_RATIO)
+end
+
+-- the listener a few times a second, the cars one per frame
+local nextEarProbe, probed = 0, nil
+local function probeTunnels(dt)
+	local on = cvTunnel:GetInt() > 0
+	local now = RealTime()
+	if now >= nextEarProbe and listener.ok then
+		nextEarProbe = now + 0.25
+		listener.inTunnel = on and not listener.cabin and inTunnel(listener.pos)
+	end
+	listener.tunnelW = approach(listener.tunnelW, listener.inTunnel and 1 or 0, dt / TUNNEL_FADE)
+	if probed and not cars[probed] then probed = nil end
+	probed = next(cars, probed)
+	local car = probed and cars[probed]
+	if car and not car.dormant then car.inTunnel = on and inTunnel(probed:GetPos() + TUNNEL_CAR_HEIGHT) end
+end
+
+local function updateRoom(car, dt)
+	car.tunnelW = approach(car.tunnelW, car.inTunnel and 1 or 0, dt / TUNNEL_FADE)
+	local outside = not listener.cabin
+	local dsp = outside and max(car.tunnelW, listener.tunnelW) > 0.5 and cvTunnel:GetInt() or 0
+	local level = (car.cfg.soundLevel or 85) + (outside and car.tunnelW > 0.5 and TUNNEL_LEVEL or 0)
+	if dsp ~= car.dsp or level ~= car.level then
+		car.dsp, car.level, car.roomGen = dsp, level, car.roomGen + 1
+	end
+end
+
+--[[
+	The car's speed, from position change (works for every car, not just our own). Measured over
+	real time, at least SPEED_SAMPLE apart: a frame's dt is capped, so a stutter read as several
+	times the real speed, and the revs and the gearbox jumped with it. A freeze over SPEED_GAP
+	says nothing about the speed, so it's held. The median of three samples drops a lone bad one
+	(a network stall reads as zero, then double), and vFlat leaves out motion along the car's own
+	up axis, so a kerb or a seam kicking the car up doesn't count as speed.
+]]
+local SPEED_SAMPLE, SPEED_GAP, SPEED_SLEW = 0.05, 0.3, 40   -- s; s; m/s per second the gearbox's speed may change
+
+local function median(h, x)
+	h[1], h[2], h[3] = h[2], h[3], x
+	return max(min(h[1], h[2]), min(max(h[1], h[2]), h[3]))
+end
+
+local function sampleSpeed(car, fwd)
+	local now = RealTime()
+	local span = now - car.sampT
+	if span < SPEED_SAMPLE then return end
+	local pos = car.ent:GetPos()
+	local vel = (pos - car.sampPos) / span                  -- inches/s
+	car.sampPos, car.sampT = pos, now
+	if span > SPEED_GAP or vel:Length() * 0.0254 > 150 then return end   -- (over 150 m/s: teleported)
+	car.vel = car.vel + (vel - car.vel) * min(1, span * 8)
+	local up = car.ent:GetUp()
+	car.vAlong = median(car.sampAlong, vel:Dot(fwd) * 0.0254)
+	car.vFlat = median(car.sampFlat, (vel - up * vel:Dot(up)):Length() * 0.0254)
+end
+
 local function updateCar(car, dt)
 	local ent, st = car.ent, car.st
 
 	if ent:IsDormant() then
 		if not car.dormant then stopAll(car); car.dormant = true end
-		car.lastPos = ent:GetPos()
+		car.sampPos, car.sampT, car.wing = ent:GetPos(), RealTime(), nil
 		return
 	end
 	car.dormant = false
@@ -613,19 +739,11 @@ local function updateCar(car, dt)
 	end
 	car.first = false
 
-	-- speed along the nose, from position change (works for every car, not just our own)
-	local pos = ent:GetPos()
+	-- speed along the nose
 	local fwd = Vector(localForward(car))
 	fwd:Rotate(ent:GetAngles())
-	local delta = pos - car.lastPos
-	local vRaw = delta:Dot(fwd) / dt * 0.0254 -- inches/s -> m/s
-	car.lastPos = pos
-	if abs(vRaw) > 150 then
-		vRaw = car.v                                         -- teleported
-	else
-		car.vel = car.vel + (delta / dt - car.vel) * min(1, dt * 8)
-	end
-	car.v = car.v + (vRaw - car.v) * min(1, dt * 10)
+	sampleSpeed(car, fwd)
+	car.v = car.v + (car.vAlong - car.v) * min(1, dt * 10)
 	-- driving it but watching from a camera, you hear it from outside like anyone else
 	local inside = mine and GetViewEntity() == ply
 	dopplerFactor(car, dt, inside)
@@ -635,21 +753,28 @@ local function updateCar(car, dt)
 	-- speed along the nose collapsed as the car went sideways, the revs plunged and shot back up
 	-- as it straightened (a cartoon "weee-ooo"). Full speed, signed by the nose, unless it has
 	-- turned mostly backwards or sideways (a spin)
-	local vFull = car.vel:Length() * 0.0254
+	local vFull = car.vFlat
 	local vDrive = car.v
 	if vFull > 2 and abs(car.v) > vFull * 0.3 then vDrive = (car.v >= 0 and 1 or -1) * vFull end
-	car.vDrive = car.vDrive and car.vDrive + (vDrive - car.vDrive) * min(1, dt * 10) or vDrive
+	-- no car really changes speed faster than SPEED_SLEW: what's left of a bump stops here
+	car.vDrive = car.vDrive and approach(car.vDrive, car.vDrive + (vDrive - car.vDrive) * min(1, dt * 10), dt * SPEED_SLEW) or vDrive
 
 	local f, b, h, s, cr = readInputs(car)
 	DT.Step(st, cfg, dt, { fwd = f, back = b, hand = h, steer = s, v = car.vDrive, cruise = cr })
 
+	updateRoom(car, dt)
+	local now = RealTime()
+	car.revive = now >= car.reviveT
+	if car.revive then car.reviveT = now + 1 end
 	updateSound(car, dt)
 
 	-- the model's own dashboard tach needle follows the revs. Cars whose wings/vents also hang off
-	-- that pose (E.GAUGE_PARTS) are left alone: the server sets it from speed (sv_engine.lua),
-	-- over Source's own speedometer value, and networks it
+	-- that pose (E.GAUGE_PARTS) follow the position the server picks from speed (sv_engine.lua)
+	-- instead, glided here so they move smoothly between its updates
 	if cfg.gaugeParts then
-		ent.audioGuage = nil
+		local want = ent:GetNW2Float("audio_wing", cfg.gaugeParts[1])
+		car.wing = car.wing and approach(car.wing, want, dt * E.WING_RATE) or want
+		ent.audioGuage = car.wing
 	else
 		local maxR = math.ceil((cfg.redline + 500) / 1000) * 1000
 		ent.audioGuage = math.Clamp(st.rpm / maxR, 0, 1)
@@ -683,6 +808,22 @@ hook.Add("Think", "audio_engine_cars", function()
 			updateCar(car, dt)
 		end
 	end
+	if dt > 0 then probeTunnels(dt) end
+end)
+
+-- the start key, read here and sent as a console command: the server's PlayerButtonDown rides on
+-- the usercmds, so now and then a press never reached it and the car stayed off
+local startHeld = false
+hook.Add("Think", "audio_engine_startkey", function()
+	local key = _G["KEY_" .. string.upper(cvStartKey:GetString())]
+	local down = key ~= nil and input.IsKeyDown(key)
+	local pressed = down and not startHeld
+	startHeld = down
+	if not pressed then return end
+	local ply = LocalPlayer()
+	if not IsValid(ply) or not IsValid(ply:GetVehicle()) or ply:IsTyping() then return end
+	if gui.IsGameUIVisible() or IsValid(vgui.GetKeyboardFocus()) then return end
+	RunConsoleCommand("audio_engine_toggle")
 end)
 
 hook.Add("EntityRemoved", "audio_engine_cars", function(ent)
