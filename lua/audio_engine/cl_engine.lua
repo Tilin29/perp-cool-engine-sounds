@@ -25,7 +25,7 @@ if cookie.GetNumber("audio_engine_doppler_moved", 0) == 0 then
 	if cvDoppler:GetFloat() == 1 then RunConsoleCommand("audio_engine_doppler", "0.25") end
 end
 local cvPassby = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off, 1 = default)", 0, 2)
-local cvTunnel = CreateClientConVar("audio_engine_tunnel", "2", true, false, "Source DSP preset for cars in a tunnel (0 = no tunnel effect, 2 = default, 6 = medium tunnel, 7 = large tunnel)", 0, 133)
+local cvTunnel = CreateClientConVar("audio_engine_tunnel", "1", true, false, "Source DSP preset for cars in a tunnel (0 = no tunnel effect, 1 = default, the map's own, 6 = medium tunnel, 7 = large tunnel)", 0, 133)
 
 local cars = {}
 E.ClientCars = cars
