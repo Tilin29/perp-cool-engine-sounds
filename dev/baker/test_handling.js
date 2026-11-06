@@ -130,7 +130,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   check(near(c.cz, -1 - 0.25 * 15), 'centre: PERP -1, lowered by a quarter wheel radius')
   check(near(c.psa, 150), 'handbrake slide as the PERP script has it')
   check(near(c.deg, 38.5), 'steering lock from the PERP script')
-  check(near(c.dfast, 11 * 1.3), 'steering at speed: PERP 11 degrees x1.3')
+  check(near(c.dfast, 11 * 1.5), 'steering at speed: PERP 11 degrees x1.5')
 
   // 2. SL65 on its own PERP script (the server): anti-spin only
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/sl65amg.txt", SL65))`)

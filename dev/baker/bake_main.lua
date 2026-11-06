@@ -86,7 +86,8 @@ function BAKE.bake(i, sr)
 		for fk, s in pairs(b.startEmoAt) do m.startEmoAt[fk] = { fadeAt = s.fadeAt, dur = s.dur } end
 	end
 	m.layers = {}
-	for k, L in ipairs(b.layers) do m.layers[k] = L.rpm end
+	m.trims = {}
+	for k, L in ipairs(b.layers) do m.layers[k], m.trims[k] = L.rpm, L.trim or 1 end
 	m.limiter = b.limiter.rpm
 	m.start = { fadeAt = b.start.fadeAt, dur = b.start.dur }
 	m.startEmo = { fadeAt = b.startEmo.fadeAt, dur = b.startEmo.dur }

@@ -74,20 +74,23 @@ textarea { width: 100%; min-height: 150px; background: var(--panel2); color: var
   <div class="field"><label for="car">Car</label><input id="car" type="text" list="carlist" autocomplete="off" spellcheck="false"><datalist id="carlist"></datalist></div>
   <div class="seg ab" id="ab"><button data-v="stock">Stock</button><button data-v="tuned" class="on">Your tune</button></div>
   <button class="primary" id="play">▶ Play</button>
-  <div class="seg" id="mode"><button data-v="rev" class="on">Rev</button><button data-v="hold">Hold rpm</button></div>
+  <button id="ignition" title="Stop the engine, or run the start-up">Ignition</button>
+  <div class="seg" id="mode"><button data-v="rev" class="on" title="In neutral: W revs it against the limiter">Rev</button><button data-v="drive" title="The game's gearbox: W accelerates, S brakes">Drive</button><button data-v="sweep" title="Revs up and down by itself">Sweep</button><button data-v="hold" title="Stay at one rpm">Hold rpm</button></div>
+  <button id="gas" title="Or hold W">Hold W: throttle</button>
   <div class="field" id="holdctl" hidden>
     <input id="rpm" type="range" min="700" max="9000" step="50" value="3000" style="width:140px">
     <span id="rpmv" class="live">3000 rpm</span>
     <div class="seg" id="thr"><button data-v="1" class="on">On throttle</button><button data-v="0">Off</button></div>
   </div>
-  <div class="field"><label for="sr">Quality</label><select id="sr"><option value="44100">44.1 kHz (as baked)</option><option value="22050">22 kHz (faster)</option></select></div>
+  <div class="seg" id="pops"><button data-v="pop">Pop</button><button data-v="crackle">Crackle</button><button data-v="bang">Bang</button></div>
+  <div class="field"><label for="vol">Volume</label><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8" style="width:80px"></div>
   <span id="status"></span>
 </header>
 <main>
   <div class="stack">
     <section class="card">
       <h2>Exhaust voice</h2>
-      <div class="meta"><span>Engine <b id="mEngine">–</b></span><span>Preset <b id="mPreset">–</b></span><span class="live">Now <b id="mRpm">–</b></span><span>Firing <b id="mFire">–</b></span></div>
+      <div class="meta"><span>Engine <b id="mEngine">–</b></span><span>Preset <b id="mPreset">–</b></span><span class="live">Now <b id="mRpm">–</b></span><span class="live">Gear <b id="mGear">–</b></span><span class="live">Speed <b id="mSpeed">–</b></span><span>Firing <b id="mFire">–</b></span></div>
       <canvas id="voice"></canvas>
       <p class="hint">Drag the three pipe resonances left or right: <b style="color:var(--accent)">Boom</b> is the deep main note, <b style="color:var(--warn)">Rasp</b> the gritty body (louder with Tone), <b style="color:var(--good)">Muffler</b> a softer chamber note. The blue fill is what's playing; dashed lines are the stock positions. Resonances only matter with Realism above 0.</p>
     </section>
@@ -95,6 +98,7 @@ textarea { width: 100%; min-height: 150px; background: var(--panel2); color: var
       <h2>Firing rhythm · one 720° cycle</h2>
       <canvas id="rhythm"></canvas>
       <p class="hint">Each bar is one cylinder firing, coloured by exhaust side (<b style="color:var(--bankL)">left</b> / <b style="color:var(--bankR)">right</b>). Uneven bars are what makes a burble or a growl; the two rhythm sliders shape them.</p>
+      <p class="hint" id="customHint" hidden>Custom pattern: drag a bar sideways to move that firing, up or down to change its strength, and click it to swap its exhaust side.</p>
     </section>
     <section class="card">
       <h2>Changes to send</h2>
@@ -114,7 +118,9 @@ textarea { width: 100%; min-height: 150px; background: var(--panel2); color: var
     </div>
     <div class="group">
       <h2>Engine</h2>
+      <div class="row"><label>Start from</label><select id="fromPreset" style="grid-column: 2 / 5"></select></div>
       <div class="row" data-k="layout"><label>Layout</label><select id="layout" style="grid-column: 2 / 4"></select><button class="reset" title="Back to stock">↺</button></div>
+      <div class="row" id="customCtl" hidden><label>Firings<small>per 720° cycle</small></label><input id="cylN" type="number" min="1" max="16" step="1"><button id="evenBtn" style="grid-column: 3 / 5">Even out</button></div>
       <div id="gEngine"></div>
     </div>
     <div class="group">
@@ -132,6 +138,7 @@ textarea { width: 100%; min-height: 150px; background: var(--panel2); color: var
 {{LUA_FILES}}
 <script type="text/plain" id="src-wasmoon">{{WASMOON}}</script>
 <script type="text/plain" id="src-worker">{{WORKER}}</script>
+<script type="text/plain" id="src-worklet">{{WORKLET}}</script>
 <script type="text/plain" id="src-wasm">{{WASM_B64}}</script>
 <script>
 'use strict'
@@ -139,11 +146,12 @@ textarea { width: 100%; min-height: 150px; background: var(--panel2); color: var
 // controls: profile fields use the game's own steps and limits (sh_presets.lua SanitizeProfile)
 // ---------------------------------------------------------------------------------------------
 const SOUND = [
-  { k: 'pitch', label: 'Pitch', sub: 'whole engine higher/lower', min: 0.5, max: 1.5, step: 0.05 },
+  { k: 'pitch', label: 'Pitch', sub: 'whole engine higher/lower', min: 0.5, max: 2, step: 0.05 },
   { k: 'tone', label: 'Tone', sub: 'dark ↔ raspy', min: 0, max: 1, step: 0.05 },
   { k: 'gurgle', label: 'Burble', sub: 'off-throttle', min: 0, max: 1, step: 0.05 },
   { k: 'realism', label: 'Realism', sub: 'uses the voice below', min: 0, max: 1, step: 0.1 },
   { k: 'popTone', label: 'Pop tone', sub: 'muffled ↔ sharp', min: 0, max: 1, step: 0.05 },
+  { k: 'muffle', label: 'Silencer', sub: 'cuts the top end', min: 0, max: 1, step: 0.05 },
 ]
 const ENGINE = [
   { k: 'idle', label: 'Idle', sub: 'rpm', min: 500, max: 1500, step: 25 },
@@ -171,34 +179,40 @@ const clamp = (x, a, b) => Math.min(b, Math.max(a, x))
 // state
 // ---------------------------------------------------------------------------------------------
 let DATA = null
-const S = { car: null, ab: 'tuned', mode: 'rev', rpm: 3000, thr: 1, sr: 44100, scope: 'car', playing: false }
-let EDITS = {}           // car name -> { sound: {}, character: {}, scope }
+const S = { car: null, ab: 'tuned', mode: 'rev', rpm: 3000, thr: 1, fwd: false, back: false, scope: 'car', playing: false, stat: null }
+let EDITS = {}           // car name -> { sound: {}, character: {}, scope, custom: { base, angles, amp, banks } }
 try { EDITS = JSON.parse(localStorage.getItem('toneStudio.edits') || '{}') || {} } catch (e) { EDITS = {} }
-try { const s = JSON.parse(localStorage.getItem('toneStudio.ui') || '{}'); if (s.car) S.car = s.car; if (s.sr) S.sr = s.sr } catch (e) {}
+try { const s = JSON.parse(localStorage.getItem('toneStudio.ui') || '{}'); if (s.car) S.car = s.car } catch (e) {}
 function save() {
-  try { localStorage.setItem('toneStudio.edits', JSON.stringify(EDITS)); localStorage.setItem('toneStudio.ui', JSON.stringify({ car: S.car, sr: S.sr })) } catch (e) {}
+  try { localStorage.setItem('toneStudio.edits', JSON.stringify(EDITS)); localStorage.setItem('toneStudio.ui', JSON.stringify({ car: S.car })) } catch (e) {}
 }
 const carInfo = (name) => DATA.cars.find((c) => c.name === name)
 const presetOf = (id) => DATA.presets.find((p) => p.id === id)
 const edit = () => (EDITS[S.car] = EDITS[S.car] || { sound: {}, character: {}, scope: S.scope })
 
 // what the car sounds like stock / with the edits
-function stockSound() { return { ...carInfo(S.car).stock } }
+function stockOf(car) { return { ...car.stock, muffle: car.muffle } }
+function stockSound() { return stockOf(carInfo(S.car)) }
 function tunedSound() { return { ...stockSound(), ...(EDITS[S.car] || {}).sound } }
+// a custom firing pattern borrows the voice of the layout it started from
+function voiceLayout(car, layout) { return layout === 'custom' ? (EDITS[car.name] || {}).custom.base : layout }
 // the voice a layout starts from: the engine type's, plus the car's own stock changes while it
 // keeps its stock layout (another engine type starts clean)
 function baseCharOf(car, layout) {
-  return { ...(DATA.character[layout] || DATA.character.i4), ...(layout === car.stock.layout ? car.character : {}) }
+  const v = voiceLayout(car, layout)
+  return { ...(DATA.character[v] || DATA.character.i4), ...(v === car.stock.layout ? car.character : {}) }
 }
 function baseChar(layout) { return baseCharOf(carInfo(S.car), layout) }
 function stockChar() { return baseChar(stockSound().layout) }
 function tunedChar() { return { ...baseChar(tunedSound().layout), ...(EDITS[S.car] || {}).character } }
 // the character the car would need in sh_carlist (only fields that differ from the engine type's)
-function charOverride(layout, ch) {
-  const def = DATA.character[layout] || DATA.character.i4, o = {}
+function charOverrideOf(car, layout, ch) {
+  const def = DATA.character[voiceLayout(car, layout)] || DATA.character.i4, o = {}
   for (const c of CHAR) if (Math.abs(ch[c.k] - def[c.k]) > 1e-6) o[c.k] = ch[c.k]
   return o
 }
+function charOverride(layout, ch) { return charOverrideOf(carInfo(S.car), layout, ch) }
+function customOf() { const e = EDITS[S.car]; return e && e.sound.layout === 'custom' ? e.custom : null }
 function cleanEdit() {
   const e = EDITS[S.car]
   if (!e) return
@@ -232,20 +246,20 @@ function startWorker() {
   }
   host.send({ type: 'init', files, wasm: bin.buffer }, [bin.buffer])
 }
-function request(type, req, tag) {
+function request(type, req) {
   return new Promise((resolve, reject) => {
     const id = nextId++
-    pending.set(id, { resolve, reject, tag })
-    host.send({ type, id, tag, req })
+    pending.set(id, { resolve, reject })
+    host.send({ type, id, req })
   })
 }
 function onWorker(m) {
   if (m.type === 'log') return console.log('[lua]', m.text)
   if (m.type === 'ready') return onReady(m.data)
+  if (m.type === 'stat') return onStat(m)
+  if (m.type === 'config') { tunedInfo = m.data; return }
   if (m.type === 'error' && !m.id) return status(m.text, 'err')
   const p = pending.get(m.id)
-  // a newer render of the same tag replaced this one in the worker's queue
-  for (const [id, q] of pending) if (q.tag && q.tag === m.tag && id < m.id) { q.reject('replaced'); pending.delete(id) }
   if (!p) return
   pending.delete(m.id)
   if (m.type === 'error') p.reject(m.text)
@@ -253,94 +267,55 @@ function onWorker(m) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// audio: each clip is loudness-matched like the game does (rms above 250 Hz), then a limiter
+// audio: the worker streams straight into the worklet (at the synth's own rate, so nothing is
+// resampled); the page only sets the volume and watches the spectrum
 // ---------------------------------------------------------------------------------------------
-let ctx = null, out = null, analyser = null, src = null, startAt = 0
-const clips = { stock: null, tuned: null }
-function audio() {
-  if (ctx) return ctx
-  ctx = new (window.AudioContext || window.webkitAudioContext)()
+let ctx = null, out = null, analyser = null, outNode = null
+async function audio() {
+  if (ctx) return
+  ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100, latencyHint: 'interactive' })
   const lim = ctx.createDynamicsCompressor()
   lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.002; lim.release.value = 0.08
   analyser = ctx.createAnalyser()
   analyser.fftSize = 16384; analyser.smoothingTimeConstant = 0.8
-  out = ctx.createGain(); out.gain.value = 0.9
+  out = ctx.createGain(); out.gain.value = Number($('vol').value)
   lim.connect(analyser); analyser.connect(out); out.connect(ctx.destination)
-  audio.input = lim
-  return ctx
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([$('src-worklet').textContent], { type: 'text/javascript' })))
+  outNode = new AudioWorkletNode(ctx, 'live-out', { numberOfInputs: 0, outputChannelCount: [1] })
+  outNode.connect(lim)
+  const ch = new MessageChannel()
+  outNode.port.postMessage({ port: ch.port2 }, [ch.port2])
+  host.send({ type: 'port', port: ch.port1 }, [ch.port1])
 }
-function loudnessGain(d, rate) {
-  // one-pole high-pass at 250 Hz is close enough to the game's biquad for matching
-  const a = Math.exp(-2 * Math.PI * 250 / rate)
-  let x1 = 0, y1 = 0, sum = 0
-  for (let i = 0; i < d.length; i++) { const y = a * (y1 + d[i] - x1); x1 = d[i]; y1 = y; sum += y * y }
-  const rms = Math.sqrt(sum / d.length) || 1e-6
-  return Math.pow(10, -21 / 20) / rms
-}
-function makeClip(m) {
-  const c = audio()
-  const buf = c.createBuffer(1, m.data.length, m.rate)
-  buf.copyToChannel(m.data, 0)
-  return { buf, gain: loudnessGain(m.data, m.rate), info: m.info, loop: m.loop, mode: S.mode }
-}
-function playing() { return clips[S.ab] }
-function startSource(offset) {
-  const clip = playing()
-  if (!clip || !S.playing) return
-  stopSource()
-  const c = audio()
-  const g = c.createGain(); g.gain.value = clip.gain
-  src = c.createBufferSource(); src.buffer = clip.buf; src.loop = true
-  src.connect(g); g.connect(audio.input)
-  const dur = clip.buf.duration
-  const off = ((offset || 0) % dur + dur) % dur
-  src.start(0, off)
-  startAt = c.currentTime - off
-  src._dur = dur
-}
-function stopSource() { if (src) { try { src.stop() } catch (e) {} src.disconnect(); src = null } }
-function position() { return src && ctx ? (ctx.currentTime - startAt) % src._dur : 0 }
-// swap clips at the same point of the timeline, so A/B compares the same moment
-function swap() { if (S.playing) startSource(position()) }
 
 // ---------------------------------------------------------------------------------------------
-// rendering
+// the live engine
 // ---------------------------------------------------------------------------------------------
-function baseReq() { return { car: S.car, mode: S.mode, sr: S.sr, rpm: S.rpm, thr: S.thr } }
+function stockReq() { return { car: S.car } }
 function tunedReq() {
-  const snd = tunedSound(), ch = charOverride(snd.layout, tunedChar())
-  return { ...baseReq(), sound: (EDITS[S.car] || {}).sound || {}, character: ch }
+  const c = customOf()
+  return { car: S.car, sound: (EDITS[S.car] || {}).sound || {}, character: charOverride(tunedSound().layout, tunedChar()), custom: c || undefined }
 }
-let renderTimer = null, lastStockKey = ''
+let cfgTimer = null, tunedInfo = null, rhythm = { stock: null, tuned: null }
 function status(t, cls) { const s = $('status'); s.textContent = t; s.className = cls || '' }
-function scheduleRender(delay) {
-  clearTimeout(renderTimer)
-  renderTimer = setTimeout(render, delay == null ? 250 : delay)
+function sendConfigNow() { host.send({ type: 'config', req: S.ab === 'stock' ? stockReq() : tunedReq() }) }
+// a slider sends many changes a second; the worker only needs the newest
+function sendConfig() {
+  if (cfgTimer) return
+  cfgTimer = setTimeout(() => { cfgTimer = null; sendConfigNow() }, 30)
 }
-async function render() {
-  const stockKey = JSON.stringify(baseReq())
-  const jobs = []
-  status('Rendering…', 'busy')
-  if (stockKey !== lastStockKey || !clips.stock) {
-    lastStockKey = stockKey
-    jobs.push(request('render', baseReq(), 'stock').then((m) => { clips.stock = makeClip(m); if (S.ab === 'stock') swap() }))
-  }
-  const t0 = performance.now()
-  jobs.push(request('render', tunedReq(), 'tuned').then((m) => {
-    clips.tuned = makeClip(m)
-    tunedInfo = m.info
-    if (S.ab === 'tuned') swap()
-    drawRhythm()
-    status(`Rendered in ${Math.round(performance.now() - t0)} ms`)
-  }))
-  try { await Promise.all(jobs) } catch (e) { if (e !== 'replaced') status(String(e), 'err') }
+function sendInput() { host.send({ type: 'input', req: { mode: S.mode, rpm: S.rpm, thr: S.thr, fwd: S.fwd, back: S.back } }) }
+function onStat(m) {
+  S.stat = m
+  if (!S.playing) return
+  const dropped = m.under ? ` · ${m.under} dropout${m.under === 1 ? '' : 's'}` : ''
+  status(`Live 44.1 kHz · ${Math.round(m.ahead * 1000)} ms delay · ${m.speed.toFixed(1)}x real time${dropped}`, m.under ? 'busy' : '')
 }
-let tunedInfo = null, rhythm = { stock: null, tuned: null }
 async function updateRhythm() {
   try {
     const [a, b] = await Promise.all([
       request('rhythm', { car: S.car, character: charOverride(stockSound().layout, stockChar()) }),
-      request('rhythm', { car: S.car, sound: (EDITS[S.car] || {}).sound || {}, character: charOverride(tunedSound().layout, tunedChar()) }),
+      request('rhythm', tunedReq()),
     ])
     rhythm = { stock: a.data, tuned: b.data }
     drawRhythm()
@@ -348,7 +323,7 @@ async function updateRhythm() {
 }
 function changed() {
   cleanEdit(); save()
-  syncControls(); renderChanges(); updateRhythm(); scheduleRender()
+  syncControls(); renderChanges(); updateRhythm(); sendConfig()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -387,14 +362,51 @@ function buildControls() {
   for (const d of CHAR) $('gChar').appendChild(rows[d.k] = makeRow(d, 'char'))
   const sel = $('layout')
   for (const l of DATA.layouts) sel.add(new Option(`${l.name}`, l.id))
+  sel.add(new Option('Custom firing pattern', 'custom'))
   sel.addEventListener('change', () => {
-    const e = edit()
+    const from = tunedSound().layout, e = edit()
+    if (sel.value === 'custom') {
+      // starts as a copy of the current layout, and keeps its voice
+      const sh = DATA.shapes[from]
+      e.custom = { base: from, angles: [...sh.angles], amp: [...sh.amp], banks: sh.banks }
+    } else {
+      delete e.custom
+      e.character = {}   // the voice starts again from the new engine type's
+    }
     e.sound.layout = sel.value
-    e.character = {}   // the voice starts again from the new engine type's
+    sel.blur()   // a focused list would eat W and S
     changed()
   })
   document.querySelector('.row[data-k=layout] .reset').addEventListener('click', () => {
-    const e = edit(); delete e.sound.layout; e.character = {}; changed()
+    const e = edit(); delete e.sound.layout; delete e.custom; e.character = {}; changed()
+  })
+  const from = $('fromPreset')
+  from.add(new Option('Choose a preset…', ''))
+  for (const p of DATA.presets) from.add(new Option(p.name, p.id))
+  from.addEventListener('change', () => {
+    const p = presetOf(from.value), e = edit()
+    from.value = ''
+    from.blur()
+    if (!p) return
+    delete e.custom
+    e.sound = { ...p.sound }
+    e.character = { ...DATA.character[p.sound.layout], ...p.character }
+    changed()
+  })
+  $('cylN').addEventListener('change', () => {
+    const c = customOf()
+    if (!c) return
+    const n = clamp(Math.round(Number($('cylN').value)) || 1, 1, 16)
+    c.angles = Array.from({ length: n }, (_, i) => i * 720 / n)
+    c.amp = Array.from({ length: n }, (_, i) => c.amp[i] || 1)
+    c.banks = n === 1 ? 'L' : 'LR'.repeat(8).slice(0, n)
+    changed()
+  })
+  $('evenBtn').addEventListener('click', () => {
+    const c = customOf()
+    if (!c) return
+    c.angles = c.angles.map((_, i) => i * 720 / c.angles.length)
+    changed()
   })
 }
 function syncControls() {
@@ -403,9 +415,12 @@ function syncControls() {
   for (const d of CHAR) rows[d.k]._set(round(tc[d.k], d.step), Math.abs(tc[d.k] - sc[d.k]) > 1e-6)
   $('layout').value = tu.layout
   document.querySelector('.row[data-k=layout]').classList.toggle('changed', tu.layout !== st.layout)
+  const custom = customOf()
+  $('customCtl').hidden = $('customHint').hidden = !custom
+  if (custom && document.activeElement !== $('cylN')) $('cylN').value = custom.angles.length
   const car = carInfo(S.car), p = presetOf(car.preset)
   const lay = DATA.layouts.find((l) => l.id === tu.layout)
-  $('mEngine').textContent = lay ? lay.name : tu.layout
+  $('mEngine').textContent = custom ? `Custom, ${custom.angles.length} firings` : lay ? lay.name : tu.layout
   $('mPreset').textContent = p ? p.name : car.preset
   const e = EDITS[S.car]
   S.scope = e ? e.scope || 'car' : S.scope
@@ -418,6 +433,7 @@ function syncControls() {
   rpm.min = tu.idle; rpm.max = tu.redline
   S.rpm = clamp(S.rpm, tu.idle, tu.redline)
   rpm.value = S.rpm; $('rpmv').textContent = S.rpm + ' rpm'
+  if (S.mode === 'hold' && S.playing) sendInput()
 }
 function segSet(id, v) { for (const b of $(id).querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === String(v)) }
 function seg(id, fn) { $(id).addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { segSet(id, b.dataset.v); fn(b.dataset.v) } }) }
@@ -429,7 +445,9 @@ const fmt = (v) => (typeof v === 'number' ? String(round(v, 0.001)) : String(v))
 function diffText(name) {
   const e = EDITS[name], car = carInfo(name)
   const parts = []
-  for (const [k, v] of Object.entries(e.sound)) parts.push(`${k} ${fmt(car.stock[k])} → ${fmt(v)}`)
+  const st = stockOf(car)
+  for (const [k, v] of Object.entries(e.sound)) parts.push(`${k} ${fmt(st[k])} → ${fmt(v)}`)
+  if (e.sound.layout === 'custom') parts.push(`${e.custom.angles.length} firings at ${e.custom.angles.map((a) => Math.round(a)).join(', ')}° (voice of ${e.custom.base})`)
   const base = baseCharOf(car, e.sound.layout || car.stock.layout)
   for (const [k, v] of Object.entries(e.character)) parts.push(`${k} ${fmt(base[k])} → ${fmt(v)}`)
   return parts.join(', ')
@@ -458,16 +476,18 @@ function exportData() {
     const stockLayout = car.stock.layout
     return {
       car: name, preset: car.preset, scope: e.scope || 'car',
-      sound: { ...e.sound }, soundStock: Object.fromEntries(Object.keys(e.sound).map((k) => [k, car.stock[k]])),
+      sound: { ...e.sound }, soundStock: Object.fromEntries(Object.keys(e.sound).map((k) => [k, stockOf(car)[k]])),
+      // a drawn firing pattern: a new entry for Synth.LAYOUTS, E.LAYOUT_CYL and E.LAYOUT_ORDER
+      layoutDef: layout === 'custom' ? { angles: e.custom.angles, amp: e.custom.amp, banks: e.custom.banks, voiceFrom: e.custom.base } : undefined,
       // the full per-car character as sh_carlist would hold it (fields that differ from the engine type)
-      character: charOverride(layout, ch), characterStock: charOverride(stockLayout, baseCharOf(car, stockLayout)),
+      character: charOverrideOf(car, layout, ch), characterStock: charOverrideOf(car, stockLayout, baseCharOf(car, stockLayout)),
     }
   })
   return { tool: 'Audio Engine Tone Studio', version: 1, changes }
 }
 function exportText() {
   const d = exportData()
-  const lines = ['Tone Studio changes for the Audio Engine addon. Please apply them (stock overrides in sh_carlist.lua; voice changes as the car\'s character, or on the preset where the scope says so) and re-bake.', '']
+  const lines = ['Tone Studio changes for the Audio Engine addon. Please apply them (stock overrides in sh_carlist.lua; voice changes as the car\'s character, or on the preset where the scope says so; muffle is the car\'s silencer; layoutDef is a new engine layout for cl_synth and sh_presets) and re-bake.', '']
   for (const c of d.changes) lines.push(`- ${c.car} [preset ${c.preset}, ${c.scope === 'preset' ? 'apply to every car on this preset' : 'this car only'}]: ${diffText(c.car)}`)
   lines.push('', '```json', JSON.stringify(d, null, 2), '```')
   return lines.join('\n')
@@ -501,14 +521,6 @@ function fromEffective(k, f, snd) {
   if (k === 'f1') return 78 + (f / sp - 78) / v
   if (k === 'f2') return (f / sp - (230 + 190 * t) * (1 - v)) / ((0.85 + 0.3 * t) * v)
   return 155 + (f / sp - 155) / v
-}
-// the rpm the rev clip is at, t seconds in (mirrors STUDIO.render in studio.lua)
-function rpmAt(t, idle, red) {
-  const top = red * 0.95
-  if (t < 0.7) return idle
-  if (t < 3.6) { const x = (t - 0.7) / 2.9; return idle + (top - idle) * (1 - Math.pow(1 - x, 1.6)) }
-  if (t < 6.2) { const x = (t - 3.6) / 2.6; return top + (idle - top) * (1 - Math.pow(1 - x, 2.2)) }
-  return idle
 }
 let drag = null, hover = null
 const freqData = new Float32Array(8192)
@@ -546,6 +558,8 @@ function drawVoice() {
   if (rpm && tunedInfo) {
     const fire = rpm / 60 * tunedInfo.cyl / 2 * snd.pitch, half = rpm / 120 * snd.pitch
     $('mRpm').textContent = Math.round(rpm) + ' rpm'
+    $('mGear').textContent = S.stat.gear > 0 ? S.stat.gear : 'N'
+    $('mSpeed').textContent = Math.round(S.stat.kmh) + ' km/h'
     $('mFire').textContent = Math.round(fire) + ' Hz'
     g.setLineDash([2, 4]); g.strokeStyle = css('--muted')
     for (const [f, lbl] of [[fire, 'firing'], [half, '½ order']]) {
@@ -585,10 +599,7 @@ function drawVoice() {
   if (!live) { g.fillStyle = css('--warn'); g.fillText('Realism is 0: the voice is off (raise Realism to use these)', 8, bottom - 8) }
 }
 function currentRpm() {
-  const snd = tunedSound()
-  if (S.mode === 'hold') return S.rpm
-  if (!S.playing || !src) return null
-  return rpmAt(position(), snd.idle, snd.redline)
+  return S.playing && S.stat ? S.stat.rpm : null
 }
 function handleAt(x, w) {
   const e = effective(tunedChar(), tunedSound())
@@ -612,7 +623,7 @@ function voiceEvents() {
     const v = round(clamp(fromEffective(drag.k, fOf(p.x, p.w), tunedSound()), def.min, def.max), def.step)
     edit().character[drag.k] = v
     cleanEdit(); syncControls()
-    scheduleRender(400)
+    sendConfig()
   })
   const end = () => { if (drag) { drag = null; changed() } }
   cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end)
@@ -630,7 +641,7 @@ function drawRhythm() {
   }
   const draw = (r, ghost) => {
     if (!r) return
-    const max = Math.max(...r.amp, 1e-6) * 1.08
+    const max = r.scale || Math.max(...r.amp, 1e-6) * 1.08
     const bw = Math.max(3, Math.min(14, (w - 2 * pad) / r.angles.length * 0.45))
     for (let i = 0; i < r.angles.length; i++) {
       const x = pad + (r.angles[i] / 720) * (w - 2 * pad)
@@ -639,8 +650,53 @@ function drawRhythm() {
       else { g.fillStyle = css(r.banks[i] === 2 ? '--bankR' : '--bankL'); g.fillRect(x - bw / 2, bottom - bh, bw, bh) }
     }
   }
-  draw(rhythm.tuned, false)
+  const c = customOf()
+  draw(c ? { angles: c.angles, amp: c.amp, banks: [...c.banks].map((b) => (b === 'R' ? 2 : 1)), scale: AMP_MAX } : rhythm.tuned, false)
   draw(rhythm.stock, true)
+}
+// a custom pattern's bars can be dragged; the graph's geometry is drawRhythm's
+const AMP_MAX = 1.4
+function rhythmEvents() {
+  const cv = $('rhythm')
+  let dr = null
+  const at = (ev) => {
+    const r = cv.getBoundingClientRect(), pad = 8, top = 10, bottom = r.height - 20
+    return { deg: (ev.clientX - r.left - pad) / (r.width - 2 * pad) * 720, amp: (bottom - (ev.clientY - r.top)) / (bottom - top) * AMP_MAX, perDeg: (r.width - 2 * pad) / 720 }
+  }
+  cv.addEventListener('pointerdown', (ev) => {
+    const c = customOf()
+    if (!c) return
+    const p = at(ev)
+    let best = -1, bd = 14
+    c.angles.forEach((a, i) => { const d = Math.abs(a - p.deg) * p.perDeg; if (d < bd) { bd = d; best = i } })
+    if (best < 0) return
+    dr = { i: best, x: ev.clientX, y: ev.clientY, moved: false }
+    cv.setPointerCapture(ev.pointerId)
+  })
+  cv.addEventListener('pointermove', (ev) => {
+    const c = customOf()
+    if (!c) return
+    if (!dr) { const p = at(ev); cv.style.cursor = c.angles.some((a) => Math.abs(a - p.deg) * p.perDeg < 14) ? 'grab' : 'default'; return }
+    if (!dr.moved && Math.abs(ev.clientX - dr.x) + Math.abs(ev.clientY - dr.y) < 4) return
+    dr.moved = true
+    const p = at(ev), a = c.angles, i = dr.i
+    // firings stay in order round the cycle
+    const lo = i > 0 ? a[i - 1] + 2 : 0, hi = i < a.length - 1 ? a[i + 1] - 2 : a[0] + 718
+    a[i] = round(clamp(p.deg, lo, hi), 1)
+    c.amp[i] = round(clamp(p.amp, 0.1, AMP_MAX), 0.01)
+    changed()
+  })
+  const end = () => {
+    const c = customOf()
+    if (dr && !dr.moved && c) {
+      const b = [...c.banks]
+      b[dr.i] = b[dr.i] === 'R' ? 'L' : 'R'
+      c.banks = b.join('')
+      changed()
+    }
+    dr = null
+  }
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end)
 }
 function loop() {
   drawVoice()
@@ -654,40 +710,67 @@ function selectCar(name) {
   if (!carInfo(name)) return
   S.car = name
   $('car').value = name
-  clips.stock = clips.tuned = null; lastStockKey = ''
-  save(); syncControls(); renderChanges(); updateRhythm(); scheduleRender(0)
+  save(); syncControls(); renderChanges(); updateRhythm(); sendConfigNow()
 }
 function onReady(data) {
   DATA = data
   const dl = $('carlist')
   for (const c of DATA.cars) dl.appendChild(new Option(c.preset, c.name))
   buildControls()
-  $('sr').value = String(S.sr)
   $('overlay').remove()
   selectCar(S.car && carInfo(S.car) ? S.car : (carInfo('Bugatti Veyron 16.4') ? 'Bugatti Veyron 16.4' : DATA.cars[0].name))
   loop()
 }
 $('car').addEventListener('change', () => { if (carInfo($('car').value)) selectCar($('car').value); else $('car').value = S.car })
 $('car').addEventListener('focus', () => $('car').select())
-seg('ab', (v) => { S.ab = v; swap() })
+seg('ab', (v) => { S.ab = v; sendConfigNow() })
 seg('mode', (v) => {
-  S.mode = v; $('holdctl').hidden = v !== 'hold'
-  clips.stock = clips.tuned = null; scheduleRender(0)
+  S.mode = v
+  $('holdctl').hidden = v !== 'hold'
+  $('gas').hidden = v === 'hold' || v === 'sweep'
+  sendInput()
 })
-seg('thr', (v) => { S.thr = Number(v); scheduleRender(0) })
+seg('thr', (v) => { S.thr = Number(v); sendInput() })
 seg('scope', (v) => { S.scope = v; const e = EDITS[S.car]; if (e) { e.scope = v; save(); renderChanges() } syncControls() })
-$('rpm').addEventListener('input', () => { S.rpm = Number($('rpm').value); $('rpmv').textContent = S.rpm + ' rpm'; scheduleRender(350) })
-$('sr').addEventListener('change', () => { S.sr = Number($('sr').value); save(); clips.stock = clips.tuned = null; scheduleRender(0) })
+$('pops').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) host.send({ type: 'pop', kind: b.dataset.v }) })
+$('rpm').addEventListener('input', () => { S.rpm = Number($('rpm').value); $('rpmv').textContent = S.rpm + ' rpm'; sendInput() })
+$('vol').addEventListener('input', () => { if (out) out.gain.value = Number($('vol').value) })
 $('play').addEventListener('click', togglePlay)
+$('ignition').addEventListener('click', () => host.send({ type: 'ignition' }))
+function pedal(k, on) { if (S[k] !== on) { S[k] = on; $('gas').classList.toggle('primary', S.fwd); sendInput() } }
+$('gas').addEventListener('pointerdown', () => pedal('fwd', true))
+for (const t of ['pointerup', 'pointerleave', 'pointercancel']) $('gas').addEventListener(t, () => pedal('fwd', false))
+// a slider keeps the focus after a drag: the keys must still work then
+function typing() { const a = document.activeElement; return /SELECT|TEXTAREA/.test(a.tagName) || (a.tagName === 'INPUT' && a.type !== 'range') }
 document.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); togglePlay() }
-  if (e.key === 'b' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { const v = S.ab === 'stock' ? 'tuned' : 'stock'; segSet('ab', v); S.ab = v; swap() }
+  if (typing() || e.ctrlKey || e.metaKey || e.altKey) return
+  if (e.code === 'KeyW') pedal('fwd', true)
+  if (e.code === 'KeyS') pedal('back', true)
+  if (e.repeat) return
+  if (e.code === 'Space') { e.preventDefault(); document.activeElement.blur(); togglePlay() }
+  if (e.code === 'KeyB') { const v = S.ab === 'stock' ? 'tuned' : 'stock'; segSet('ab', v); S.ab = v; sendConfigNow() }
 })
-function togglePlay() {
-  audio(); if (ctx.state === 'suspended') ctx.resume()
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'KeyW') pedal('fwd', false)
+  if (e.code === 'KeyS') pedal('back', false)
+})
+window.addEventListener('blur', () => { pedal('fwd', false); pedal('back', false) })
+async function togglePlay() {
   S.playing = !S.playing
   $('play').textContent = S.playing ? '■ Stop' : '▶ Play'
-  if (S.playing) startSource(0); else stopSource()
+  if (!S.playing) {
+    host.send({ type: 'stop' })
+    if (outNode) outNode.port.postMessage({ flush: true })
+    status('Stopped')
+    return
+  }
+  try {
+    const first = audio()
+    if (ctx.state === 'suspended') ctx.resume()
+    await first
+    sendInput()
+    host.send({ type: 'play' })
+  } catch (e) { status('No audio: ' + (e && e.message || e), 'err') }
 }
 $('copy').addEventListener('click', async () => {
   const t = exportText(), ta = $('exportText')
@@ -702,6 +785,7 @@ $('download').addEventListener('click', () => {
 $('clear').addEventListener('click', () => { EDITS = {}; save(); changed() })
 window.addEventListener('resize', drawRhythm)
 voiceEvents()
+rhythmEvents()
 startWorker()
 </script>
 </body>

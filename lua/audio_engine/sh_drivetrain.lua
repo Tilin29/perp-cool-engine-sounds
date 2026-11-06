@@ -43,7 +43,7 @@ DT.SHIFT = {
 	-- above cruiseLand, and down again only when they sag under sagRpm. Holding a speed is not
 	-- you flooring it: no kickdown
 	cruiseLand = 0.45,
-	cruiseThr = 0.35,  -- the steady part throttle it sounds like while holding the speed
+	cruiseThr = 0.8,   -- the throttle it sounds like while holding the speed (the pedal 80% down)
 }
 
 -- a car's own shift points, any it leaves out from DT.SHIFT
@@ -154,7 +154,7 @@ DT.GearRatio = gearRatio
 --[[
 	inp.fwd, inp.back, inp.hand : driver keys (W, S, Space)
 	inp.steer                   : A or D held (the gearbox holds its gear through corners)
-	inp.cruise                  : holding at the speed limiter (sv_cruise.lua): steady part throttle
+	inp.cruise                  : holding at the speed limiter (sv_cruise.lua): steady throttle, 80%
 	inp.v                       : speed along the car's nose, m/s (negative when rolling back)
 ]]
 function DT.Step(st, cfg, dt, inp)

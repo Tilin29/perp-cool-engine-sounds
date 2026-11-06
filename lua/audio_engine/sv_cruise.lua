@@ -12,7 +12,7 @@
 	Getting out and the engine stopping switch it off.
 
 	To the clients: audio_cruise = the limit (mph, 0 = off) for the HUD, and audio_limst =
-	0 free / 1 holding at the limit (sounds like steady part throttle) / 2 over it (throttle shut).
+	0 free / 1 holding at the limit (sounds like the throttle held 80% down) / 2 over it (throttle shut).
 ]]
 local E = AUDIO_ENGINE
 

@@ -72,7 +72,7 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 		yawAllow = 10,         -- extra rotation (deg/s) allowed before it steps in
 		driftYaw = 70,         -- ... with the handbrake held (drifting)
 		overDamp = 9,          -- how firmly it catches oversteer
-		turnHelp = 2.5,        -- how much turn-in it adds when the car pushes wide (0 = none)
+		turnHelp = 4,          -- how much turn-in it adds when the car pushes wide (0 = none)
 		driftAngle = 30,       -- last-resort guard: tail-out slide angle (degrees)
 		handbrakeAngle = 70,   -- ... while drifting (started with the handbrake)
 		driftHold = 8,         -- a drift lasts while the car slides at least this many degrees

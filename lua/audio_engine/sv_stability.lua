@@ -8,7 +8,8 @@
 	  * rotating more than asked (oversteer, a spin starting)  -> catches it. With the handbrake
 	    held it allows a lot more, so handbrake drifts still work.
 	  * rotating against the steering (a snap the other way)  -> helps stop the rotation
-	  * rotating less than asked (pushing wide, understeer)    -> adds a little turn-in
+	  * rotating less than asked (pushing wide, understeer)    -> adds turn-in, up to turnShare of
+	    the asked rotation; braking (locked front tyres plough on) up to brakeTurn, applied firmer
 	  * last-resort guard: if the tail still slides out past the drift angle, it slows the
 	    rotation down (it never turns a sliding car's travel: that launched it where the nose pointed)
 	  * lateral grip: without the handbrake, extra tyre grip (gripAssist g) takes sideways speed
@@ -43,7 +44,12 @@ local DEFAULTS = {
 	yawAllow = 10,         -- deg/s of extra rotation allowed before it steps in
 	driftYaw = 70,         -- ... with the handbrake held (drifting)
 	overDamp = 9,          -- how firmly it catches oversteer (per second)
-	turnHelp = 2.5,        -- how much turn-in it adds when the car pushes wide (per second)
+	turnHelp = 4,          -- how much turn-in it adds when the car pushes wide (per second)...
+	turnShare = 0.9,       -- ...up to this share of the rotation the steering asks for
+	-- braking (S held, rolling forward): the front tyres lock and the car ploughs straight on.
+	-- It still turns, less: turn-in help up to brakeTurn of the asked rotation, applied firmer
+	brakeTurn = 0.6,
+	brakeHelp = 6,         -- per second
 	driftAngle = 20,       -- last-resort guard: tail-out slide angle (degrees)
 	handbrakeAngle = 70,   -- ... while drifting
 	driftHold = 8,         -- a drift lasts while the car slides at least this many degrees
@@ -187,16 +193,19 @@ local function assist(veh, cfg, dt)
 
 	local allow = handbrake and P("driftYaw") or (P("yawAllow") + 0.15 * abs(wRef))
 	local kOver = P("overDamp")
+	local braking = drv:KeyDown(IN_BACK) and not drv:KeyDown(IN_FORWARD)
+	local share = braking and P("brakeTurn") or P("turnShare")
 
 	if yaw * wRef >= 0 then
 		-- turning the way the driver steers: catch only the part beyond what was asked
 		local excess = abs(yaw) - abs(wRef) - allow
 		if excess > 0 then
 			add = add - sign(yaw) * excess * min(1, kOver * dt)
-		elseif not handbrake and abs(wRef) > 4 and v > 5 and abs(yaw) < abs(wRef) * 0.8
+		elseif not handbrake and abs(wRef) > 4 and v > 5 and abs(yaw) < abs(wRef) * share
 			and not (tailOut and a > P("slipMax") * 0.5) then
-			-- pushing wide: a little help to turn in
-			add = add + sign(wRef) * (abs(wRef) * 0.8 - abs(yaw)) * min(1, P("turnHelp") * dt)
+			-- pushing wide (or ploughing on under braking): help it turn in
+			local k = braking and P("brakeHelp") or P("turnHelp")
+			add = add + sign(wRef) * (abs(wRef) * share - abs(yaw)) * min(1, k * dt)
 		end
 	elseif not handbrake then
 		-- rotating against the steering (a snap the other way): stop it. Not while drifting:

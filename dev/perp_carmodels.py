@@ -17,6 +17,7 @@ import os, re, sys
 MAP = """
 Alfa Romeo 33 Stradale (1967)|alfa_stradale|tdmcars/alfa_stradale
 Alfa Romeo Giulietta|alfa_giulietta|tdmcars/alfa_giulietta
+Ambulance|@models/sickness/meatwagon.mdl|perp2/ambulance
 Aston Martin DB5|ast_db5|tdmcars/ast_db5
 Aston Martin DBS|dbs|tdmcars/dbs
 Aston Martin Rapide|ast_rapide|tdmcars/ast_rapide
@@ -53,6 +54,7 @@ Chrysler 300C|chr_300c|tdmcars/300c
 Chrysler PT Cruiser|chr_ptcruiser|tdmcars/ptcruiser
 Citroen C1|citroen_c1|tdmcars/citroenc1
 Citroen C4|cit_c4|tdmcars/c4
+Courier Truck|courier_truck|tdmcars/courier_truck
 DeLorean DMC-12|del_dmc|tdmcars/delorean
 Dodge Challenger 1970|dod_challenger70|tdmcars/challenger70
 Dodge Challenger 2015|dod_challenger15|tdmcars/dod_challenger15
@@ -70,10 +72,14 @@ Ferrari F12 Berlinetta|fer_f12|tdmcars/fer_f12
 Ferrari F430|fer_f430|tdmcars/fer_f430
 Ferrari F50|fer_f50|tdmcars/f50
 Ferrari LaFerrari|fer_lafer|tdmcars/laferrari
+Fire Truck|@models/sickness/truckfire.mdl|perp2/truckfire
 Ford Crown Victoria|crownvic_taxi|tdmcars/crownvic
 Ford Deluxe Coupe 1940|ford_coupe_40|tdmcars/coupe40
 Ford F100|for_f100|tdmcars/f100
 Ford F350|for_f350|tdmcars/f350
+Ford F350 Fire Rescue|for_f350_fru|perp2/f350_firetruck
+Ford F350 Tow Truck|for_f350_tow|perp2/f350_towtruck
+Ford F450 Ambulance|@models/forest/f450_ambo.mdl|perp2/f450_ambulance
 Ford Focus RS|focusrs|tdmcars/focusrs
 Ford Focus SVT|for_focussvt|tdmcars/focussvt
 Ford GT 05|gt05|tdmcars/gt05
@@ -81,14 +87,16 @@ Ford Mustang GT|for_mustanggt|tdmcars/mustanggt
 Ford Raptor SVT|for_raptor|tdmcars/raptorsvt
 Ford Shelby GT500|gt500|tdmcars/gt500
 Ford Transit|ford_transit|tdmcars/transit
+Ford Transit 2016 (Police)|@models/ezza/plpd_2016transit.mdl|jarheads/transit2016
+Ford Transit 2016 (Prisoner Transport)|2016transit|tdmcars/2016transit
 GMC Sierra|gmc_sierralow|tdmcars/sierralow
 GMC Syclone|gmc_syclone|tdmcars/syclone
 GMC Vandura|gmcvan|tdmcars/gmcvan
 Holden HSV GTS|hsvgts|tdmcars/hsvgts
 Holden HSV W427|hsvw427|tdmcars/hsvw427
-Honda CR-X SiR|hon_crxsir|tdmcars/hon_crxsir
 Honda Civic Type R|civic_typer|tdmcars/civictyper
 Honda Civic Type R 1997|hon_civic97|tdmcars/civic97
+Honda CR-X SiR|hon_crxsir|tdmcars/hon_crxsir
 Honda S2000|hon_s2000|tdmcars/s2000
 Hudson Hornet|hud_hornet|tdmcars/hudhornet
 Hummer H1|hummerh1|tdmcars/h1
@@ -108,6 +116,7 @@ Lamborghini Reventon Roadster|reventon_roadster|tdmcars/reventonr
 Land Rover Defender|landrover_defender|tdmcars/lrdefender
 Land Rover Range Rover 08|landrover|tdmcars/landrover
 Land Rover Range Rover 2012|landrover12|tdmcars/landrover12
+Lenco BearCat|plpd_bearcat|jarheads/bearcat
 Lexus IS 300|lex_is300|tdmcars/lex_is300
 Lexus IS F|lex_isf|tdmcars/lex_isf
 Maserati Ghibli S|mas_ghibli|tdmcars/mas_ghibli
@@ -124,8 +133,8 @@ Mercedes 300SL Gullwing Coupe|mer_300slgull|tdmcars/mer300slgull
 Mercedes C32 AMG|mercedes_c32|tdmcars/c32
 Mercedes E63 AMG|mer_e63|tdmcars/mere63
 Mercedes G-Class|gwagon|jarheads/gwagon
-Mercedes ML63 AMG|mer_ml63|tdmcars/ml63
 Mercedes McLaren SLR|mer_slr|tdmcars/mer_slr
+Mercedes ML63 AMG|mer_ml63|tdmcars/ml63
 Mercedes SL65 AMG|sl65amg|tdmcars/sl65amg
 Mercedes SLS AMG|mer_slsamg|tdmcars/slsamg
 Mini Clubman|mini_clubman|tdmcars/miniclubman
@@ -161,6 +170,7 @@ Shelby 1000|she_1000|tdmcars/she1000
 Subaru Impreza WRX STI|sub_wrxsti08|tdmcars/subimpreza08
 Subaru Legacy GT 2010|sub_legacygt10|tdmcars/subleggt10
 Subaru Legacy RS 1990|sub_legacyrs90|tdmcars/sublegrs90
+SWAT Stockade|@models/perp2.5/swat_van.mdl|perp2/swatvan
 Tesla Model S|tesla_models|tdmcars/teslamodels
 Toyota FJ Cruiser|toy_fj|tdmcars/toyfj
 Toyota MR2 GT|toy_mr2gt|tdmcars/mr2gt
@@ -181,6 +191,44 @@ Volvo 242 Turbo|242turbo|tdmcars/242turbo
 Volvo 850R|vol_850r|tdmcars/850r
 Volvo S60|vol_s60|tdmcars/vols60
 """
+
+# Job vehicles (police, fire, EMS, taxi...): spawn name|car in MAP|vehicle script|skin.
+# Most share a MAP car's model with their own script (_cop, _medic, ...) and paint the job livery
+# with skin 11 (skins 0-10 are the TDM colours; 12 is often a supervisor/chief livery). The Crown
+# Vic is the exception: 11 taxi, 12 police. A MAP car listed here with its own base script is
+# a job-only model: it spawns from the job tab only.
+# No model in any content pack (left out): perp2/towtruck (GTA IV tow truck), tdmcars/lee,
+# tdmcars/subimpreza. Not on the procedural engine: perp2/bus and tdmcars/airtug play raw .wav
+# paths (can't be muted, both engines would play), tdmcars/porcycle (pedal tricycle).
+JOBS = """
+Ambulance|Ambulance|perp2/ambulance|0
+Audi RS4 Avant First Responder|Audi RS4 Avant|tdmcars/rs4avant_medic|11
+BMW 340i Police|BMW 340i|tdmcars/bmw_340i_police|11
+BMW M5 E60 Police|BMW M5 E60|tdmcars/bmwm5e60_cop|11
+Dodge Charger 2012 Police|Dodge Charger 2012|tdmcars/charger2012_cop|11
+Dodge Charger SRT-8 Police|Dodge Charger SRT-8|tdmcars/charger_cop|11
+Dodge RAM SRT10 Fire Rescue|Dodge RAM SRT10|tdmcars/dodgeramff|11
+Fire Truck|Fire Truck|perp2/truckfire|0
+Ford Crown Victoria Police|Ford Crown Victoria|tdmcars/crownvic_cop|12
+Ford Crown Victoria Taxi|Ford Crown Victoria|tdmcars/crownvic_taxi|11
+Ford Crown Victoria Unmarked|Ford Crown Victoria|tdmcars/crownvic_unmarked|0
+Ford F350 Fire Rescue|Ford F350 Fire Rescue|perp2/f350_firetruck|0
+Ford F350 Tow Truck|Ford F350 Tow Truck|perp2/f350_towtruck|0
+Ford F450 Ambulance|Ford F450 Ambulance|perp2/f450_ambulance|0
+Ford Transit 2016 (Police)|Ford Transit 2016 (Police)|jarheads/transit2016|0
+Ford Transit 2016 (Prisoner Transport)|Ford Transit 2016 (Prisoner Transport)|tdmcars/2016transit|11
+Land Rover Defender Fire|Land Rover Defender|tdmcars/lrdefender_fire|11
+Land Rover Range Rover 2012 Police|Land Rover Range Rover 2012|tdmcars/landrover12_cop|11
+Lenco BearCat|Lenco BearCat|jarheads/bearcat|0
+Mercedes SL65 AMG Police|Mercedes SL65 AMG|tdmcars/sl65amg_cop|11
+Porsche Cayenne Turbo S Police|Porsche Cayenne Turbo S|tdmcars/cayenne_cop|11
+SWAT Stockade|SWAT Stockade|perp2/swatvan|0
+Toyota Prius Medic|Toyota Prius|tdmcars/prius_medic|11
+"""
+
+def jobs():
+    return [l.split("|") for l in JOBS.strip().splitlines()]
+
 
 # --- Valve KeyValues ---------------------------------------------------------------------
 def kv_parse(text):
@@ -282,7 +330,13 @@ def write_physics(pack, out_path):
         'E.PERP_PHYSICS = {',
     ]
     n = 0
-    for name, m, s in rows:
+    # the job vehicles' own scripts too, after their car's base script (sv_handling looks them up
+    # by the script the spawn entry asked for)
+    scripts = [(name, s) for name, m, s in rows]
+    for name, car, s, skin in jobs():
+        if s not in [x for _, x in scripts]:
+            scripts.append((name, s))
+    for name, s in scripts:
         key = 'scripts/vehicles/%s.txt' % s
         ph = physics(os.path.join(V, *s.split('/')) + '.txt')
         if not ph or not ph['engine'].get('horsepower') or len(ph['axles']) < 2:
@@ -322,6 +376,15 @@ def main():
         tiers = [d for d in ("used", "upgrade_1", "upgrade_2", "spiked") if os.path.exists(os.path.join(V, pk, d, base + ".txt"))]
         wr = "%.3f" % (radius * 0.0254) if radius else "nil"
         print('\t["%s"] = { "%s", "scripts/vehicles/%s.txt", %s }, -- %s' % (name, mdl, s, wr, " ".join(tiers) or "no tiers"))
+    # E.JOB_VEHICLES
+    cars = set(r[0] for r in rows)
+    print("\n-- E.JOB_VEHICLES")
+    for name, car, s, skin in jobs():
+        if car not in cars:
+            print("UNKNOWN CAR", name, car, file=sys.stderr); bad += 1
+        if not os.path.exists(os.path.join(V, *s.split("/")) + ".txt"):
+            print("MISSING SCRIPT", name, s, file=sys.stderr); bad += 1
+        print('\t{ "%s", "%s", "scripts/vehicles/%s.txt", %s },' % (name, car, s, skin))
     sys.exit(1 if bad else 0)
 
 main()

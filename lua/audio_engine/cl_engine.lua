@@ -17,8 +17,8 @@ local cvVol = CreateClientConVar("audio_engine_volume", "1", true, false, "Engin
 CreateClientConVar("audio_engine_startkey", "i", true, true, "Key that starts/stops the engine of the car you drive (a key name such as i, k or f1; none = off)")
 local cvRoad = CreateClientConVar("audio_engine_roadnoise", "1", true, false, "Tyre roar volume (0-2)", 0, 2)
 local cvWind = CreateClientConVar("audio_engine_windnoise", "1", true, false, "Wind noise volume (0-2)", 0, 2)
-local cvDoppler = CreateClientConVar("audio_engine_doppler", "1", true, false, "Doppler pitch shift of passing cars (0 = off, 1 = real)", 0, 1)
-local cvPassby = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off)", 0, 1)
+local cvDoppler = CreateClientConVar("audio_engine_doppler", "1", true, false, "Doppler pitch shift of passing cars (0 = off, 0.25 = real, 1 = default, four times real)", 0, 1)
+local cvPassby = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off, 1 = default)", 0, 2)
 
 local cars = {}
 E.ClientCars = cars
@@ -209,9 +209,13 @@ local function updateListener(dt)
 	end
 	listener.pos = pos
 	listener.ok = true
+	listener.cabin = IsValid(ply:GetVehicle()) and view == ply
 end
 
--- f' = f (c + v_listener) / (c - v_source), both measured toward each other
+-- f' = f (c + v_listener) / (c - v_source), both measured toward each other. At the real speed of
+-- sound an 80 mph drive-by only bends 3-4 semitones, which hardly registers in a game, so sound
+-- travels slower here: c / (audio_engine_doppler x DOPPLER_BOOST)
+local DOPPLER_BOOST = 4
 local function dopplerFactor(car, dt, mine)
 	local amt = cvDoppler:GetFloat()
 	local target = 1
@@ -222,29 +226,70 @@ local function dopplerFactor(car, dt, mine)
 			d:Mul(1 / dist)
 			local vs = car.vel:Dot(d)            -- source toward listener
 			local vl = -listener.vel:Dot(d)      -- listener toward source
-			local c = SPEED_OF_SOUND
-			target = (c + vl) / math.max(c * 0.5, c - vs)
-			target = 1 + (math.Clamp(target, 0.8, 1.25) - 1) * amt
+			local c = SPEED_OF_SOUND / (amt * DOPPLER_BOOST)
+			target = math.Clamp((c + vl) / math.max(c * 0.5, c - vs), 0.6, 1.8)
 		end
 	end
-	car.dop = car.dop + (target - car.dop) * min(1, dt * 6)
+	-- quick enough to keep up with the pitch drop: a fast close pass is over in about 0.2 s
+	car.dop = car.dop + (target - car.dop) * min(1, dt * 14)
 	return car.dop
 end
 
 --[[
 	Pass-by swell, for everyone but the car's own driver. Close up the game already plays a car
-	at full level (its distance falloff only starts some 20-40 m out), and the mix can't go any
-	louder without clipping, so a drive-by had no loudness peak. Instead a car is turned down a
-	little at mid range and comes up to full level as it gets close: closer than PASSBY_NEAR
-	it's untouched, past PASSBY_FAR it sits audio_engine_passby x PASSBY_DROP lower.
+	at full level (its distance falloff only starts some 20-40 m out), so a drive-by had no
+	loudness peak. Instead a car is turned down at range and rises as it gets close, the way
+	distance really works: steepest right next to you, so the peak is sharp. It reaches full level
+	at PASSBY_REF and keeps rising to PASSBY_NEAR, over the car's headroom ceiling: a pass is too
+	short for the ceiling's margin to matter, so updateSound only holds the peak under PASSBY_PEAK.
+	All of this is for fast cars: pace (0-1, PASSBY_SLOW to PASSBY_FAST m/s) sets how steep the
+	drop is, from PASSBY_CURVE_SLOW (-5.4 dB at PASSBY_FAR) to PASSBY_CURVE_FAST (-10.9 dB), and how
+	much of the extra near the car and of the exhaust direction it gets. The steep curve on every
+	car cut how far slow ones carried, and made a crawl past sound like a fly-by.
+	A fast car is judged PASSBY_LEAD seconds closer than it is: at 60 m/s it's inside 5 m for a
+	blink, too short for the volume glide to follow or the ear to register as loud.
+	Past PASSBY_FAR the game's own falloff has taken over and the drop stays put.
+
+	The exhaust points backward: a fast car is EXHAUST_FRONT_DB down coming at you and
+	EXHAUST_REAR_DB up once it's past, so the hit lands just as the pitch drops (electric cars have
+	none). Close to a fast car you also hear what the driver doesn't: car.rush (0-1) brings up the
+	tyre roar and wind, tuned low for the cabin, as a whoosh over RUSH_FAR to PASSBY_NEAR.
+
+	Speed here means how fast the car goes past you: its own speed, but no more than its speed
+	relative to the listener. A car keeping pace beside you isn't passing, and on its own speed it
+	got the whole swell and whoosh while your own engine stayed at 1, so it drowned yours out.
+	Sitting in a car, every other car is CABIN_DB down: it comes through the bodywork, yours doesn't.
 ]]
-local PASSBY_NEAR, PASSBY_FAR, PASSBY_DROP = 8 / 0.0254, 35 / 0.0254, 0.4   -- inches; 0.4 = -4.4 dB
-local function proximityGain(car, mine)
+local PASSBY_NEAR, PASSBY_REF, PASSBY_FAR = 2.5 / 0.0254, 5 / 0.0254, 30 / 0.0254   -- inches
+local PASSBY_CURVE_SLOW, PASSBY_CURVE_FAST = 0.35, 0.7
+local PASSBY_SLOW, PASSBY_FAST, PASSBY_PEAK, PASSBY_LEAD = 5, 30, 0.95, 0.2
+local EXHAUST_FRONT_DB, EXHAUST_REAR_DB = 5, 3
+local CABIN_DB = 3
+local RUSH_FAR, RUSH_SLOW, RUSH_FAST, RUSH_ROAD, RUSH_WIND = 10 / 0.0254, 12, 40, 0.7, 1   -- inches; m/s; volumes
+local function proximityGain(car, mine, fwd)
+	car.rush = 0
+	if mine or not listener.ok then return 1 end
+	local cabin = listener.cabin and 10 ^ (-CABIN_DB / 20) or 1
 	local amt = cvPassby:GetFloat()
-	if mine or amt <= 0 or not listener.ok then return 1 end
-	local t = math.Clamp((listener.pos:Distance(car.ent:GetPos()) - PASSBY_NEAR) / (PASSBY_FAR - PASSBY_NEAR), 0, 1)
-	t = t * t * (3 - 2 * t)
-	return 1 - amt * PASSBY_DROP * t
+	if amt <= 0 then return cabin end
+	local toEar = listener.pos - car.ent:GetPos()
+	local dist = toEar:Length()
+	local speed = min(car.vel:Length(), (car.vel - listener.vel):Length())   -- inches/s
+	local ms = speed * 0.0254
+	local d = math.Clamp(dist - speed * PASSBY_LEAD, PASSBY_NEAR, PASSBY_FAR)
+	local pace = math.Clamp((ms - PASSBY_SLOW) / (PASSBY_FAST - PASSBY_SLOW), 0, 1)
+	local gain
+	if d > PASSBY_REF then
+		gain = (PASSBY_REF / d) ^ ((PASSBY_CURVE_SLOW + (PASSBY_CURVE_FAST - PASSBY_CURVE_SLOW) * pace) * amt)
+	else
+		gain = 1 + ((PASSBY_REF / d) ^ amt - 1) * pace
+	end
+	car.rush = amt * math.Clamp((RUSH_FAR - dist) / (RUSH_FAR - PASSBY_NEAR), 0, 1) ^ 2
+		* math.Clamp((ms - RUSH_SLOW) / (RUSH_FAST - RUSH_SLOW), 0, 1)
+	if car.cfg.electric or dist < 1 then return gain * cabin end
+	local ahead = fwd:Dot(toEar) / dist                     -- 1 in front of the car, -1 behind it
+	local db = -ahead * (ahead > 0 and EXHAUST_FRONT_DB or EXHAUST_REAR_DB)
+	return gain * cabin * 10 ^ (db * pace * amt / 20)
 end
 
 local function updateSound(car, dt)
@@ -377,9 +422,16 @@ local function updateSound(car, dt)
 	car.popLoad = (car.popLoad or 0) * math.exp(-dt / 0.08)
 	-- the pass-by swell goes on after the headroom, so a car pinned at its ceiling still swells
 	local prox = car.prox or 1
+	if prox > 1 then
+		prox = max(1, min(prox, PASSBY_PEAK / max(est * car.bus, 0.01)))
+		car.prox = prox
+	end
 	car.busPeak = est * car.bus * prox
 	g = g * car.bus * prox
 	roadVol, windVol, humVol = roadVol * car.bus * prox, windVol * car.bus * prox, humVol * car.bus * prox
+	-- after the headroom: the whoosh shouldn't pull the engine down just as it peaks
+	local rush = car.rush or 0
+	roadVol, windVol = roadVol + road * rush * RUSH_ROAD, windVol + wind * rush * RUSH_WIND
 
 	local thr = car.thrS
 	local det = car.detune * (car.dop or 1)
@@ -387,7 +439,8 @@ local function updateSound(car, dt)
 		local L = layers[i]
 		local wi = (w[i] or 0) * (1 - car.limW) * g
 		local pitch = math.Clamp(100 * det * rpm / L.rpm, 5, 250)
-		setGroup(car, i, { L.on, L.off }, { wi * thr, wi * (1 - thr) }, pitch, dt)
+		local trim = L.trim or 1
+		setGroup(car, i, { L.on, L.off }, { wi * thr * trim, wi * (1 - thr) * trim }, pitch, dt)
 	end
 	-- a family bank (or the stock fallback) may be rendered at another redline: pitch it to ours
 	local limPitch = math.Clamp(100 * det * cfg.redline / (bank.limiter.rpm or cfg.redline), 5, 250)
@@ -545,13 +598,13 @@ local function updateCar(car, dt)
 				car.loopGain = 0
 				if car.bank and car.bank.ready then
 					local s = st.emotion and car.bank.startEmo or car.bank.start
-					playOneShot(car, "start", s.name, cvVol:GetFloat() * (cfg.volume or 1), 100, s.fadeAt, s.dur)
+					playOneShot(car, "start", s.name, cvVol:GetFloat() * (cfg.volume or 1) * (car.prox or 1), 100, s.fadeAt, s.dur)
 				end
 			end
 		else
 			if not car.first and st.rpm > 100 and car.bank and car.bank.ready then
 				local pitch = math.Clamp(100 * st.rpm / cfg.idle, 70, 160)
-				playOneShot(car, "stop", car.bank.stop.name, cvVol:GetFloat() * (cfg.volume or 1), pitch, 0, car.bank.stop.dur)
+				playOneShot(car, "stop", car.bank.stop.name, cvVol:GetFloat() * (cfg.volume or 1) * (car.prox or 1), pitch, 0, car.bank.stop.dur)
 			end
 			DT.Stop(st)
 			if car.first then st.rpm = 0 end
@@ -573,8 +626,10 @@ local function updateCar(car, dt)
 		car.vel = car.vel + (delta / dt - car.vel) * min(1, dt * 8)
 	end
 	car.v = car.v + (vRaw - car.v) * min(1, dt * 10)
-	dopplerFactor(car, dt, mine)
-	car.prox = proximityGain(car, mine)
+	-- driving it but watching from a camera, you hear it from outside like anyone else
+	local inside = mine and GetViewEntity() == ply
+	dopplerFactor(car, dt, inside)
+	car.prox = proximityGain(car, inside, fwd)
 
 	-- the gearbox follows the wheels, and in a slide they still roll at the car's full speed: the
 	-- speed along the nose collapsed as the car went sideways, the revs plunged and shot back up

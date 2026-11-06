@@ -1,13 +1,19 @@
 --[[
 	Tone Studio glue: runs after the addon's own files (bake_shim.lua, sh_*, cl_synth) in the
-	page's worker. Renders an engine from a car's stock sound plus the page's changes, through
+	page's worker. Runs an engine live from a car's stock sound plus the page's changes, through
 	the same E.ResolveProfile + Synth code the baker and the game use, so what the page plays is
-	what a re-bake would ship. Results go to JS through callbacks (__result, __push): wasmoon
+	the synth a re-bake would ship. Results go to JS through callbacks (__result, __push): wasmoon
 	leaks stack slots on doString return values.
 ]]
 local E = AUDIO_ENGINE
 local Synth = E.Synth
+local DT = E.Drivetrain
 STUDIO = {}
+LIVE = {}
+
+-- the incremental collector's pauses reached 120 ms, generational stays under 20: the stream's
+-- buffer only has to cover that
+collectgarbage("generational")
 
 local SOUND_FIELDS = { "layout", "pitch", "tone", "idle", "redline", "realism", "gurgle", "popTone" }
 local CHAR_FIELDS = { "f1", "f2", "f3", "w", "o1", "o05" }
@@ -61,14 +67,25 @@ function STUDIO.data()
 	table.sort(cars, function(a, b) return a.name < b.name end)
 	local presets = {}
 	for _, p in ipairs(E.ENGINE_PRESETS) do
-		presets[#presets + 1] = { id = p.id, name = p.name, sound = pick(p, SOUND_FIELDS) }
+		presets[#presets + 1] = { id = p.id, name = p.name, sound = pick(p, SOUND_FIELDS), character = pick(p.character or {}, CHAR_FIELDS) }
 	end
 	local layouts = {}
 	for _, o in ipairs(E.LAYOUT_ORDER) do layouts[#layouts + 1] = { id = o[1], name = o[2], cyl = E.LAYOUT_CYL[o[1]] } end
-	__result(json({ cars = cars, presets = presets, layouts = layouts, character = Synth.CHARACTER }))
+	local shapes = {}
+	for id, L in pairs(Synth.LAYOUTS) do shapes[id] = { angles = L.angles, amp = L.amp, banks = L.banks } end
+	__result(json({ cars = cars, presets = presets, layouts = layouts, shapes = shapes, character = Synth.CHARACTER }))
 end
 
--- the car with the page's changes: req.car, req.sound (profile fields), req.character
+-- a firing pattern drawn on the page (req.custom): an engine layout like those in cl_synth,
+-- with the voice of the layout it started from
+local function defineCustom(c)
+	Synth.LAYOUTS.custom = { angles = c.angles, amp = c.amp, banks = c.banks }
+	Synth.CHARACTER.custom = Synth.CHARACTER[c.base] or Synth.CHARACTER.i4
+	E.LAYOUT_CYL.custom = #c.angles
+end
+
+-- the car with the page's changes: req.car, req.sound (profile fields, and muffle: the car's
+-- silencer), req.character, req.custom
 local function resolve(req)
 	local base = byName[req.car]
 	assert(base, "unknown car " .. tostring(req.car))
@@ -77,8 +94,11 @@ local function resolve(req)
 	car.topSpeed = 250
 	-- req.character replaces the car's own (nil keeps it, {} clears it)
 	if req.character ~= nil then car.character = next(req.character) and req.character or nil end
+	if req.custom then defineCustom(req.custom) end
+	local sound = req.sound or {}
+	if sound.muffle then car.muffle = sound.muffle end
 	local prof = E.CarStockProfile(car)
-	for k, v in pairs(req.sound or {}) do prof[k] = v end
+	for k, v in pairs(sound) do prof[k] = v end
 	-- the same rounding and limits the game applies to a profile
 	prof = E.SanitizeProfile(prof)
 	return E.ResolveProfile(car, prof), prof
@@ -94,59 +114,130 @@ function STUDIO.rhythm(req)
 	__result(json({ angles = ang, amp = am, banks = banks }))
 end
 
-local function push(buf, n)
-	local k = 1
-	while k <= n do
-		local j = math.min(n, k + 399)
-		__push(table.unpack(buf, k, j))
-		k = j + 1
+--[[
+	The live engine: one generator and exhaust chain that keep running while the page retunes them
+	and works the pedals. Each step renders one control tick (1/60 s) through the same
+	Synth.RenderControlled the baker uses, and the game's own E.Drivetrain drives the revs.
+]]
+local SR, CHUNK = 44100, 735
+local live
+
+-- what NewGen / NewChain work out from a profile. The running engine takes these on and keeps
+-- everything else (firing phase, filter and resonator state), so a change lands without a restart
+local GEN_FIELDS = { "pitch", "tone", "cyl", "iv", "am", "banks", "redline", "R", "ev" }
+local CHAIN_FIELDS = { "drive", "driveNorm", "tailWet", "verbWet", "muffleK", "ev" }
+local CHAIN_FILTERS = { "peak", "low", "lpf2", "shelf" }
+
+function LIVE.config(req)
+	local cfg = resolve(req)
+	local g, ch = Synth.NewEngine(cfg, SR)
+	if live then
+		local lg, lc = live.g, live.ch
+		for _, k in ipairs(GEN_FIELDS) do lg[k] = g[k] end
+		lg.idx = lg.idx % #g.iv
+		lg.evOrder = nil
+		for _, k in ipairs(CHAIN_FIELDS) do lc[k] = ch[k] end
+		for _, k in ipairs(CHAIN_FILTERS) do
+			for i = 1, 5 do lc[k][i] = ch[k][i] end
+		end
+	else
+		g.allowPops = false
+		g.on = true; g.gain = 1
+		g.rpm, g.tRpm = cfg.idle, cfg.idle
+		local st = DT.New()
+		DT.SkipStart(st, cfg)
+		live = { g = g, ch = ch, st = st, v = 0, t = 0, ref = 0.06, fx = {}, msg = {},
+			inp = { mode = "rev", rpm = 3000, thr = 1, fwd = false, back = false } }
+		live.ctl = { control = function() return live.msg end }
+	end
+	live.cfg = cfg
+	live.emotion = E.CAR_EMOTION[req.car] and true or false
+	__result(json({ key = cfg.soundKey, redline = cfg.redline, idle = cfg.idle, cyl = E.LAYOUT_CYL[cfg.layout] or 4 }))
+end
+
+-- req: any of mode ("rev", "drive", "sweep", "hold"), rpm, thr, fwd, back
+function LIVE.input(req)
+	if req.mode and req.mode ~= live.inp.mode then live.t = 0; live.v = 0 end
+	for k, v in pairs(req) do live.inp[k] = v end
+end
+
+function LIVE.ignition()
+	local st = live.st
+	if st.on then
+		DT.Stop(st)
+	else
+		live.g.gain = 0
+		DT.Start(st, live.emotion)
 	end
 end
 
---[[
-	req.mode "hold": a steady loop at req.rpm / req.thr (what the game cross-fades between).
-	req.mode "rev":  idle, a full-throttle pull to near redline, a lift (the off-throttle
-	                 burble) and back to idle, the way you'd blip it standing next to the car.
-]]
-function STUDIO.render(req)
-	local cfg, prof = resolve(req)
-	local sr = req.sr or 44100
-	local out, n, loop
-	if req.mode == "hold" then
-		local rpm = math.max(cfg.idle, math.min(cfg.redline, req.rpm or 3000))
-		out, n = Synth.RenderSteadyLoop(cfg, sr, rpm, req.thr or 1, nil, 2.0)
-		loop = true
+-- a free rev like a blip beside the car: idle, a full-throttle pull, a lift, idle again (7.5 s)
+local function sweep(L, dt)
+	local cfg = L.cfg
+	local top = cfg.redline * 0.95
+	L.t = (L.t + dt) % 7.5
+	local t = L.t
+	if t < 0.7 then return cfg.idle, 0 end
+	if t < 3.6 then return cfg.idle + (top - cfg.idle) * (1 - (1 - (t - 0.7) / 2.9) ^ 1.6), 1 end
+	if t < 6.2 then return top + (cfg.idle - top) * (1 - (1 - (t - 3.6) / 2.6) ^ 2.2), 0 end
+	return cfg.idle, 0
+end
+
+-- a plain car for the gearbox to work against: pulls until drag meets it at the top speed
+local function roll(L, dt)
+	local v, top, inp = L.v, L.cfg.topSpeed / 3.6, L.inp
+	local a = -0.4 - 1.5 * (v / top) ^ 2
+	if inp.back then a = -9 elseif inp.fwd then a = 7 * (1 - (v / top) ^ 2) end
+	L.v = math.max(0, v + a * dt)
+end
+
+local function control(L, dt)
+	local st, cfg, inp, m = L.st, L.cfg, L.inp, L.msg
+	if st.on and st.phase ~= "run" then
+		DT.StartSequence(st, cfg, dt)
+	elseif st.on and (inp.mode == "hold" or inp.mode == "sweep") then
+		local rpm, thr = inp.rpm, inp.thr
+		if inp.mode == "sweep" then rpm, thr = sweep(L, dt) end
+		st.rpm, st.soundThr, st.cut, st.crankMode, st.gear = rpm, thr, false, 0, 0
+	elseif inp.mode == "drive" then
+		DT.Step(st, cfg, dt, { fwd = inp.fwd, back = inp.back and L.v > 0.7, v = L.v })
+		roll(L, dt)
 	else
-		local g, ch = Synth.NewEngine(cfg, sr)
-		g.allowPops = false
-		g.on = true; g.gain = 1
-		g.rpm, g.tRpm, g.thr, g.tThr = cfg.idle, cfg.idle, 0, 0
-		local top = cfg.redline * 0.95
-		local warm = math.floor(sr * 0.8)
-		local total = warm + math.floor(sr * 7.5)
-		out = Synth.RenderControlled(g, ch, {
-			skip = warm,
-			control = function(t)
-				t = t - 0.8
-				if t < 0.7 then return { tRpm = cfg.idle, tThr = 0, on = true } end
-				if t < 3.6 then
-					-- the revs climb with the throttle like a free-revving engine: slower near the top
-					local x = (t - 0.7) / 2.9
-					return { tRpm = cfg.idle + (top - cfg.idle) * (1 - (1 - x) ^ 1.6), tThr = 1, on = true }
-				end
-				if t < 6.2 then
-					local x = (t - 3.6) / 2.6
-					return { tRpm = top + (cfg.idle - top) * (1 - (1 - x) ^ 2.2), tThr = 0, on = true }
-				end
-				return { tRpm = cfg.idle, tThr = 0, on = true }
-			end,
-		}, total)
-		n = #out
-		loop = false
+		DT.Step(st, cfg, dt, { fwd = inp.fwd, hand = true, v = 0 })
 	end
-	__genBegin("render", sr, loop and 0 or -1, n)
-	push(out, n)
-	__genEnd("render")
-	__result(json({ key = cfg.soundKey, profile = pick(prof, SOUND_FIELDS), redline = cfg.redline, idle = cfg.idle,
-		cyl = E.LAYOUT_CYL[cfg.layout] or 4, char = Synth.RealismOf(cfg).char }))
+	m.tRpm, m.tThr, m.cut, m.crank, m.on = st.rpm, st.soundThr, st.cut, st.crankMode, st.on or st.rpm > 25
+end
+
+-- a pop or bang on top of the engine, at the level the sound bank gives it (cl_soundbank) and the
+-- 0.7 the game plays it at. L.ref stands in for the bank's loudest band
+function LIVE.pop(kind)
+	local L = live
+	if L.cfg.electric then return end
+	local big = kind == "bang"
+	local buf = Synth.RenderBackfire(L.cfg, SR, math.random(1, 1000000), kind)
+	local s2, m = 0, math.min(#buf, math.floor(SR * (big and 0.05 or 0.02)))
+	for i = 1, m do s2 = s2 + buf[i] * buf[i] end
+	local gain = 0.7 * L.ref * 10 ^ ((big and 3 or -4) / 20) / (math.sqrt(s2 / m) + 1e-9)
+	L.fx[#L.fx + 1] = { buf = buf, pos = 1, n = #buf, gain = gain }
+end
+
+function LIVE.step()
+	local L = live
+	control(L, CHUNK / SR)
+	local out = Synth.RenderControlled(L.g, L.ch, L.ctl, CHUNK)
+	local st = L.st
+	if st.soundThr > 0.7 then
+		local s2 = 0
+		for i = 1, CHUNK do s2 = s2 + out[i] * out[i] end
+		L.ref = math.max(L.ref * 0.9995, math.sqrt(s2 / CHUNK))
+	end
+	for i = #L.fx, 1, -1 do
+		local f = L.fx[i]
+		for k = 1, math.min(CHUNK, f.n - f.pos + 1) do out[k] = out[k] + f.buf[f.pos + k - 1] * f.gain end
+		f.pos = f.pos + CHUNK
+		if f.pos > f.n then table.remove(L.fx, i) end
+	end
+	__live(st.rpm, st.gear, L.v * 3.6, st.soundThr, st.on and st.phase == "run" and 1 or 0, L.cfg.electric and 1 or 0)
+	__push(table.unpack(out, 1, 400))
+	__push(table.unpack(out, 401, CHUNK))
 end

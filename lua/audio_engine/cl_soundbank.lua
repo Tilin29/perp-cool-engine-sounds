@@ -313,6 +313,24 @@ local function build(b)
 	end
 	y()
 
+	--[[
+		A sound's volume can't go over 1, and the loudness matching leaves many bands peaking far
+		under full scale (the Furai's high revs at 0.23-0.5), so those could never swell on a
+		drive-by. Each band's loops are stored as hot as they go; layer.trim is the volume that
+		plays them at the level they had. b.peak stays the level at volume 1 before the trim.
+	]]
+	if not cfg.electric then
+		local byName = {}
+		for _, j in ipairs(jobs) do byName[j.name] = j end
+		for _, L in ipairs(b.layers) do
+			local on, off = byName[L.on], byName[L.off]
+			L.trim = math.min(1, math.max(peakOf(on.data, 0), peakOf(off.data, 0)) / 0.95)
+			scale(on.data, 1 / L.trim); scale(off.data, 1 / L.trim)
+			on.trim, off.trim = L.trim, L.trim
+			y()
+		end
+	end
+
 	for _, j in ipairs(jobs) do
 		local data = j.data
 		local samples = data
@@ -330,7 +348,7 @@ local function build(b)
 		end
 		-- the peak each sound plays at (cl_engine keeps the car's mix under full scale with it)
 		b.peak = b.peak or {}
-		b.peak[j.name] = math.min(1, peakOf(samples, 0) * jg)
+		b.peak[j.name] = math.min(1, peakOf(samples, 0) * jg * (j.trim or 1))
 		sound.Generate(j.name, sr, N / sr, function(t)
 			local v = (samples[(t % N) + 1] or 0) * jg
 			if v > 1 then v = 1 elseif v < -1 then v = -1 end
@@ -442,7 +460,9 @@ local function bakedBank(cfg)
 		cfg = cfg, key = cfg.id, sr = m.sr, ready = true, baked = true, cyl = m.cyl,
 		layers = {}, pops = {}, bangs = {}, peak = {}, limitedDb = m.limitedDb,
 	}
-	for i, rpm in ipairs(m.layers) do b.layers[i] = { rpm = rpm, off = n("b" .. i .. "off"), on = n("b" .. i .. "on") } end
+	for i, rpm in ipairs(m.layers) do
+		b.layers[i] = { rpm = rpm, off = n("b" .. i .. "off"), on = n("b" .. i .. "on"), trim = m.trims and m.trims[i] }
+	end
 	b.limiter = { off = n("lim"), rpm = m.limiter }
 	b.start = { name = n("start"), fadeAt = m.start.fadeAt, dur = m.start.dur }
 	b.startEmo = { name = n("starte"), fadeAt = m.startEmo.fadeAt, dur = m.startEmo.dur }

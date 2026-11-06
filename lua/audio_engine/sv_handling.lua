@@ -22,8 +22,8 @@
 	   power; from ~36 mph to no less than 60%, so it catches slides without holding the car back.
 	   When the car slides (tail out or over-rotating, from sv_stability.lua; not in a handbrake
 	   drift) it cuts the power quickly, down to 20% at any speed, until it straightens up.
-	5. High-speed steering: the wider lock of step 2 tightens to 0.65 between ~40 and
-	   80 mph (E.HIGH_SPEED_STEER), so the car turns well at town speeds and holds its speed in fast turns.
+	5. High-speed steering: the wider lock of step 2 tightens to 0.9 between ~45 and
+	   90 mph (E.HIGH_SPEED_STEER), so the car turns well at town speeds and holds its speed in fast turns.
 
 	A car on a spiked/ tier script (tyres shot by a stinger) gets none of it: it's meant to be
 	hard to drive.
@@ -167,7 +167,7 @@ E.ANTI_SPIN = {
 	powerSlide = 1.0,       -- handbrake slide push x this (1 = the script's own: lower kills drifts)
 	minGravity = 1.0,       -- at least normal grip
 	lowerCentre = 0.25,     -- lower the centre of mass by this many wheel radii
-	steerFast = 1.3,        -- steering angle at speed x this (the scripts' 8-13 degrees turn too little)
+	steerFast = 1.5,        -- steering angle at speed x this (the scripts' 8-13 degrees turn too little; 1.3 still did)
 }
 
 local function antiSpin(p)
@@ -206,7 +206,9 @@ function E.PrepareHandling(veh)
 	local ok, p = pcall(veh.GetVehicleParams, veh)
 	if not ok or not istable(p) or not istable(p.engine) then return end
 	local changed = false
-	local ph = car.script and E.PERP_PHYSICS and E.PERP_PHYSICS[car.script]
+	-- the script the spawn entry asked for (a job variant's own), else the car's base script
+	local want = istable(veh.VehicleTable) and veh.VehicleTable.AudioPerpScript or car.script
+	local ph = want and E.PERP_PHYSICS and (E.PERP_PHYSICS[want] or E.PERP_PHYSICS[car.script])
 	if ph and script == E.TEST_SCRIPT then
 		perpOnto(p, ph)
 		veh.audioPerpPhysics = true
@@ -268,14 +270,36 @@ E.TRACTION = {
 
 -- steering lock at speed, x the (already widened) degreesFast: 1 up to fromMph, `scale` from toMph.
 -- Tightens from town speeds on: a fast turn on the wide lock scrubbed off speed and revs
--- (11 deg script x 1.3 x 0.65 = ~9 deg at 80 mph)
-E.HIGH_SPEED_STEER = { fromMph = 40, toMph = 80, scale = 0.65 }
+-- (11 deg script x 1.5 x 0.9 = ~14.9 deg at 90 mph; 1.3 x 0.65 by 80 mph, then 1.3 x 0.8, turned too little)
+E.HIGH_SPEED_STEER = { fromMph = 45, toMph = 90, scale = 0.9 }
 
 local function steerScale(mph)
 	local H = E.HIGH_SPEED_STEER
 	local t = math.Clamp((mph - H.fromMph) / (H.toMph - H.fromMph), 0, 1)
 	t = t * t * (3 - 2 * t)
 	return 1 + (H.scale - 1) * t
+end
+
+--[[
+	The scripts blend DegreesSlow (~38) into DegreesFast (~11) by 35 mph (FastCarSpeed), so at
+	30 mph the wheels were nearly at the high-speed lock already. The lock we want instead fades
+	from the slow lock to the (widened) fast one over E.STEER_CURVE.toMph, (1 - mph/toMph)^power:
+	the SL65 (38.5 / 16.5) gets ~28 deg at 30 mph and ~23 at 50 (was ~20 and ~16).
+	Source keeps blending below blendMph, so degreesFast is set to what makes its blend land there.
+	Returns the multiplier on the car's degreesFast (veh.audioSteerLock).
+]]
+E.STEER_CURVE = { toMph = 90, power = 1.5, blendMph = 35 }
+
+local function lockScale(veh, mph)
+	local st = veh.audioBase and veh.audioBase.steering
+	local S, F = st and st.degreesSlow, st and st.degreesFast
+	if not (S and F and F > 0) then return steerScale(mph) end
+	local C = E.STEER_CURVE
+	local k = (1 - math.Clamp(mph / C.toMph, 0, 1)) ^ C.power
+	local want = (F + (S - F) * k) * steerScale(mph)
+	local frac = mph / C.blendMph
+	local fast = frac >= 1 and want or (frac > 0.05 and S + (want - S) / frac or F)
+	return math.Clamp(fast / F, 0.3, 4)
 end
 
 -- the fastest-turning driven wheel's surface speed (m/s), from the wheel physics objects
@@ -318,7 +342,7 @@ hook.Add("Tick", "audio_engine_traction", function()
 			local phys = veh:GetPhysicsObject()
 			local v = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 or 0
 			-- steering: only on cars that got the wider lock (anti-spin setup)
-			local steer = veh.audioAntiSpin and steerScale(v * 2.23694) or nil
+			local steer = veh.audioAntiSpin and lockScale(veh, v * 2.23694) or nil
 			if steer and math.abs(steer - (veh.audioSteerSent or 1)) >= 0.03 then
 				veh.audioSteerLock = steer   -- (not audioSteer: sv_stability keeps the A/D input there)
 				veh.audioSteerSent = steer

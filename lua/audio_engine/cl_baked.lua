@@ -5,13 +5,13 @@
 	several redlines is baked once, at the highest, and E.BAKED_FAMILY points the others at it.
 	The WAVs live in sound/audio_engine/<dir>/. cl_soundbank.lua loads these instead of
 	generating, so stock cars cost no CPU; tuned engines are still generated in game.
-	Synth version: b827f00e33
+	Synth version: 821e00c7a5
 ]]
 
 local E = AUDIO_ENGINE
-E.BAKED_VERSION = "b827f00e33"
+E.BAKED_VERSION = "821e00c7a5"
 E.BAKED_ENV = {
-	dir = "env_439e5ada",
+	dir = "env_859c904c",
 	peak = {
 		bov1 = 0.35331,
 		bov2 = 0.363128,
@@ -68,7 +68,7 @@ E.BAKED = {
 		bangs = 3,
 		cars = { "Volkswagen Beetle 1967", "Volkswagen Camper 1965" },
 		cyl = 4,
-		dir = "f4air_4500_957c95",
+		dir = "f4air_4500_5fbb88",
 		engine = "Flat-4 · air-cooled (Beetle, Camper)",
 		layers = { 910, 1140, 1440, 1800, 2270, 2850, 3580, 4500 },
 		limitedDb = 6.68683,
@@ -116,12 +116,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 1, 1, 1 },
 	},
 	["boxer_1_0.55_800_7400_1_0.35_0.25"] = {
 		bangs = 3,
 		cars = { "Scion FR-S" },
 		cyl = 4,
-		dir = "f4_7400_fad4c4",
+		dir = "f4_7400_129fd0",
 		engine = "Flat-4 (FR-S)",
 		layers = { 860, 1060, 1320, 1630, 2030, 2520, 3120, 3870, 4810, 5960, 7400 },
 		limitedDb = 2.0707,
@@ -175,12 +176,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 1, 0.912752, 0.708719, 0.804451, 0.558862, 0.555059 },
 	},
 	["boxer_1_0.6_800_7000_1_0.5_0.3"] = {
 		bangs = 3,
 		cars = { "Subaru Impreza WRX STI", "Subaru Legacy GT 2010", "Subaru Legacy RS 1990" },
 		cyl = 4,
-		dir = "boxer_7000_4a0eb2",
+		dir = "boxer_7000_185e2e",
 		engine = "Flat-4 · turbo (Subaru)",
 		layers = { 860, 1060, 1300, 1610, 1980, 2450, 3020, 3730, 4600, 5670, 7000 },
 		limitedDb = 2.60272,
@@ -234,12 +236,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 1, 1, 0.654404, 0.808114, 0.50517, 0.493349 },
 	},
 	["electric_1_0.4_500_10400_1_0_0.2"] = {
 		bangs = 0,
 		cars = { "Nissan Leaf" },
 		cyl = 1,
-		dir = "ev_10400_bcaca6",
+		dir = "ev_10400_dd3110",
 		engine = "Electric motor",
 		layers = { 540, 720, 970, 1300, 1750, 2360, 3170, 4270, 5750, 7730, 10400 },
 		limitedDb = 0,
@@ -285,12 +288,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
 	},
 	["electric_1_0.4_500_16000_1_0_0.2"] = {
 		bangs = 0,
 		cars = { "Tesla Model S" },
 		cyl = 1,
-		dir = "ev_16000_14cbf2",
+		dir = "ev_16000_a1d18c",
 		engine = "Electric motor",
 		layers = { 540, 710, 940, 1250, 1660, 2200, 2930, 3880, 5150, 6840, 9080, 12050, 16000 },
 		limitedDb = 0,
@@ -340,12 +344,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 },
 	},
 	["flat12_1_0.6_1000_7200_1_0.3_0.3"] = {
 		bangs = 3,
 		cars = { "Ferrari 512 TR" },
 		cyl = 12,
-		dir = "f12_7200_8105c7",
+		dir = "f12_7200_be5c67",
 		engine = "Flat-12 (180° V12)",
 		layers = { 1070, 1320, 1630, 2020, 2500, 3090, 3810, 4710, 5830, 7200 },
 		limitedDb = 0,
@@ -397,12 +402,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.674757, 0.749636, 0.724598, 0.298293, 0.429608, 0.544587, 0.308348, 0.603755, 0.462297, 0.509782 },
 	},
 	["flat6_1.05_0.7_950_9000_1_0.25_0.4"] = {
 		bangs = 3,
 		cars = { "Porsche 911 GT3", "Porsche 997 GT3" },
 		cyl = 6,
-		dir = "f6_9000_8e9381",
+		dir = "f6_9000_98ceb3",
 		engine = "Flat-6 (Porsche GT3)",
 		layers = { 1020, 1260, 1570, 1960, 2430, 3020, 3760, 4680, 5820, 7240, 9000 },
 		limitedDb = 0,
@@ -464,12 +470,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.685429, 0.85178, 0.840367, 0.772712, 0.528105, 0.5284, 0.868848, 0.257563, 0.672028, 0.52987, 0.344408 },
 	},
 	["i4_0.95_0.15_1000_5200_1_0_0.1_m0.7"] = {
 		bangs = 3,
 		cars = { "Toyota Prius" },
 		cyl = 4,
-		dir = "i4h_5200_cd5402",
+		dir = "i4h_5200_305b31",
 		engine = "Inline-4 hybrid (Prius)",
 		layers = { 1070, 1340, 1680, 2110, 2640, 3310, 4150, 5200 },
 		limitedDb = 0.495479,
@@ -517,12 +524,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.993607, 0.920692, 0.929281, 1, 0.786622, 0.660998, 0.554754 },
 	},
 	["i4_1.05_0.3_850_4500_1_0.3_0.3"] = {
 		bangs = 3,
-		cars = { "Ford Transit", "Land Rover Defender" },
+		cars = { "Ford Transit", "Ford Transit 2016 (Police)", "Ford Transit 2016 (Prisoner Transport)", "Land Rover Defender" },
 		cyl = 4,
-		dir = "i4t_4500_c3b436",
+		dir = "i4t_4500_da3f36",
 		engine = "Inline-4 · turbo",
 		layers = { 910, 1140, 1440, 1800, 2270, 2850, 3580, 4500 },
 		limitedDb = 0.911034,
@@ -570,12 +578,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.977767, 0.843232, 0.93912, 0.842521, 0.747205, 1, 0.729393, 0.634275 },
 	},
 	["i4_1.05_0.3_850_7000_1_0_0.3_m0.7"] = {
 		bangs = 3,
 		cars = { "Vauxhall Insignia" },
 		cyl = 4,
-		dir = "i4t_7000_da75c6",
+		dir = "i4t_7000_ed0165",
 		engine = "Inline-4 · turbo",
 		layers = { 910, 1140, 1430, 1800, 2250, 2830, 3550, 4450, 5580, 7000 },
 		limitedDb = 0.293353,
@@ -627,12 +636,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.982279, 0.836381, 0.861375, 0.815353, 0.674555, 1, 0.626062, 0.547182, 0.446122, 0.265514 },
 	},
 	["i4_1.05_0.55_850_7000_1_0.3_0.3"] = {
 		bangs = 3,
 		cars = { "Alfa Romeo Giulietta", "Audi TT 2007", "Mazda Speed 3 2009", "Mini Cooper S 2011", "Mini Coupe", "Mitsubishi Colt Ralliart", "Mitsubishi Eclipse GSX", "Mitsubishi Lancer Evo VIII", "Mitsubishi Lancer Evo X", "Nissan Silvia", "Toyota MR2 GT", "Volkswagen Golf GTI 2014", "Volkswagen Scirocco GT", "Volvo 242 Turbo" },
 		cyl = 4,
-		dir = "i4t_7000_d55c6c",
+		dir = "i4t_7000_25f7b5",
 		engine = "Inline-4 · turbo",
 		layers = { 910, 1140, 1430, 1800, 2250, 2830, 3550, 4450, 5580, 7000 },
 		limitedDb = 0.345414,
@@ -692,12 +702,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.861913, 0.91435, 0.845962, 0.738544, 1, 0.624118, 0.561276, 0.457959, 0.284148 },
 	},
 	["i4_1.05_0.65_900_9000_1_0.15_0.3"] = {
 		bangs = 3,
 		cars = { "Ford Focus SVT", "Honda CR-X SiR", "Honda Civic Type R", "Honda Civic Type R 1997", "Honda S2000" },
 		cyl = 4,
-		dir = "i4s_9000_d1538a",
+		dir = "i4s_9000_a469b1",
 		engine = "Inline-4 · high-revving (Type R, S2000)",
 		layers = { 960, 1200, 1510, 1880, 2350, 2940, 3680, 4600, 5760, 7200, 9000 },
 		limitedDb = 0.968673,
@@ -769,12 +780,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.960614, 0.857949, 0.941548, 0.867426, 0.851584, 0.664829, 0.605487, 0.475052, 0.297583, 0.605232 },
 	},
 	["i4_1.25_0.75_800_6200_1_0.05_0.2_m0.7_c130,647,193,1.44,0.3,0.15"] = {
 		bangs = 3,
 		cars = { "Chevrolet Spark", "Chrysler PT Cruiser", "Citroen C4", "Kia Ceed", "Kia Forte Koup", "Mini Clubman", "Scion tC", "Scion xD", "Vauxhall Astra", "Vauxhall Corsa", "Volkswagen Golf MKII", "Volkswagen Golf MKIII", "Volkswagen New Beetle" },
 		cyl = 4,
-		dir = "i4_6200_b03b68",
+		dir = "i4_6200_3af189",
 		engine = "Inline-4",
 		layers = { 860, 1070, 1330, 1660, 2060, 2570, 3200, 3990, 4980, 6200 },
 		limitedDb = 0,
@@ -826,12 +838,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.840621, 0.793757, 0.829018, 0.626355, 0.673675, 0.678633, 0.616953, 0.443452, 0.356754, 0.380287 },
 	},
 	["i4_1.25_0.75_800_7000_1_0.05_0.2_c130,647,193,1.44,0.3,0.15"] = {
 		bangs = 3,
 		cars = { "Mazda MX-5 2007", "Mini Cooper 1965" },
 		cyl = 4,
-		dir = "i4_7000_401d62",
+		dir = "i4_7000_f49431",
 		engine = "Inline-4",
 		layers = { 860, 1060, 1300, 1610, 1980, 2450, 3020, 3730, 4600, 5670, 7000 },
 		limitedDb = 2.66553,
@@ -893,12 +906,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.850926, 0.72673, 0.767286, 0.686764, 0.647423, 0.569311, 0.638666, 0.456998, 0.347916, 0.336566, 0.639913 },
 	},
 	["i5_1_0.6_850_7000_1_0.45_0.35"] = {
 		bangs = 3,
 		cars = { "Ford Focus RS", "Volvo 850R", "Volvo S60" },
 		cyl = 5,
-		dir = "i5t_7000_12613f",
+		dir = "i5t_7000_eb58a3",
 		engine = "Inline-5 · turbo",
 		layers = { 910, 1140, 1430, 1800, 2250, 2830, 3550, 4450, 5580, 7000 },
 		limitedDb = 1.93948,
@@ -950,12 +964,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.944339, 0.911457, 0.878903, 1, 0.866058, 0.714497, 0.866204, 0.424606, 0.627993, 0.750602 },
 	},
 	["i6_1_0.4_750_4500_1_0.25_0.2"] = {
 		bangs = 3,
 		cars = { "Hudson Hornet" },
 		cyl = 6,
-		dir = "i6_4500_7cb863",
+		dir = "i6_4500_13ad92",
 		engine = "Inline-6",
 		layers = { 800, 1000, 1230, 1530, 1900, 2360, 2920, 3630, 4500 },
 		limitedDb = 1.66554,
@@ -1005,12 +1020,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.847941, 0.753898, 1, 0.81998, 0.655986, 0.7152, 0.405311, 0.474785 },
 	},
 	["i6_1_0.5_750_7000_1_0.25_0.2"] = {
 		bangs = 3,
 		cars = { "Aston Martin DB5", "BMW M1", "BMW M5 E34", "Jaguar E-Type", "Jeep Wrangler", "Lexus IS 300", "Mercedes 300SL Gullwing Coupe" },
 		cyl = 6,
-		dir = "i6_7000_e217f9",
+		dir = "i6_7000_00a02c",
 		engine = "Inline-6",
 		layers = { 800, 1000, 1240, 1540, 1910, 2370, 2940, 3660, 4540, 5640, 7000 },
 		limitedDb = 1.29122,
@@ -1082,12 +1098,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.850928, 0.78064, 1, 0.835209, 0.599989, 0.669678, 0.418124, 0.443003, 0.735924, 0.400164 },
 	},
 	["i6_1_0.5_750_8000_1_0.3_0.25"] = {
 		bangs = 3,
 		cars = { "BMW 1M", "BMW 340i", "Nissan Skyline R34", "Toyota Supra" },
 		cyl = 6,
-		dir = "i6t_8000_027d17",
+		dir = "i6t_8000_5e5759",
 		engine = "Inline-6 · turbo",
 		layers = { 800, 1010, 1270, 1600, 2010, 2530, 3190, 4010, 5050, 6360, 8000 },
 		limitedDb = 1.34662,
@@ -1149,12 +1166,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.790394, 0.847728, 1, 0.841182, 0.595937, 0.570165, 0.364302, 0.498375, 0.670428, 0.320726 },
 	},
 	["rotary2_1_0.6_900_8000_1_0.6_0.4"] = {
 		bangs = 3,
 		cars = { "Mazda RX7" },
 		cyl = 4,
-		dir = "r2t_8000_ff8b91",
+		dir = "r2t_8000_ce1a64",
 		engine = "2-rotor Wankel · turbo (RX-7)",
 		layers = { 960, 1190, 1470, 1820, 2250, 2780, 3430, 4240, 5240, 6470, 8000 },
 		limitedDb = 2.03487,
@@ -1208,12 +1226,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.854503, 0.866231, 0.719237, 0.896706, 0.840274, 0.71319, 0.592151, 0.485579, 0.597511, 0.268247 },
 	},
 	["rotary2_1_0.6_900_9000_1_0.7_0.4"] = {
 		bangs = 3,
 		cars = { "Mazda RX-8" },
 		cyl = 4,
-		dir = "r2_9000_b50a60",
+		dir = "r2_9000_59b8f0",
 		engine = "2-rotor Wankel (RX-8)",
 		layers = { 960, 1200, 1510, 1880, 2350, 2940, 3680, 4600, 5760, 7200, 9000 },
 		limitedDb = 1.9673,
@@ -1267,12 +1286,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.902233, 0.903999, 0.789924, 0.804515, 1, 0.672592, 0.527835, 0.493584, 0.299786, 0.376453 },
 	},
 	["rotary3_1_0.8_1100_10000_1_0.6_0.6"] = {
 		bangs = 3,
 		cars = { "Mazda Furai" },
 		cyl = 6,
-		dir = "r3_10000_0fbb94",
+		dir = "r3_10000_de0b10",
 		engine = "3-rotor Wankel (Mazda Furai)",
 		layers = { 1180, 1460, 1810, 2240, 2770, 3430, 4250, 5260, 6520, 8070, 10000 },
 		limitedDb = 0.302231,
@@ -1326,12 +1346,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.667392, 0.969003, 0.724236, 0.663199, 0.483556, 0.564512, 0.534415, 0.244543, 0.449656, 0.50549, 0.761755 },
 	},
 	["triple_1_0.25_850_6300_1_0_0.2_m0.7"] = {
 		bangs = 3,
 		cars = { "Citroen C1", "Vauxhall Agila" },
 		cyl = 3,
-		dir = "i3_6300_2a32e7",
+		dir = "i3_6300_1a285f",
 		engine = "Inline-3",
 		layers = { 910, 1130, 1400, 1730, 2150, 2670, 3300, 4100, 5080, 6300 },
 		limitedDb = 3.48323,
@@ -1383,12 +1404,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 0.984555, 1, 0.917697, 1, 1, 0.932537, 0.738392, 0.676591 },
 	},
 	["v10_0.9_0.55_750_6000_1_0.45_0.3"] = {
 		bangs = 3,
 		cars = { "Dodge RAM SRT10", "Dodge Viper GTS" },
 		cyl = 10,
-		dir = "v10l_6000_da0603",
+		dir = "v10l_6000_019ba5",
 		engine = "V10 · big-block (Viper, Ram SRT-10)",
 		layers = { 800, 1000, 1250, 1570, 1960, 2450, 3070, 3840, 4800, 6000 },
 		limitedDb = 1.15284,
@@ -1440,12 +1462,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 0.770177, 0.604422, 0.881131, 0.521303, 0.363785, 0.485117, 0.623678, 0.409567 },
 	},
 	["v10_1_0.65_950_8500_1_0.3_0.4"] = {
 		bangs = 3,
 		cars = { "Audi R8 Plus", "Audi R8 Spyder", "Audi R8 V10", "BMW M5 E60", "Lamborghini Gallardo", "Lamborghini Gallardo LP570-4 Spyder Performante", "Porsche Carrera GT" },
 		cyl = 10,
-		dir = "v10_8500_86f461",
+		dir = "v10_8500_e2cea2",
 		engine = "V10",
 		layers = { 1020, 1260, 1550, 1920, 2380, 2940, 3630, 4490, 5560, 6870, 8500 },
 		limitedDb = 0,
@@ -1499,12 +1522,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.930872, 0.693903, 0.533903, 0.9211, 0.465328, 0.273169, 0.561, 0.593802, 0.388472, 0.371161, 0.470078 },
 	},
 	["v12_1_0.4_700_6000_1_0.35_0.15"] = {
 		bangs = 3,
 		cars = { "Mercedes SL65 AMG", "SL65 AMG" },
 		cyl = 12,
-		dir = "sl65_6000_137453",
+		dir = "sl65_6000_338765",
 		engine = "SL65 AMG · 6.0 V12 biturbo",
 		layers = { 750, 920, 1140, 1400, 1720, 2120, 2610, 3210, 3960, 4870, 6000 },
 		limitedDb = 0,
@@ -1558,12 +1582,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.999817, 0.770259, 0.526585, 0.480249, 0.841575, 0.342507, 0.381056, 0.580496, 0.313497, 0.520602, 0.506962 },
 	},
 	["v12_1_0.5_900_8000_1_0.25_0.25"] = {
 		bangs = 3,
 		cars = { "Bugatti EB110" },
 		cyl = 12,
-		dir = "v12t_8000_dd1b3b",
+		dir = "v12t_8000_e8a98a",
 		engine = "V12 · turbo",
 		layers = { 960, 1190, 1470, 1820, 2250, 2780, 3430, 4240, 5240, 6470, 8000 },
 		limitedDb = 0,
@@ -1617,12 +1642,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.670549, 0.46499, 0.560308, 0.598267, 0.317773, 0.546443, 0.455127, 0.338281, 0.391997, 0.765719, 0.351667 },
 	},
 	["v12_1_0.6_1000_9200_1_0.25_0.3"] = {
 		bangs = 3,
 		cars = { "Aston Martin DBS", "Aston Martin Rapide", "Aston Martin V12 Vantage", "Ferrari 250 GTO", "Ferrari 250GT", "Ferrari Enzo", "Ferrari F12 Berlinetta", "Ferrari F50", "Ferrari LaFerrari", "Lamborghini Diablo", "Lamborghini Miura", "Lamborghini Murcielago", "Lamborghini Murcielago LP670-4 SV", "Lamborghini Reventon Roadster", "McLaren F1", "Pagani Zonda C12" },
 		cyl = 12,
-		dir = "v12na_9200_df4a21",
+		dir = "v12na_9200_f5d521",
 		engine = "V12",
 		layers = { 1070, 1330, 1650, 2040, 2530, 3140, 3890, 4820, 5980, 7420, 9200 },
 		limitedDb = 0,
@@ -1704,12 +1730,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.642745, 0.542976, 0.753084, 0.305388, 0.367496, 0.633801, 0.326755, 0.467213, 0.383174, 0.472904, 0.432655 },
 	},
 	["v6_1_0.55_800_7000_1_0.3_0.3"] = {
 		bangs = 3,
 		cars = { "GMC Syclone", "Maserati Ghibli S", "Nissan GT-R SpecV" },
 		cyl = 6,
-		dir = "v6t_7000_3fe9ad",
+		dir = "v6t_7000_fccf11",
 		engine = "V6 · twin-turbo",
 		layers = { 860, 1060, 1300, 1610, 1980, 2450, 3020, 3730, 4600, 5670, 7000 },
 		limitedDb = 1.27576,
@@ -1776,12 +1803,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.913168, 1, 0.899781, 1, 0.844386, 0.549231, 0.933958, 0.543222, 0.486617, 0.761227, 0.343856 },
 	},
 	["v6_1_0.5_750_7500_1_0.3_0.2"] = {
 		bangs = 3,
 		cars = { "Chevrolet Blazer", "Mercedes C32 AMG", "Mitsubishi Eclipse GT", "Nissan 350z", "Nissan 370Z", "Pontiac Fiero GT", "Toyota FJ Cruiser" },
 		cyl = 6,
-		dir = "v6_7500_b985cf",
+		dir = "v6_7500_6dfc9d",
 		engine = "V6",
 		layers = { 800, 1000, 1250, 1570, 1960, 2450, 3070, 3840, 4800, 6000, 7500 },
 		limitedDb = 1.40338,
@@ -1863,12 +1891,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 0.894207, 1, 1, 0.810191, 0.549825, 0.966558, 0.477937, 0.496452, 0.72109, 0.350349 },
 	},
 	["v6odd_1_0.45_750_6000_1_0.4_0.2"] = {
 		bangs = 3,
 		cars = { "DeLorean DMC-12" },
 		cyl = 6,
-		dir = "v6odd_6000_17998c",
+		dir = "v6odd_6000_078f04",
 		engine = "V6 · 90° odd-fire (DeLorean)",
 		layers = { 800, 1000, 1250, 1570, 1960, 2450, 3070, 3840, 4800, 6000 },
 		limitedDb = 2.2328,
@@ -1920,12 +1949,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 0.998799, 1, 0.584863, 1, 0.612248, 0.704865, 0.733037 },
 	},
 	["v8cross_0.95_0.45_700_6000_1_0.6_0.25"] = {
 		bangs = 3,
 		cars = { "Dundreary Limousine", "Ford Crown Victoria" },
 		cyl = 8,
-		dir = "v8x_6000_ab59ca",
+		dir = "v8x_6000_d762a6",
 		engine = "V8 · crossplane (muscle, trucks)",
 		layers = { 750, 920, 1140, 1400, 1720, 2120, 2610, 3210, 3960, 4870, 6000 },
 		limitedDb = 4.95849,
@@ -1987,12 +2017,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 0.987334, 0.974421, 0.79722, 0.635669, 0.665493, 0.77281, 0.707531, 0.546817 },
 	},
 	["v8cross_0.95_0.5_700_5000_1_0.6_0.25"] = {
 		bangs = 3,
 		cars = { "BMW 507", "Ford Deluxe Coupe 1940" },
 		cyl = 8,
-		dir = "v8x_5000_15fbfc",
+		dir = "v8x_5000_9b02a6",
 		engine = "V8 · crossplane (muscle, trucks)",
 		layers = { 750, 920, 1140, 1410, 1740, 2150, 2660, 3280, 4050, 5000 },
 		limitedDb = 4.93387,
@@ -2045,12 +2076,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 0.87495, 0.681696, 0.651021, 0.791599, 0.791075 },
 	},
 	["v8cross_0.95_0.65_700_7000_1_0.6_0.25"] = {
 		bangs = 3,
-		cars = { "Bowler EXR-S", "Cadillac Escalade 2012", "Chevrolet C10", "Chevrolet Camaro SS 69", "Chevrolet Camaro ZL1", "Chevrolet Chevelle SS", "Chevrolet Corvette GSC", "Chevrolet Corvette Stingray 427", "Chevrolet Impala SS 96", "Chrysler 300C", "Dodge Challenger 1970", "Dodge Challenger 2015", "Dodge Charger 2012", "Dodge Charger SRT-8", "Ford F100", "Ford F350", "Ford GT 05", "Ford Mustang GT", "Ford Raptor SVT", "Ford Shelby GT500", "GMC Sierra", "GMC Vandura", "Holden HSV GTS", "Holden HSV W427", "Jaguar F-Type", "Jeep Grand Cherokee", "Mercedes 300 SEL", "Mercedes G-Class", "Mercedes McLaren SLR", "Morgan Aero SS", "Pontiac Firebird Trans Am", "Shelby 1000" },
+		cars = { "Ambulance", "Bowler EXR-S", "Cadillac Escalade 2012", "Chevrolet C10", "Chevrolet Camaro SS 69", "Chevrolet Camaro ZL1", "Chevrolet Chevelle SS", "Chevrolet Corvette GSC", "Chevrolet Corvette Stingray 427", "Chevrolet Impala SS 96", "Chrysler 300C", "Dodge Challenger 1970", "Dodge Challenger 2015", "Dodge Charger 2012", "Dodge Charger SRT-8", "Ford F100", "Ford F350", "Ford F350 Fire Rescue", "Ford F350 Tow Truck", "Ford F450 Ambulance", "Ford GT 05", "Ford Mustang GT", "Ford Raptor SVT", "Ford Shelby GT500", "GMC Sierra", "GMC Vandura", "Holden HSV GTS", "Holden HSV W427", "Jaguar F-Type", "Jeep Grand Cherokee", "Mercedes 300 SEL", "Mercedes G-Class", "Mercedes McLaren SLR", "Morgan Aero SS", "Pontiac Firebird Trans Am", "Shelby 1000" },
 		cyl = 8,
-		dir = "v8x_7000_f2d35a",
+		dir = "v8x_7000_c122d6",
 		engine = "V8 · crossplane (muscle, trucks)",
 		layers = { 750, 940, 1170, 1460, 1830, 2290, 2860, 3580, 4480, 5600, 7000 },
 		limitedDb = 3.96089,
@@ -2122,12 +2154,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 0.985592, 0.628816, 0.699936, 0.693946, 0.694632, 0.535637, 0.755385 },
 	},
 	["v8cross_1.05_0.6_800_8400_1_0.4_0.3"] = {
 		bangs = 3,
 		cars = { "Audi RS4 Avant", "Audi S5", "BMW M3 E92", "Lexus IS F", "Maserati Quattroporte Sport GT S", "Mercedes E63 AMG", "Mercedes ML63 AMG", "Mercedes SLS AMG" },
 		cyl = 8,
-		dir = "v8s_8400_2bf401",
+		dir = "v8s_8400_affacc",
 		engine = "V8 · crossplane, high-revving (M3, AMG)",
 		layers = { 860, 1080, 1350, 1700, 2130, 2680, 3370, 4230, 5320, 6680, 8400 },
 		limitedDb = 4.5829,
@@ -2199,12 +2232,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 0.967338, 0.870435, 0.620478, 0.552786, 0.654268, 0.607425, 0.61479, 0.864192, 0.59032 },
 	},
 	["v8cross_1_0.35_650_3500_1_0.5_0.25"] = {
 		bangs = 3,
-		cars = { "Hummer H1" },
+		cars = { "Courier Truck", "Fire Truck", "Hummer H1", "Lenco BearCat", "SWAT Stockade" },
 		cyl = 8,
-		dir = "v8xt_3500_6fd4c1",
+		dir = "v8xt_3500_b1d88b",
 		engine = "V8 · twin-turbo",
 		layers = { 700, 880, 1100, 1390, 1750, 2210, 2780, 3500 },
 		limitedDb = 5.36373,
@@ -2252,12 +2286,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 0.629895, 0.795027, 0.832078 },
 	},
 	["v8cross_1_0.4_750_4500_1_0.5_0.25"] = {
 		bangs = 3,
 		cars = { "Land Rover Range Rover 08" },
 		cyl = 8,
-		dir = "v8xt_4500_100afe",
+		dir = "v8xt_4500_37a09f",
 		engine = "V8 · twin-turbo",
 		layers = { 800, 1000, 1230, 1530, 1900, 2360, 2920, 3630, 4500 },
 		limitedDb = 3.59556,
@@ -2307,12 +2342,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 1, 1, 0.70148, 0.751375, 0.831569, 0.743485 },
 	},
 	["v8cross_1_0.55_750_7000_1_0.5_0.25"] = {
 		bangs = 3,
 		cars = { "BMW M6 2013", "Land Rover Range Rover 2012", "Noble M600", "Porsche Cayenne Turbo 2012", "Porsche Cayenne Turbo S" },
 		cyl = 8,
-		dir = "v8xt_7000_eb7350",
+		dir = "v8xt_7000_3c1a4e",
 		engine = "V8 · twin-turbo",
 		layers = { 800, 1000, 1240, 1540, 1910, 2370, 2940, 3660, 4540, 5640, 7000 },
 		limitedDb = 5.79599,
@@ -2374,12 +2410,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 1, 1, 1, 0.990289, 0.835072, 0.760265, 0.806632, 0.728205, 0.678571, 0.597035, 0.975562 },
 	},
 	["v8flat_1.05_0.65_1000_9000_1_0.2_0.4"] = {
 		bangs = 3,
 		cars = { "McLaren P1", "Porsche 918 Spyder" },
 		cyl = 8,
-		dir = "v8h_9000_8b2df7",
+		dir = "v8h_9000_b698ba",
 		engine = "V8 hybrid (918 Spyder, P1)",
 		layers = { 1070, 1320, 1640, 2030, 2510, 3100, 3840, 4750, 5880, 7270, 9000 },
 		limitedDb = 0,
@@ -2441,12 +2478,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.863002, 0.907718, 0.587553, 0.630555, 0.796141, 0.431967, 0.32114, 0.509208, 0.477913, 0.298792, 0.435289 },
 	},
 	["v8flat_1.05_0.7_950_9000_1_0.3_0.45"] = {
 		bangs = 3,
 		cars = { "Alfa Romeo 33 Stradale (1967)", "Ferrari 458 Spider", "Ferrari F430" },
 		cyl = 8,
-		dir = "v8flat_9000_f9a9fd",
+		dir = "v8flat_9000_b98199",
 		engine = "V8 · flat-plane (Ferrari, McLaren)",
 		layers = { 1020, 1260, 1570, 1960, 2430, 3020, 3760, 4680, 5820, 7240, 9000 },
 		limitedDb = 0,
@@ -2513,12 +2551,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.869267, 0.884973, 0.630588, 0.606838, 0.731873, 0.630179, 0.280718, 0.530508, 0.47523, 0.307849, 0.426638 },
 	},
 	["w16_0.9_0.4_750_6600_1_0.2_0.65_c66,486,224,0.88,0.23,0.42"] = {
 		bangs = 3,
 		cars = { "Bugatti Veyron 16.4" },
 		cyl = 16,
-		dir = "w16_6600_3a9275",
+		dir = "w16_6600_be9941",
 		engine = "W16 · quad-turbo",
 		layers = { 800, 990, 1220, 1510, 1860, 2300, 2840, 3510, 4330, 5350, 6600 },
 		limitedDb = 0.142457,
@@ -2572,12 +2611,13 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.834175, 1, 0.698949, 0.57695, 0.416772, 0.46102, 0.410638, 0.420732, 0.85165, 0.833006, 0.372131 },
 	},
 	["w16_0.9_0.5_750_6600_1_0.35_0.2"] = {
 		bangs = 3,
 		cars = { "Bugatti Veyron SS" },
 		cyl = 16,
-		dir = "w16_6600_8c4b6a",
+		dir = "w16_6600_34d67b",
 		engine = "W16 · quad-turbo",
 		layers = { 800, 990, 1220, 1510, 1860, 2300, 2840, 3510, 4330, 5350, 6600 },
 		limitedDb = 1.52917,
@@ -2631,5 +2671,6 @@ E.BAKED = {
 		stop = {
 			dur = 1.6,
 		},
+		trims = { 0.974294, 0.705875, 0.692472, 0.415414, 0.486575, 0.743037, 0.62829, 0.796077, 0.51142, 0.656572, 0.664741 },
 	},
 }

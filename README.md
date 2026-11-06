@@ -71,7 +71,7 @@ Playback is kept clean:
 - Each car keeps its own mix under full scale, using the measured peak of every generated sound, including pops and bangs that overlap. Revving in neutral may go a few dB louder than driving.
 
 Around the engine:
-- **Doppler:** a car coming toward you sounds higher, and drops in pitch as it passes, from the real speeds of the car and of you. At 130 km/h that's about +11% then −10%, like a real drive-by. Your own car is never shifted.
+- **Doppler:** a car coming toward you sounds higher, and drops in pitch as it passes, from the real speeds of the car and of you, at four times the real shift so a drive-by stands out. At 130 km/h that's about +72% then −30%. Your own car is never shifted.
 - **Tyre roar and wind:** a road roar that grows with speed, and a faint wind that only becomes noticeable near top speed. These are generated once and shared by every car. They play even with the engine off, while the car rolls.
 
 The rpm and gear come from a small automatic-gearbox model:
@@ -115,28 +115,37 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_volume` | client | 1 | engine volume, 0–2 |
 | `audio_engine_roadnoise` | client | 1 | tyre roar volume, 0–2 (0 = off) |
 | `audio_engine_windnoise` | client | 1 | wind volume, 0–2 (0 = off) |
-| `audio_engine_doppler` | client | 1 | Doppler on passing cars, 0 = off, 1 = real |
+| `audio_engine_doppler` | client | 1 | Doppler on passing cars, 0 = off, 0.25 = real, 1 = four times real (the maximum) |
+| `audio_engine_passby` | client | 1 | how much passing cars swell in loudness, 0 = off, up to 2 |
 | `audio_engine_hud` | client | 1 | show the HUD |
-| `audio_engine_units` | client | kmh | `kmh` or `mph` |
+| `audio_engine_units` | client | mph | `mph` or `kmh` |
 | `audio_engine_hud_scale` | client | 1 | HUD size |
 | `audio_engine_samplerate` | client | 44100 | 44100 or 22050 (twice as fast, half the memory); changing it regenerates everything |
+| `audio_engine_genbudget` | client | 6 | milliseconds per frame spent generating sounds, 1–50 |
 | `audio_engine_maxsounds` | client | 10 | how many different engines to keep generated (about 4 MB each); past this, cars fall back to their stock sound |
 | `audio_engine_baked` | client | 1 | stock engines play the pre-generated sounds; 0 = generate everything in game |
 | `audio_engine_startkey` | client | i | key that starts and stops the engine (`none` = no key) |
 | `audio_engine_mutestock` | shared | 1 | silence the TDM engine recordings of cars that use the procedural engine |
+| `audio_engine_muteskid` | shared | 1 | silence the TDM tyre screech when braking (shared by all TDM cars) |
+| `audio_engine_mutetyrescrape` | shared | 1 | silence the scrape of sliding tyres (a global change: glass bottle and dirt surface sounds) |
 | `audio_engine_autostart` | server | 0 | 1 = start the engine when a driver gets in; 0 = the driver starts it |
 | `audio_engine_emotionstart` | server | 1 | rev flare on start-up (high-powered cars only: `CAR_EMOTION`) |
 | `audio_engine_keeprunning` | server | 1 | keep idling after the driver gets out (0 = getting out switches the engine off; not saved, set it in server.cfg) |
+| `audio_engine_cruise` | server | 1 | speed limiter on registered cars (middle mouse switches it, the mouse wheel sets the limit) |
 | `audio_engine_stability` | server | 1 | drift-friendly stability assist (all cars except spiked tyres) |
 | `audio_engine_handling` | server | 1 | anti-spin setup: front brake bias, less power while steering at speed, lower centre of mass (cars spawned after) |
+| `audio_engine_traction` | server | 1 | traction control: less power while the driven wheels spin |
 | `audio_engine_tuneaccess` | server | 1 | who can retune engines: 0 = whoever drives the car, 1 = admins, 2 = superadmins |
 | `audio_engine_tunecooldown` | server | 5 | seconds between engine changes per player |
 
 Commands:
 - `audio_engine_menu` opens the tuning menu (also `!engine` in chat).
 - `audio_engine_handling_info` (admins) prints the handling setup of the car you're in or looking at.
+- `audio_engine_accel_log [seconds]` (admins) logs speed, gear, rpm, wheel slip and power trims of the car you drive to the console (default 12 s, max 60).
 - `audio_engine_toggle` (bindable) switches the engine of the car you're driving on or off, like the start key.
 - `audio_engine_rebuild` regenerates all engine sounds (after editing the synth or presets).
+- `audio_engine_wingflap` (superadmins) shows the brake flap for 10 s on the P1 or SLR you're in or looking at.
+- `audio_engine_bonedump` (superadmins) writes the bone manipulations of the car you're in or looking at to `data/audio_engine_bones.txt`.
 
 ## Files to edit
 - `lua/audio_engine/sh_carlist.lua`: which preset each of the server's 165 cars uses, with a few per-car changes (redline, tone). Register a car by name once its model is known: `AUDIO_ENGINE.RegisterCarNamed("models/....mdl", "Ferrari 458 Spider")`.

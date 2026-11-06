@@ -55,8 +55,10 @@ function findAll(pat) {
   await run('test shim', `
     FCVAR_ARCHIVE, FCVAR_REPLICATED, FCVAR_NOTIFY, CHAN_STATIC = 128, 8192, 256, 6
     player = { GetAll = function() return {} end }
-    LISTED, FALLBACK, NOSCRIPT = 0, 0, {}
+    LISTED, FALLBACK, NOSCRIPT, IDS = 0, 0, {}, {}
     list = { Set = function(kind, id, t)
+      if IDS[id] then NOSCRIPT[#NOSCRIPT + 1] = "duplicate:" .. id end
+      IDS[id] = t
       LISTED = LISTED + 1
       local s = t.KeyValues.vehiclescript
       if s:find("audio_engine/test_car", 1, true) then FALLBACK = FALLBACK + 1 end
@@ -89,12 +91,20 @@ function findAll(pat) {
     local names, n = {}, 0
     for low, name in pairs(E.PERP_MUTED) do n = n + 1 names[#names + 1] = name end
     table.sort(names)
-    __result(n .. "\\t" .. LISTED .. "\\t" .. FALLBACK .. "\\t" .. table.concat(NOSCRIPT, " ") .. "\\t" ..
+    -- every car (job-only ones from the job tab) plus every job vehicle
+    local want, byName = #E.JOB_VEHICLES, {}
+    for _, car in pairs(E.Cars) do if car.perp then byName[car.name] = car want = want + 1 end end
+    for _, job in ipairs(E.JOB_VEHICLES) do
+      local car = byName[job[2]]
+      if not car then NOSCRIPT[#NOSCRIPT + 1] = "nocar:" .. job[1]
+      elseif car.script == job[3] then want = want - 1 end
+    end
+    __result(n .. "\\t" .. LISTED .. "\\t" .. want .. "\\t" .. FALLBACK .. "\\t" .. table.concat(NOSCRIPT, " ") .. "\\t" ..
       table.concat(names, " ", 1, math.min(12, #names)))`)
-  const [nMuted, listed, fallback, noScript, sample] = res.split('\t')
+  const [nMuted, listed, want, fallback, noScript, sample] = res.split('\t')
   console.log(`stock mute: ${nMuted} soundscripts muted, e.g. ${sample}`)
   console.log(`spawn menu: ${listed} PERP cars listed, ${fallback} on the generic test script`)
-  check(+listed === 165, 'expected all 165 PERP cars in the spawn menu (are the TDM models mounted?)')
+  check(+listed === +want, `expected ${want} PERP spawn entries, cars and job vehicles (are the TDM models mounted?)`)
   check(noScript === '', 'spawn entries whose vehicle script is missing (no physics in game): ' + noScript)
   if (+nMuted > 0) {
     check(+nMuted > 100, 'expected the engine soundscripts of the registered cars to be muted')
@@ -103,10 +113,10 @@ function findAll(pat) {
     console.log('  (PERP vehicle scripts not mounted: nothing to mute, every car on the test script)')
     check(+fallback === +listed, 'every car should fall back to the test script')
   }
-  // the bus and fire trucks must keep their engine sound
+  // vehicles left on their TDM recordings (the bus and airtug play raw .wav paths) keep their engine sound
   await L.doString(`
     local keep, bad = {}, {}
-    for _, s in ipairs({ "perp2/bus", "perp2/truckfire", "perp2/f350_firetruck", "perp2/towtruck", "jarheads/bearcat" }) do
+    for _, s in ipairs({ "perp2/bus", "tdmcars/airtug", "tdmcars/porcycle" }) do
       local t = {}
       local txt = file.Read("scripts/vehicles/" .. s .. ".txt", "GAME") or ""
       for block in txt:gmatch('"[Ss][Tt][Aa][Tt][Ee]"%s*(%b{})') do

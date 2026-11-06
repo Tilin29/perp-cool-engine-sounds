@@ -194,6 +194,20 @@ E.CAR_ENGINES = {
 	["Volvo 242 Turbo"] = P("i4t", { redline = 6000 }),
 	["Volvo 850R"] = P("i5t"),
 	["Volvo S60"] = P("i5t"),
+
+	-- work and emergency vehicles on their own models (not in the engine list). They reuse
+	-- engines already baked (the same sound at a lower redline needs no new bank):
+	-- the diesels as the Hummer H1's, the petrol V8s as the Ford F350's, the vans as the Transit's
+	["Ambulance"] = P("v8x", { redline = 5000 }),   -- GTA IV ambulance (Ford E-Series type)
+	["Courier Truck"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
+	["Fire Truck"] = P("v8xt", { redline = 3000, idle = 650, tone = 0.35 }),
+	["Ford F350 Fire Rescue"] = P("v8x", { redline = 5000 }),
+	["Ford F350 Tow Truck"] = P("v8x", { redline = 5000 }),
+	["Ford F450 Ambulance"] = P("v8x", { redline = 5000 }),
+	["Ford Transit 2016 (Police)"] = P("i4t", { redline = 4500, tone = 0.3 }),
+	["Ford Transit 2016 (Prisoner Transport)"] = P("i4t", { redline = 4500, tone = 0.3 }),
+	["Lenco BearCat"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),   -- 6.7 diesel V8
+	["SWAT Stockade"] = P("v8xt", { redline = 3200, idle = 650, tone = 0.35 }),   -- GTA IV police stockade
 }
 
 --[[
@@ -516,12 +530,14 @@ end
 	in used/, upgrade_1/, upgrade_2/ and spiked/ next to the base script (worn, tuned, tyres shot),
 	and some extra variants (_cop, _taxi, _unmarked, _medic). They all keep the model, so the
 	engine follows the car whatever script PERP spawned it with; "auto" top speed and fitted
-	gearing follow the tier's MaxSpeed.
+	gearing follow the tier's MaxSpeed. Work and emergency vehicles on models of their own (the
+	BearCat, ambulances, fire trucks, the stockade...) are listed here too, by their base script.
 	{ model, base vehicle script, wheel radius (m, from the script) }. Built by dev/perp_carmodels.py.
 ]]
 E.CAR_MODELS = {
 	["Alfa Romeo 33 Stradale (1967)"] = { "models/tdmcars/alfa_stradale.mdl", "scripts/vehicles/tdmcars/alfa_stradale.txt", 0.368 },
 	["Alfa Romeo Giulietta"] = { "models/tdmcars/alfa_giulietta.mdl", "scripts/vehicles/tdmcars/alfa_giulietta.txt", 0.376 },
+	["Ambulance"] = { "models/sickness/meatwagon.mdl", "scripts/vehicles/perp2/ambulance.txt", 0.368 },
 	["Aston Martin DB5"] = { "models/tdmcars/ast_db5.mdl", "scripts/vehicles/tdmcars/ast_db5.txt", 0.427 },
 	["Aston Martin DBS"] = { "models/tdmcars/dbs.mdl", "scripts/vehicles/tdmcars/dbs.txt", 0.406 },
 	["Aston Martin Rapide"] = { "models/tdmcars/ast_rapide.mdl", "scripts/vehicles/tdmcars/ast_rapide.txt", 0.411 },
@@ -558,6 +574,7 @@ E.CAR_MODELS = {
 	["Chrysler PT Cruiser"] = { "models/tdmcars/chr_ptcruiser.mdl", "scripts/vehicles/tdmcars/ptcruiser.txt", 0.381 },
 	["Citroen C1"] = { "models/tdmcars/citroen_c1.mdl", "scripts/vehicles/tdmcars/citroenc1.txt", 0.343 },
 	["Citroen C4"] = { "models/tdmcars/cit_c4.mdl", "scripts/vehicles/tdmcars/c4.txt", 0.356 },
+	["Courier Truck"] = { "models/tdmcars/courier_truck.mdl", "scripts/vehicles/tdmcars/courier_truck.txt", 0.495 },
 	["DeLorean DMC-12"] = { "models/tdmcars/del_dmc.mdl", "scripts/vehicles/tdmcars/delorean.txt", 0.356 },
 	["Dodge Challenger 1970"] = { "models/tdmcars/dod_challenger70.mdl", "scripts/vehicles/tdmcars/challenger70.txt", 0.399 },
 	["Dodge Challenger 2015"] = { "models/tdmcars/dod_challenger15.mdl", "scripts/vehicles/tdmcars/dod_challenger15.txt", 0.457 },
@@ -575,10 +592,14 @@ E.CAR_MODELS = {
 	["Ferrari F430"] = { "models/tdmcars/fer_f430.mdl", "scripts/vehicles/tdmcars/fer_f430.txt", 0.401 },
 	["Ferrari F50"] = { "models/tdmcars/fer_f50.mdl", "scripts/vehicles/tdmcars/f50.txt", 0.406 },
 	["Ferrari LaFerrari"] = { "models/tdmcars/fer_lafer.mdl", "scripts/vehicles/tdmcars/laferrari.txt", 0.406 },
+	["Fire Truck"] = { "models/sickness/truckfire.mdl", "scripts/vehicles/perp2/truckfire.txt", 0.686 },
 	["Ford Crown Victoria"] = { "models/tdmcars/crownvic_taxi.mdl", "scripts/vehicles/tdmcars/crownvic.txt", 0.381 },
 	["Ford Deluxe Coupe 1940"] = { "models/tdmcars/ford_coupe_40.mdl", "scripts/vehicles/tdmcars/coupe40.txt", 0.406 },
 	["Ford F100"] = { "models/tdmcars/for_f100.mdl", "scripts/vehicles/tdmcars/f100.txt", 0.363 },
 	["Ford F350"] = { "models/tdmcars/for_f350.mdl", "scripts/vehicles/tdmcars/f350.txt", 0.526 },
+	["Ford F350 Fire Rescue"] = { "models/tdmcars/for_f350_fru.mdl", "scripts/vehicles/perp2/f350_firetruck.txt", 0.526 },
+	["Ford F350 Tow Truck"] = { "models/tdmcars/for_f350_tow.mdl", "scripts/vehicles/perp2/f350_towtruck.txt", 0.485 },
+	["Ford F450 Ambulance"] = { "models/forest/f450_ambo.mdl", "scripts/vehicles/perp2/f450_ambulance.txt", 0.480 },
 	["Ford Focus RS"] = { "models/tdmcars/focusrs.mdl", "scripts/vehicles/tdmcars/focusrs.txt", 0.381 },
 	["Ford Focus SVT"] = { "models/tdmcars/for_focussvt.mdl", "scripts/vehicles/tdmcars/focussvt.txt", 0.381 },
 	["Ford GT 05"] = { "models/tdmcars/gt05.mdl", "scripts/vehicles/tdmcars/gt05.txt", 0.406 },
@@ -586,14 +607,16 @@ E.CAR_MODELS = {
 	["Ford Raptor SVT"] = { "models/tdmcars/for_raptor.mdl", "scripts/vehicles/tdmcars/raptorsvt.txt", 0.526 },
 	["Ford Shelby GT500"] = { "models/tdmcars/gt500.mdl", "scripts/vehicles/tdmcars/gt500.txt", 0.439 },
 	["Ford Transit"] = { "models/tdmcars/ford_transit.mdl", "scripts/vehicles/tdmcars/transit.txt", 0.432 },
+	["Ford Transit 2016 (Police)"] = { "models/ezza/plpd_2016transit.mdl", "scripts/vehicles/jarheads/transit2016.txt", 0.483 },
+	["Ford Transit 2016 (Prisoner Transport)"] = { "models/tdmcars/2016transit.mdl", "scripts/vehicles/tdmcars/2016transit.txt", 0.406 },
 	["GMC Sierra"] = { "models/tdmcars/gmc_sierralow.mdl", "scripts/vehicles/tdmcars/sierralow.txt", 0.406 },
 	["GMC Syclone"] = { "models/tdmcars/gmc_syclone.mdl", "scripts/vehicles/tdmcars/syclone.txt", 0.381 },
 	["GMC Vandura"] = { "models/tdmcars/gmcvan.mdl", "scripts/vehicles/tdmcars/gmcvan.txt", 0.381 },
 	["Holden HSV GTS"] = { "models/tdmcars/hsvgts.mdl", "scripts/vehicles/tdmcars/hsvgts.txt", 0.406 },
 	["Holden HSV W427"] = { "models/tdmcars/hsvw427.mdl", "scripts/vehicles/tdmcars/hsvw427.txt", 0.406 },
-	["Honda CR-X SiR"] = { "models/tdmcars/hon_crxsir.mdl", "scripts/vehicles/tdmcars/hon_crxsir.txt", 0.335 },
 	["Honda Civic Type R"] = { "models/tdmcars/civic_typer.mdl", "scripts/vehicles/tdmcars/civictyper.txt", 0.356 },
 	["Honda Civic Type R 1997"] = { "models/tdmcars/hon_civic97.mdl", "scripts/vehicles/tdmcars/civic97.txt", 0.356 },
+	["Honda CR-X SiR"] = { "models/tdmcars/hon_crxsir.mdl", "scripts/vehicles/tdmcars/hon_crxsir.txt", 0.335 },
 	["Honda S2000"] = { "models/tdmcars/hon_s2000.mdl", "scripts/vehicles/tdmcars/s2000.txt", 0.373 },
 	["Hudson Hornet"] = { "models/tdmcars/hud_hornet.mdl", "scripts/vehicles/tdmcars/hudhornet.txt", 0.432 },
 	["Hummer H1"] = { "models/tdmcars/hummerh1.mdl", "scripts/vehicles/tdmcars/h1.txt", 0.533 },
@@ -613,6 +636,7 @@ E.CAR_MODELS = {
 	["Land Rover Defender"] = { "models/tdmcars/landrover_defender.mdl", "scripts/vehicles/tdmcars/lrdefender.txt", 0.711 },
 	["Land Rover Range Rover 08"] = { "models/tdmcars/landrover.mdl", "scripts/vehicles/tdmcars/landrover.txt", 0.432 },
 	["Land Rover Range Rover 2012"] = { "models/tdmcars/landrover12.mdl", "scripts/vehicles/tdmcars/landrover12.txt", 0.452 },
+	["Lenco BearCat"] = { "models/tdmcars/plpd_bearcat.mdl", "scripts/vehicles/jarheads/bearcat.txt", 0.622 },
 	["Lexus IS 300"] = { "models/tdmcars/lex_is300.mdl", "scripts/vehicles/tdmcars/lex_is300.txt", 0.389 },
 	["Lexus IS F"] = { "models/tdmcars/lex_isf.mdl", "scripts/vehicles/tdmcars/lex_isf.txt", 0.381 },
 	["Maserati Ghibli S"] = { "models/tdmcars/mas_ghibli.mdl", "scripts/vehicles/tdmcars/mas_ghibli.txt", 0.445 },
@@ -629,8 +653,8 @@ E.CAR_MODELS = {
 	["Mercedes C32 AMG"] = { "models/tdmcars/mercedes_c32.mdl", "scripts/vehicles/tdmcars/c32.txt", 0.381 },
 	["Mercedes E63 AMG"] = { "models/tdmcars/mer_e63.mdl", "scripts/vehicles/tdmcars/mere63.txt", 0.394 },
 	["Mercedes G-Class"] = { "models/tdmcars/gwagon.mdl", "scripts/vehicles/jarheads/gwagon.txt", 0.483 },
-	["Mercedes ML63 AMG"] = { "models/tdmcars/mer_ml63.mdl", "scripts/vehicles/tdmcars/ml63.txt", 0.437 },
 	["Mercedes McLaren SLR"] = { "models/tdmcars/mer_slr.mdl", "scripts/vehicles/tdmcars/mer_slr.txt", 0.394 },
+	["Mercedes ML63 AMG"] = { "models/tdmcars/mer_ml63.mdl", "scripts/vehicles/tdmcars/ml63.txt", 0.437 },
 	["Mercedes SL65 AMG"] = { "models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/sl65amg.txt", 0.381 },
 	["Mercedes SLS AMG"] = { "models/tdmcars/mer_slsamg.mdl", "scripts/vehicles/tdmcars/slsamg.txt", 0.432 },
 	["Mini Clubman"] = { "models/tdmcars/mini_clubman.mdl", "scripts/vehicles/tdmcars/miniclubman.txt", 0.348 },
@@ -666,6 +690,7 @@ E.CAR_MODELS = {
 	["Subaru Impreza WRX STI"] = { "models/tdmcars/sub_wrxsti08.mdl", "scripts/vehicles/tdmcars/subimpreza08.txt", 0.381 },
 	["Subaru Legacy GT 2010"] = { "models/tdmcars/sub_legacygt10.mdl", "scripts/vehicles/tdmcars/subleggt10.txt", 0.386 },
 	["Subaru Legacy RS 1990"] = { "models/tdmcars/sub_legacyrs90.mdl", "scripts/vehicles/tdmcars/sublegrs90.txt", 0.381 },
+	["SWAT Stockade"] = { "models/perp2.5/swat_van.mdl", "scripts/vehicles/perp2/swatvan.txt", 0.495 },
 	["Tesla Model S"] = { "models/tdmcars/tesla_models.mdl", "scripts/vehicles/tdmcars/teslamodels.txt", 0.432 },
 	["Toyota FJ Cruiser"] = { "models/tdmcars/toy_fj.mdl", "scripts/vehicles/tdmcars/toyfj.txt", 0.470 },
 	["Toyota MR2 GT"] = { "models/tdmcars/toy_mr2gt.mdl", "scripts/vehicles/tdmcars/mr2gt.txt", 0.356 },
@@ -685,6 +710,41 @@ E.CAR_MODELS = {
 	["Volvo 242 Turbo"] = { "models/tdmcars/242turbo.mdl", "scripts/vehicles/tdmcars/242turbo.txt", 0.356 },
 	["Volvo 850R"] = { "models/tdmcars/vol_850r.mdl", "scripts/vehicles/tdmcars/850r.txt", 0.373 },
 	["Volvo S60"] = { "models/tdmcars/vol_s60.mdl", "scripts/vehicles/tdmcars/vols60.txt", 0.368 },
+}
+
+--[[
+	Job vehicles (police, fire, EMS, taxi, tow, SWAT), listed in their own spawn-menu tab. Most are
+	a car above on its own PERP script (_cop, _medic, _fire, _taxi...) in the job livery: skin 11
+	on the TDM models (skins 0-10 are the paint colours, 12 is often a supervisor/chief livery;
+	the Crown Vic has the taxi on 11 and the police on 12). The engine follows the model, so they
+	sound like their car; the script only changes the handling. A car whose base script is
+	listed here (the ambulances, fire trucks, BearCat...) spawns from this tab only.
+	{ spawn name, car (E.CAR_MODELS), vehicle script, skin }. Built by dev/perp_carmodels.py.
+]]
+E.JOB_VEHICLES = {
+	{ "Ambulance", "Ambulance", "scripts/vehicles/perp2/ambulance.txt", 0 },
+	{ "Audi RS4 Avant First Responder", "Audi RS4 Avant", "scripts/vehicles/tdmcars/rs4avant_medic.txt", 11 },
+	{ "BMW 340i Police", "BMW 340i", "scripts/vehicles/tdmcars/bmw_340i_police.txt", 11 },
+	{ "BMW M5 E60 Police", "BMW M5 E60", "scripts/vehicles/tdmcars/bmwm5e60_cop.txt", 11 },
+	{ "Dodge Charger 2012 Police", "Dodge Charger 2012", "scripts/vehicles/tdmcars/charger2012_cop.txt", 11 },
+	{ "Dodge Charger SRT-8 Police", "Dodge Charger SRT-8", "scripts/vehicles/tdmcars/charger_cop.txt", 11 },
+	{ "Dodge RAM SRT10 Fire Rescue", "Dodge RAM SRT10", "scripts/vehicles/tdmcars/dodgeramff.txt", 11 },
+	{ "Fire Truck", "Fire Truck", "scripts/vehicles/perp2/truckfire.txt", 0 },
+	{ "Ford Crown Victoria Police", "Ford Crown Victoria", "scripts/vehicles/tdmcars/crownvic_cop.txt", 12 },
+	{ "Ford Crown Victoria Taxi", "Ford Crown Victoria", "scripts/vehicles/tdmcars/crownvic_taxi.txt", 11 },
+	{ "Ford Crown Victoria Unmarked", "Ford Crown Victoria", "scripts/vehicles/tdmcars/crownvic_unmarked.txt", 0 },
+	{ "Ford F350 Fire Rescue", "Ford F350 Fire Rescue", "scripts/vehicles/perp2/f350_firetruck.txt", 0 },
+	{ "Ford F350 Tow Truck", "Ford F350 Tow Truck", "scripts/vehicles/perp2/f350_towtruck.txt", 0 },
+	{ "Ford F450 Ambulance", "Ford F450 Ambulance", "scripts/vehicles/perp2/f450_ambulance.txt", 0 },
+	{ "Ford Transit 2016 (Police)", "Ford Transit 2016 (Police)", "scripts/vehicles/jarheads/transit2016.txt", 0 },
+	{ "Ford Transit 2016 (Prisoner Transport)", "Ford Transit 2016 (Prisoner Transport)", "scripts/vehicles/tdmcars/2016transit.txt", 11 },
+	{ "Land Rover Defender Fire", "Land Rover Defender", "scripts/vehicles/tdmcars/lrdefender_fire.txt", 11 },
+	{ "Land Rover Range Rover 2012 Police", "Land Rover Range Rover 2012", "scripts/vehicles/tdmcars/landrover12_cop.txt", 11 },
+	{ "Lenco BearCat", "Lenco BearCat", "scripts/vehicles/jarheads/bearcat.txt", 0 },
+	{ "Mercedes SL65 AMG Police", "Mercedes SL65 AMG", "scripts/vehicles/tdmcars/sl65amg_cop.txt", 11 },
+	{ "Porsche Cayenne Turbo S Police", "Porsche Cayenne Turbo S", "scripts/vehicles/tdmcars/cayenne_cop.txt", 11 },
+	{ "SWAT Stockade", "SWAT Stockade", "scripts/vehicles/perp2/swatvan.txt", 0 },
+	{ "Toyota Prius Medic", "Toyota Prius", "scripts/vehicles/tdmcars/prius_medic.txt", 11 },
 }
 
 -- the stability assist on the PERP cars, with each car's own steering angles (sv_handling.lua).
