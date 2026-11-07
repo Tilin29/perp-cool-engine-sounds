@@ -200,7 +200,7 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		local msg
 		if not st.on then
 			local cv = GetConVar("audio_engine_startkey")
-			local key = string.upper(cv and cv:GetString() or "I")
+			local key = string.upper(cv and cv:GetString() or "R")
 			msg = (key == "" or key == "NONE") and "Engine off · audio_engine_toggle starts it" or ("Engine off · press " .. key .. " to start")
 		else
 			msg = "Starting…"

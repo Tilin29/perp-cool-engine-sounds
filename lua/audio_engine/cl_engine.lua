@@ -15,7 +15,7 @@ local Synth = E.Synth
 
 local cvVol = CreateClientConVar("audio_engine_volume", "1", true, false, "Engine sound volume (0-2)", 0, 2)
 -- the key that switches the engine on and off, e.g. i, k, f1, or none
-local cvStartKey = CreateClientConVar("audio_engine_startkey", "i", true, false, "Key that starts/stops the engine of the car you drive (a key name such as i, k or f1; none = off)")
+local cvStartKey = CreateClientConVar("audio_engine_startkey", "r", true, false, "Key that starts/stops the engine of the car you drive (a key name such as r, k or f1; none = off)")
 local cvRoad = CreateClientConVar("audio_engine_roadnoise", "1", true, false, "Tyre roar volume (0-2)", 0, 2)
 local cvWind = CreateClientConVar("audio_engine_windnoise", "1", true, false, "Wind noise volume (0-2)", 0, 2)
 local cvDoppler = CreateClientConVar("audio_engine_doppler", "0.25", true, false, "Doppler pitch shift of passing cars (0 = off, 0.25 = default, real, 1 = four times real)", 0, 1)

@@ -11,7 +11,7 @@ Drop the `sl65amg_rtu` folder into `garrysmod/addons/`. Spawn the example car fr
 - SL65 AMG (RTU Yellow): skin 2
 
 ## Starting the engine
-The engine is off when you get in, and the car is silent and can't drive. Press **I** to start it: it cranks, catches, flares and settles to idle, and the car only drives once that has finished (about 2 s, or about 3.5 s with the rev flare). Press **I** again to switch it off.
+The engine is off when you get in, and the car is silent and can't drive. Press **R** to start it: it cranks, catches, flares and settles to idle, and the car only drives once that has finished (about 2 s, or about 3.5 s with the rev flare). Press **R** again to switch it off.
 - Pick your own key with `audio_engine_startkey` (a key name such as `k` or `f1`, or `none`). `bind <key> audio_engine_toggle` also works.
 - `audio_engine_autostart 1` on the server starts the engine by itself when a driver gets in (the car still waits for the start-up to finish).
 
@@ -125,7 +125,7 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_genbudget` | client | 6 | milliseconds per frame spent generating sounds, 1–50 |
 | `audio_engine_maxsounds` | client | 10 | how many different engines to keep generated (about 4 MB each); past this, cars fall back to their stock sound |
 | `audio_engine_baked` | client | 1 | stock engines play the pre-generated sounds; 0 = generate everything in game |
-| `audio_engine_startkey` | client | i | key that starts and stops the engine (`none` = no key) |
+| `audio_engine_startkey` | client | r | key that starts and stops the engine (`none` = no key) |
 | `audio_engine_mutestock` | shared | 1 | silence the TDM engine recordings of cars that use the procedural engine |
 | `audio_engine_muteskid` | shared | 1 | silence the TDM tyre screech when braking (shared by all TDM cars) |
 | `audio_engine_mutetyrescrape` | shared | 1 | silence the scrape of sliding tyres (a global change: glass bottle and dirt surface sounds) |
