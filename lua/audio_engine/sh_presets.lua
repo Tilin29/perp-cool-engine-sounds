@@ -67,7 +67,14 @@ E.ENGINE_PRESETS = {
 	{ id = "v10",    name = "V10",                                      layout = "v10",     pitch = 1.00, tone = 0.65, idle = 950,  redline = 8500,  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.4,  gearbox = "close" },
 	{ id = "v10l",   name = "V10 · big-block (Viper, Ram SRT-10)",      layout = "v10",     pitch = 0.90, tone = 0.55, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.45, popTone = 0.3,  gearbox = "road" },
 	-- V8
-	{ id = "v8x",    name = "V8 · crossplane (muscle, trucks)",         layout = "v8cross", pitch = 0.95, tone = 0.65, idle = 700,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.6,  popTone = 0.25, gearbox = "road" },
+	{ id = "v8x",    name = "V8 · crossplane (heavy duty, trucks)",     layout = "v8cross", pitch = 0.95, tone = 0.65, idle = 700,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.6,  popTone = 0.25, gearbox = "road" },
+	-- own voices, tuned in Tone Studio; muffle = the car's silencer (cfg.muffle)
+	{ id = "v8m",    name = "V8 · old muscle",                          layout = "v8cross", pitch = 0.90, tone = 0.85, idle = 800,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.85, popTone = 0.25, gearbox = "road",
+	  character = { f1 = 56, f2 = 340, f3 = 150, w = 1.25, o1 = 0.32, o05 = 0.45 } },
+	{ id = "v8p",    name = "V8 · modern performance",                  layout = "v8cross", pitch = 1.00, tone = 0.80, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.4,  popTone = 0.25, gearbox = "road",
+	  character = { f1 = 85, f2 = 450, f3 = 195, w = 0.88, o1 = 0.15, o05 = 0.18 } },
+	{ id = "v8r",    name = "V8 · refined sedan",                       layout = "v8cross", pitch = 1.00, tone = 0.30, idle = 650,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.2,  popTone = 0.25, gearbox = "road",
+	  character = { f1 = 70, f2 = 220, f3 = 125, w = 1.35, o1 = 0.09, o05 = 0.12 }, muffle = 0.65 },
 	{ id = "v8s",    name = "V8 · crossplane, high-revving (M3, AMG)",  layout = "v8cross", pitch = 1.05, tone = 0.60, idle = 800,  redline = 8000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.4,  popTone = 0.3,  gearbox = "seven" },
 	{ id = "v8flat", name = "V8 · flat-plane (Ferrari, McLaren)",       layout = "v8flat",  pitch = 1.05, tone = 0.70, idle = 950,  redline = 8500,  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.45, gearbox = "close" },
 	{ id = "v8xt",   name = "V8 · twin-turbo",                          layout = "v8cross", pitch = 1.00, tone = 0.55, idle = 750,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.6,  gurgle = 0.5,  popTone = 0.25, gearbox = "seven" },
@@ -82,9 +89,16 @@ E.ENGINE_PRESETS = {
 	{ id = "i6t",    name = "Inline-6 · turbo",                         layout = "i6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.4,  gurgle = 0.3,  popTone = 0.25, gearbox = "road" },
 	{ id = "i5t",    name = "Inline-5 · turbo",                         layout = "i5",      pitch = 1.00, tone = 0.60, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.7,  gurgle = 0.45, popTone = 0.35, gearbox = "close" },
 	-- four, three
-	-- i4: tuned in Tone Studio on an economy car (its own voice, and economy cars keep its tone and burble)
-	{ id = "i4",     name = "Inline-4",                                 layout = "i4",      pitch = 1.25, tone = 0.75, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
+	-- i4: tuned in Tone Studio on an economy car, now the sporty voice (i4st with a turbo); i4w and i4q are the
+	-- economy voices. economyTuned: economy cars keep the preset's tone and burble
+	{ id = "i4",     name = "Inline-4 · sporty",                        layout = "i4",      pitch = 1.25, tone = 0.75, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
 	  character = { f1 = 130, f2 = 647, f3 = 193, w = 1.44, o1 = 0.3, o05 = 0.15 }, economyTuned = true },
+	{ id = "i4st",   name = "Inline-4 · sporty turbo",                  layout = "i4",      pitch = 1.25, tone = 0.75, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.5,  gurgle = 0.05, popTone = 0.3,  gearbox = "road",
+	  character = { f1 = 130, f2 = 647, f3 = 193, w = 1.44, o1 = 0.3, o05 = 0.15 } },
+	{ id = "i4w",    name = "Inline-4 · warm hatch",                    layout = "i4",      pitch = 1.00, tone = 0.42, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
+	  character = { f1 = 92, f2 = 320, f3 = 175, w = 1.15, o1 = 0.14, o05 = 0.1 }, economyTuned = true, muffle = 0.7 },
+	{ id = "i4q",    name = "Inline-4 · quiet hum",                     layout = "i4",      pitch = 1.15, tone = 0.30, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0,    popTone = 0.2,  gearbox = "eco",
+	  character = { f1 = 120, f2 = 420, f3 = 215, w = 1.0, o1 = 0.05, o05 = 0.03 }, economyTuned = true, muffle = 0.9 },
 	{ id = "i4s",    name = "Inline-4 · high-revving (Type R, S2000)",  layout = "i4",      pitch = 1.05, tone = 0.65, idle = 900,  redline = 8800,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.15, popTone = 0.3,  gearbox = "close" },
 	{ id = "i4t",    name = "Inline-4 · turbo",                         layout = "i4",      pitch = 1.05, tone = 0.55, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.5,  gurgle = 0.3,  popTone = 0.3,  gearbox = "road" },
 	{ id = "i4h",    name = "Inline-4 hybrid (Prius)",                  layout = "i4",      pitch = 0.95, tone = 0.25, idle = 1000, redline = 5200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.0,  popTone = 0.1,  gearbox = "eco" },

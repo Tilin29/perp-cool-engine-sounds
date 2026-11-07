@@ -9,7 +9,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu. Server: sv_engine, sv_stability.
 - `sh_config.lua`: `RegisterCar(model, cfg)`; the SL65 entry (shift points, stability, wheel radius).
-- `sh_presets.lua`: layouts, gearbox presets, 33 engine presets, profile Sanitize/Encode/Decode
+- `sh_presets.lua`: layouts, gearbox presets, 38 engine presets, profile Sanitize/Encode/Decode
   (21 pipe-separated fields, ending `...|popTone|turboVol|bovVol`), `ResolveProfile`, `CarStockProfile`.
   `cfg.soundKey` = what forces a new sound bank (layout, pitch, tone, idle, redline, realism, gurgle, popTone).
   Turbo, BOV, volumes and pop frequency are runtime-only.
@@ -173,8 +173,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   the default collector paused up to 120 ms. Turbo/BOV aren't previewed. Also draggable exhaust resonances and firing bars (custom layouts: 1-16 firings),
   start from a preset, silencer; exports changes as text + JSON to paste back: `sound`/`character` as ever; `muffle` = car.muffle; `layoutDef` = a new
   entry for Synth.LAYOUTS, Synth.CHARACTER (voice of `voiceFrom`), E.LAYOUT_CYL and E.LAYOUT_ORDER. Per-car voice: `P(preset, stock, character)` in sh_carlist (cl_synth `Synth.CharacterFor`, part of the sound key).
-  Preset-scope voice: a preset's own `character` (used when the car has none; i4 has one). `economyTuned` presets were tuned on an
+  Preset-scope voice: a preset's own `character` (used when the car has none) and `muffle` (the car's silencer, over the economy one).
+  V8 voices: v8x heavy duty (trucks, work vehicles), v8m old muscle, v8p modern performance, v8r refined sedan. I4: i4/i4st sporty, i4w warm hatch (regular cars), i4q quiet hum (cheaper cars). `economyTuned` presets were tuned on an
   economy car, so economy cars keep their tone and gurgle (no x0.5, no gurgle 0).
+  Engine ideas panel: `dev/tone_studio/candidates.json` lists sounds to audition before they reach sh_carlist (each is an ordinary edit of its
+  example car; `[]` hides the panel). Nothing in it reaches the game.
 
 ## Gotchas
 - `sound.Generate` sounds can't be freed or overridden; names are `audeng_<serial>_<name>`. Volume caps at 1, pitch 0-255 and truncates to an integer.

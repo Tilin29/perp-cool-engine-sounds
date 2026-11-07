@@ -31,6 +31,7 @@ wasmoon = wasmoon.replace(hook, 'function Ta(a,b){var c=M;if(globalThis.__WASMOO
 const wasm = fs.readFileSync(path.join(WASMOON, 'glue.wasm'))
 const worker = fs.readFileSync(path.join(HERE, 'worker.js'), 'utf8')
 const worklet = fs.readFileSync(path.join(HERE, 'worklet.js'), 'utf8')
+const ideas = JSON.stringify(JSON.parse(fs.readFileSync(path.join(HERE, 'candidates.json'), 'utf8')))
 
 /*
   Runs the live engine as the page does, with a stand-in for the audio worklet that takes each
@@ -123,11 +124,11 @@ async function selfTest() {
 
 function build() {
   const t = fs.readFileSync(path.join(HERE, 'template.html'), 'utf8')
-  for (const [name, src] of [...files.map((f) => [f.name, f.src]), ['wasmoon', wasmoon], ['worker.js', worker], ['worklet.js', worklet]]) {
+  for (const [name, src] of [...files.map((f) => [f.name, f.src]), ['wasmoon', wasmoon], ['worker.js', worker], ['worklet.js', worklet], ['candidates.json', ideas]]) {
     if (src.toLowerCase().includes('</script')) throw new Error(name + " holds </script: it would end the page's script tag")
   }
   const lua = files.map((f) => `<script type="text/x-lua" data-name="${f.name}">${f.src}</script>`).join('\n')
-  const parts = { '{{LUA_FILES}}': lua, '{{WASMOON}}': wasmoon, '{{WORKER}}': worker, '{{WORKLET}}': worklet, '{{WASM_B64}}': wasm.toString('base64') }
+  const parts = { '{{LUA_FILES}}': lua, '{{WASMOON}}': wasmoon, '{{WORKER}}': worker, '{{WORKLET}}': worklet, '{{WASM_B64}}': wasm.toString('base64'), '{{IDEAS}}': ideas }
   let out = t
   for (const [k, v] of Object.entries(parts)) {
     if (!out.includes(k)) throw new Error('template has no ' + k)
