@@ -328,6 +328,26 @@ E.CAR_BOV = {
 	["Mitsubishi Lancer Evo X"] = true,
 }
 
+--[[
+	Stock supercharger: the belt-driven blower's whine, locked to the revs (cl_synth
+	RenderSuperchargerLoop, env bank). sport / regular / heavy (heavy: trucks, no stock car has
+	one). A supercharged car's preset turbo is switched off (Range Rover 2012: on the twin-turbo
+	V8 preset). Runtime only: no re-bake.
+]]
+E.CAR_SUPERCHARGER = {
+	["Ford GT 05"] = "sport",              -- 5.4 V8, Lysholm twin-screw
+	["Mercedes McLaren SLR"] = "sport",    -- 5.4 V8, twin-screw
+	["Mercedes C32 AMG"] = "sport",        -- 3.2 V6, twin-screw
+	["Shelby 1000"] = "sport",
+	["Ford Shelby GT500"] = "sport",       -- 2007-14 5.4 / 5.8 V8
+	["Chevrolet Camaro ZL1"] = "sport",    -- 6.2 LSA
+	["Dodge Challenger 2015"] = "sport",   -- SRT Hellcat 6.2
+	["Holden HSV GTS"] = "sport",          -- Gen-F 6.2 LSA
+	["Jaguar F-Type"] = "sport",
+	["Bowler EXR-S"] = "sport",            -- Jaguar 5.0 V8
+	["Land Rover Range Rover 2012"] = "regular",   -- 5.0 V8 supercharged
+}
+
 -- gear count with fitted gearing (sh_presets.lua E.FitGearCount), where one per 40 km/h of
 -- top speed gives another count than the car's PERP script. Runtime only: no re-bake
 E.CAR_GEARS = {
@@ -495,6 +515,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		stockPopVol = E.STOCK_POP_VOLUME,
 		stockBov = E.CAR_BOV[carName] and true or false,
 		stockBovVol = E.STOCK_BOV_VOLUME,
+		supercharger = E.CAR_SUPERCHARGER[carName],
 		emotionStart = E.CAR_EMOTION[carName] or false,
 		gaugeParts = E.GAUGE_PARTS[carName],
 		brakeWing = E.BRAKE_WINGS[carName],

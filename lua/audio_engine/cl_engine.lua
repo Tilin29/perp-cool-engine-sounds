@@ -11,6 +11,7 @@
 local E = AUDIO_ENGINE
 local DT = E.Drivetrain
 local Bank = E.Bank
+local Synth = E.Synth
 
 local cvVol = CreateClientConVar("audio_engine_volume", "1", true, false, "Engine sound volume (0-2)", 0, 2)
 -- the key that switches the engine on and off, e.g. i, k, f1, or none
@@ -447,8 +448,18 @@ local function updateSound(car, dt)
 		local moving = math.Clamp(abs(car.v) / 2, 0, 1)   -- a little softer standing still
 		humVol = g * 0.3 * fade * (0.7 + 0.3 * moving)
 	end
+	-- supercharger (sh_carlist CAR_SUPERCHARGER): belt-driven, so its whine follows the revs, not
+	-- boost. Louder with the revs; off the throttle the bypass valve opens: the duller, quieter loop
+	local sc = cfg.supercharger
+	local scV = sc and Synth.SC_VARIANTS[sc]
+	local scOn = scV and not cfg.electric and env and env.ready and env["sc_" .. sc] and true or false
+	local scVol = 0
+	if scOn and st.on then scVol = g * scV.level * min(1, rpm / cfg.redline) ^ 0.9 end
+	local scThr = car.thrS
 	local thrE = car.thrS
 	local est2 = (car.limW * g * pk(bank.limiter.off)) ^ 2
+		+ (scOn and scVol * (scThr * (env.peak["sc_" .. sc] or 0.3)
+			+ (1 - scThr) * 0.5 * (env.peak["sc_" .. sc .. "_off"] or 0.3)) or 0) ^ 2
 		+ (humVol * (env and env.peak and env.peak.evhum or 0.3)) ^ 2
 		+ (turboOn and (g * b ^ 1.5 * 0.5 * (cfg.profile.turboVol or 1) * (env.peak.turbo or 0.9)) or 0) ^ 2
 		+ (env and (roadVol * (env.peak and env.peak.road or 0.3)) or 0) ^ 2
@@ -510,6 +521,12 @@ local function updateSound(car, dt)
 	elseif car.active.turbo then
 		-- turbo switched off in the menu: fade the whistle out
 		setGroup(car, "turbo", { env.turbo }, { 0 }, 100, dt)
+	end
+	if scOn then
+		scVol = scVol * car.bus * (car.prox or 1)
+		local pitch = math.Clamp(100 * det * rpm / Synth.SC_REF_RPM, 5, 255)
+		setGroup(car, "sc", { env["sc_" .. sc], env["sc_" .. sc .. "_off"] },
+			{ scVol * scThr, scVol * 0.5 * (1 - scThr) }, pitch, dt)
 	end
 	if humVol > 0 or car.active.evhum then
 		local pitch = math.Clamp(100 * (car.dop or 1) * (1 + 0.12 * math.Clamp(humSpd / 0.2, 0, 1)), 20, 220)

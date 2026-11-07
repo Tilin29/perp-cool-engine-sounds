@@ -27,6 +27,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Pop timing (cl_engine): lifting off over half redline starts a burble 0.12-0.3 s later, uneven clusters thinning out over
   (0.8 + 2.2 x pops) s and with the revs; back on the throttle ends it; a long coast only pops now and then (a per-frame chance
   spread lone pops over every coast: popcorn).
+  `CAR_SUPERCHARGER[name]` = "sport" | "regular" | "heavy" (11 cars; heavy: trucks, none stock): the blower whine, locked to the revs
+  (cl_engine pitches the env loop `sc_<v>` by rpm / `Synth.SC_REF_RPM` 2800, level x `SC_VARIANTS[v].level` x (rpm/redline)^0.9,
+  off throttle the bypass loop `sc_<v>_off` at half). A supercharged car's preset turbo/BOV is off (CarStockProfile). Runtime only.
   `CAR_EMOTION[name]`: high-powered cars that rev-flare on start-up (`cfg.emotionStart`, picked by sv_engine; runtime only); others get the gentle start.
   `ECONOMY[name]` + `ECONOMY_SOUND`: economy cars get tone x0.5 and gurgle 0 (in the sound key: re-bake), volume 0.8, soundLevel 80.
 - `sh_perp.lua`: mutes the TDM engine soundscripts named in registered cars' PERP scripts (base + used/upgrade_1/upgrade_2/spiked
@@ -74,7 +77,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - **loudness matching** (TARGET_DB -21, electric -30, measured as rms above 250 Hz of the on-throttle loops), then `limitPeaks` (look-ahead, circular for loops)
   - band loops stored at 0.95 peak with `layer.trim` (manifest `trims`) as the volume that restores their level: volume caps at 1, so quiet bands had no room for the pass-by swell (not electric)
 
-  A shared env bank holds road, wind, turbo whistle, the EV hum and 2 blow-off sounds. Sample rate is `audio_engine_samplerate`, 44100 or 22050; changing it rebuilds.
+  A shared env bank holds road, wind, turbo whistle, the EV hum, 2 blow-off sounds and the supercharger loops (`Synth.RenderSuperchargerLoop`: on boost + bypass per variant; the bypass loop keeps its on loop's gain). Sample rate is `audio_engine_samplerate`, 44100 or 22050; changing it rebuilds.
   - `Bank.Build` first tries the baked copy (`Bank.BakedEntry(cfg)`: own key or family, + file exists): names are then file paths `audio_engine/<dir>/<stem>.wav`.
     `audio_engine_baked 0` forces generation. Baked banks load lazily (when a car using them appears) and don't count toward maxsounds.
 - `cl_engine.lua`: per-car playback.

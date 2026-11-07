@@ -329,6 +329,8 @@ function E.CarStockProfile(car)
 	-- stock blow-off valve (CAR_BOV): only with a turbo
 	if car.stockBov ~= nil then p.bov = (car.stockBov and p.turbo) and true or false end
 	if car.stockBovVol then p.bovVol = math.Clamp(car.stockBovVol, 0, 2) end
+	-- a supercharged car (CAR_SUPERCHARGER) doesn't also get its preset's turbo
+	if car.supercharger then p.turbo, p.bov = false, false end
 	return p
 end
 

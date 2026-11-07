@@ -5,18 +5,24 @@
 	several redlines is baked once, at the highest, and E.BAKED_FAMILY points the others at it.
 	The WAVs live in sound/audio_engine/<dir>/. cl_soundbank.lua loads these instead of
 	generating, so stock cars cost no CPU; tuned engines are still generated in game.
-	Synth version: 5fb2ed58ad
+	Synth version: 78f24250e5
 ]]
 
 local E = AUDIO_ENGINE
-E.BAKED_VERSION = "5fb2ed58ad"
+E.BAKED_VERSION = "78f24250e5"
 E.BAKED_ENV = {
-	dir = "env_a4a97542",
+	dir = "env_93167ba6",
 	peak = {
 		bov1 = 0.35331,
 		bov2 = 0.363128,
 		evhum = 0.144744,
 		road = 0.298855,
+		sc_heavy = 0.173268,
+		sc_heavy_off = 0.118099,
+		sc_regular = 0.168095,
+		sc_regular_off = 0.118856,
+		sc_sport = 0.201706,
+		sc_sport_off = 0.108849,
 		turbo = 0.074635,
 		wind = 0.23615,
 	},
@@ -245,7 +251,7 @@ E.BAKED = {
 		bangs = 0,
 		cars = { "Nissan Leaf" },
 		cyl = 1,
-		dir = "ev_10400_264f74",
+		dir = "ev_10400_39813f",
 		engine = "Electric motor",
 		layers = { 540, 720, 970, 1300, 1750, 2360, 3170, 4270, 5750, 7730, 10400 },
 		limitedDb = 0,
@@ -297,7 +303,7 @@ E.BAKED = {
 		bangs = 0,
 		cars = { "Tesla Model S" },
 		cyl = 1,
-		dir = "ev_16000_ded3fd",
+		dir = "ev_16000_5918c6",
 		engine = "Electric motor",
 		layers = { 540, 710, 940, 1250, 1660, 2200, 2930, 3880, 5150, 6840, 9080, 12050, 16000 },
 		limitedDb = 0,
