@@ -1223,15 +1223,20 @@ end
 --[[
 	Supercharger loop: a belt-driven blower spins with the crank, so unlike the turbo its whine
 	is locked to the revs. Rendered at SC_REF_RPM; the game pitches it by rpm / SC_REF_RPM.
-	Variants (candidates, not wired into the game yet):
-	  "roots"  Roots / Eaton TVS (modern muscle, Jaguar 5.0): a round gear whine with its 2nd and
-	           3rd harmonics and a faint lobe ripple, in a narrow band of intake air
-	  "screw"  twin-screw / Lysholm (Ford GT, SLR, C32): higher and sharper, two meshing lines
-	           (4/6 lobe rotors, 3:2) and a thin metallic sizzle above them
-	  "soft"   refined factory blower behind a big intake box: one quiet, smooth tone in a breath
-	           of air, everything over ~2.8 kHz rolled off
+	Two loops per variant: on boost (`off` false) and bypass open (`off` true: lifting off, the
+	blower idles through its bypass valve, duller and quieter). Variants (candidates, not played
+	in game yet):
+	  "roots"  Roots / Eaton TVS (modern muscle): a round gear whine with its 2nd and 3rd harmonics
+	  "screw"  twin-screw / Lysholm: higher and sharper, two meshing lines (4/6 lobes, 3:2), sizzle
+	  "soft"   refined factory blower behind a big intake box: one quiet, smooth tone in air
+	  "soft2"  soft, with what makes a real one: the firing pulses wobble the belt and rotor speed
+	           (FM at the firing rate), each lobe pushes a puff of air (noise pulsing with the lobes),
+	           rotor runout sidebands, a faint timing-gear whine, boost hiss on load, slow jitter
+	  "soft3"  soft2 with all of that more pronounced and a little more bite
 ]]
 Synth.SC_REF_RPM = 4000
+-- firing rate of a V8 at SC_REF_RPM (4 per crank turn), most of the supercharged cars
+local SC_FIRE_HZ = Synth.SC_REF_RPM / 60 * 4
 Synth.SC_VARIANTS = {
 	roots = { fw = 1150, h = { 1, 0.38, 0.14 }, ripple = 0.14, rippleDiv = 6, air = 0.9, airQ = 4,
 		sizzle = 0, cut = 4800, drift = 0.006 },
@@ -1239,35 +1244,64 @@ Synth.SC_VARIANTS = {
 		sizzle = 0.35, cut = 7000, drift = 0.004 },
 	soft = { fw = 1350, h = { 1, 0.08, 0 }, ripple = 0.04, rippleDiv = 6, air = 1.3, airQ = 2,
 		sizzle = 0, cut = 2800, drift = 0.008 },
+	soft2 = { fw = 1350, h = { 1, 0.10, 0.03 }, ripple = 0.05, rippleDiv = 6, air = 1.1, airQ = 2,
+		sizzle = 0, cut = 3000, drift = 0.008,
+		fm = 0.004, am = 0.10, puff = 0.45, runout = 0.06, gear = 0.07, hiss = 0.35, jitter = 0.12 },
+	soft3 = { fw = 1350, h = { 1, 0.16, 0.06 }, ripple = 0.08, rippleDiv = 6, air = 1.0, airQ = 2.5,
+		sizzle = 0, cut = 3600, drift = 0.010,
+		fm = 0.008, am = 0.18, puff = 0.7, runout = 0.10, gear = 0.12, hiss = 0.5, jitter = 0.2 },
 }
 
-function Synth.RenderSuperchargerLoop(sr, variant, yieldFn)
+function Synth.RenderSuperchargerLoop(sr, variant, yieldFn, off)
 	local v = Synth.SC_VARIANTS[variant or "roots"] or Synth.SC_VARIANTS.roots
 	local rnd = noiseGen(0x5C0A1)
 	local L = floor(sr * 1.5)
 	local X = floor(sr * 0.15)
 	local total = L + X
 	local buf = {}
-	local ph, phm, phr = 0, 0, 0
-	local drift = 0
+	local ph, phm, phr, phf, phg = 0, 0, 0, 0, 0
+	local drift, j2, j3, jl = 0, 0, 0, 0
+	-- bypass open: the tone falls back, darker; on boost the intake hisses
+	local toneLvl = off and 0.45 or 1
+	local cut = off and v.cut * 0.6 or v.cut
 	local air = biquad("bandpass", v.fw, sr, v.airQ)
 	local siz = biquad("bandpass", v.fw * 2.5, sr, 3)
-	local cut1 = biquad("lowpass", v.cut, sr, 0)
-	local cut2 = biquad("lowpass", v.cut, sr, 0)
+	local hissF = biquad("bandpass", 2600, sr, 0.9)
+	local cut1 = biquad("lowpass", cut, sr, 0)
+	local cut2 = biquad("lowpass", cut, sr, 0)
 	local h1, h2, h3 = v.h[1], v.h[2], v.h[3]
-	local mesh = v.mesh or 0
+	local mesh, fm, am, puff = v.mesh or 0, v.fm or 0, v.am or 0, v.puff or 0
+	local runout, gear, jit = v.runout or 0, v.gear or 0, v.jitter or 0
+	local hiss = off and 0 or (v.hiss or 0)
 	for i = 1, total do
 		local nz = rnd()
 		drift = drift + (nz - drift) * 0.0004
-		local f = v.fw * (1 + v.drift * drift * 30)
+		-- slow, independent level jitter of the partials (a few Hz): a machine, not an oscillator
+		j2 = j2 + (rnd() - j2) * 0.00015
+		j3 = j3 + (rnd() - j3) * 0.00012
+		jl = jl + (rnd() - jl) * 0.0001
+		-- firing pulses: the belt and rotors speed up and slow a hair on every power stroke
+		phf = phf + SC_FIRE_HZ / sr; if phf >= 1 then phf = phf - 1 end
+		local pulse = sin(TAU * phf)
+		local f = v.fw * (1 + v.drift * drift * 30) * (1 + fm * pulse)
 		ph = ph + f / sr; if ph >= 1 then ph = ph - 1 end
 		phm = phm + f * 1.5 / sr; if phm >= 1 then phm = phm - 1 end
+		-- rotor turn (lobe pass / rippleDiv): runout puts sidebands either side of the whine
 		phr = phr + f / v.rippleDiv / sr; if phr >= 1 then phr = phr - 1 end
+		-- timing gears: a fainter, higher whine at their own ratio
+		phg = phg + f * 1.37 / sr; if phg >= 1 then phg = phg - 1 end
 		local a = TAU * ph
-		local tone = h1 * sin(a) + h2 * sin(2 * a + 0.4) + h3 * sin(3 * a + 1.1) + mesh * sin(TAU * phm)
-		tone = tone * (1 + v.ripple * sin(TAU * phr)) * 0.6
-		local x = tone + runBiquad(air, nz) * v.air
-		if v.sizzle > 0 then x = x + runBiquad(siz, rnd()) * v.sizzle end
+		local rot = sin(TAU * phr)
+		local tone = h1 * sin(a + runout * 3 * rot)
+			+ h2 * (1 + jit * 8 * j2) * sin(2 * a + 0.4)
+			+ h3 * (1 + jit * 8 * j3) * sin(3 * a + 1.1)
+			+ mesh * sin(TAU * phm) + gear * sin(TAU * phg)
+		tone = tone * (1 + v.ripple * rot) * (1 + am * pulse) * (1 + jit * 6 * jl) * 0.6 * toneLvl
+		-- intake air, pushed in puffs as each lobe passes
+		local lobe = 0.5 + 0.5 * sin(a)
+		local x = tone + runBiquad(air, nz) * v.air * (1 - puff + puff * 2 * lobe * lobe)
+		if v.sizzle > 0 then x = x + runBiquad(siz, rnd()) * v.sizzle * toneLvl end
+		if hiss > 0 then x = x + runBiquad(hissF, rnd()) * hiss * (1 + am * pulse) end
 		buf[i] = runBiquad(cut2, runBiquad(cut1, x))
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
