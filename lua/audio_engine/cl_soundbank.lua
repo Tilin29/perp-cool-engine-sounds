@@ -391,12 +391,16 @@ local function buildEnv(b)
 		{ "bov1", Synth.RenderBlowoff(sr, 0xB10F + 4099, y), 0.093, false, 0.15 },
 		{ "bov2", Synth.RenderBlowoff(sr, 0xB10F + 2 * 4099, y), 0.093, false, 0.15 },
 	}
-	-- superchargers: on boost and bypass open per variant. The on loop is set to about 0.38 of a
-	-- loudness-matched engine's top band (full band rms), as in the clips they were picked
-	-- from; the bypass loop keeps the gain of its on loop (6th field), so it stays quieter
+	-- superchargers: on boost and bypass open per variant and rpm band (sc_<variant>_<band>). The
+	-- on loop is set to about 0.38 of a loudness-matched engine's top band (full band rms), as in
+	-- the clips they were picked from; the bypass loop keeps the gain of its on loop (6th field),
+	-- so it stays quieter
 	for _, v in ipairs(Synth.SC_ORDER) do
-		jobs[#jobs + 1] = { "sc_" .. v, Synth.RenderSuperchargerLoop(sr, v, y), 0.057, true }
-		jobs[#jobs + 1] = { "sc_" .. v .. "_off", Synth.RenderSuperchargerLoop(sr, v, y, true), 0, true, nil, "sc_" .. v }
+		for k, bandRpm in ipairs(Synth.SC_BANDS) do
+			local on = "sc_" .. v .. "_" .. k
+			jobs[#jobs + 1] = { on, Synth.RenderSuperchargerLoop(sr, v, y, false, bandRpm), 0.057, true }
+			jobs[#jobs + 1] = { on .. "_off", Synth.RenderSuperchargerLoop(sr, v, y, true, bandRpm), 0, true, nil, on }
+		end
 	end
 	local gains = {}
 	b.peak = {}

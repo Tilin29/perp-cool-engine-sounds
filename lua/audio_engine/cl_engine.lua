@@ -80,6 +80,34 @@ local VOL_SLEW = 4
 -- the car's top speed, down to SC_FAST_GAIN (-8 dB): by km/h slow cars never reached the fade
 local SC_GAIN = 0.7
 local SC_FADE_FROM, SC_FADE_TO, SC_FAST_GAIN = 0.4, 0.8, 0.4
+-- setGroup keys of the whine's bands, and each env bank's { on, off } sound names per variant.
+-- Built on first use, not at load: a Lua refresh can run this file against an older Synth
+local SC_KEYS = {}
+local scNameCache = setmetatable({}, { __mode = "k" })
+local function scBandNames(env, variant)
+	if not Synth.SC_BANDS then return nil end
+	for k = #SC_KEYS + 1, #Synth.SC_BANDS do SC_KEYS[k] = "sc" .. k end
+	local byVariant = scNameCache[env]
+	if not byVariant then
+		byVariant = {}
+		scNameCache[env] = byVariant
+	end
+	local names = byVariant[variant]
+	if names == nil then
+		names = {}
+		for k = 1, #Synth.SC_BANDS do
+			local on = env["sc_" .. variant .. "_" .. k]
+			local off = env["sc_" .. variant .. "_" .. k .. "_off"]
+			if not (on and off) then
+				names = false
+				break
+			end
+			names[k] = { on, off }
+		end
+		byVariant[variant] = names
+	end
+	return names or nil
+end
 -- electric motors (and their low-speed hum) play at this fraction: their banks are rendered at a
 -- workable level for 16-bit files, a real EV is far quieter than any engine
 E.EV_VOLUME = 0.1
@@ -464,11 +492,31 @@ local function updateSound(car, dt)
 		At speed it fades back (to SC_FAST_GAIN by SC_FADE_TO of top speed): cruising, the steady
 		whine wore on the ear over the engine; revving and pulling away it's at full level.
 		cfg.scPitch (sh_carlist SC_PITCH) moves the whine for a blower geared unlike the others.
+		The whine is in octave bands (cl_synth SC_BANDS), cross-faded at equal power by the revs x
+		scPitch: one loop pitched from idle to redline stepped audibly at low revs.
 	]]
 	local sc = cfg.supercharger
 	local scV = sc and Synth.SC_VARIANTS[sc]
-	local scOn = scV and not cfg.electric and env and env.ready and env["sc_" .. sc] and true or false
+	local scNames = scV and not cfg.electric and env and env.ready and scBandNames(env, sc)
+	local scOn = scNames and true or false
 	local scRpm = rpm + (cfg.redline * 0.985 - rpm) * car.limW
+	-- the two bands around the whine's rpm and their weights
+	local scLo, scWLo, scWHi = 1, 1, 0
+	local scE = (cfg.scPitch or 1) * scRpm
+	local bands = Synth.SC_BANDS
+	if not scOn then
+		-- no whine: nothing to weigh
+	elseif scE >= bands[#bands] then
+		scLo = #bands
+	elseif scE > bands[1] then
+		for k = 1, #bands - 1 do
+			if scE < bands[k + 1] then
+				local t = log(scE / bands[k]) / log(bands[k + 1] / bands[k])
+				scLo, scWLo, scWHi = k, cos(t * pi / 2), sin(t * pi / 2)
+				break
+			end
+		end
+	end
 	local scVol = 0
 	if scOn and st.on then
 		local share = abs(car.v) * 3.6 / max(cfg.topSpeed or 250, 30)
@@ -480,8 +528,8 @@ local function updateSound(car, dt)
 	local scThr = car.scThr
 	local thrE = car.thrS
 	local est2 = (car.limW * g * pk(bank.limiter.off)) ^ 2
-		+ (scOn and scVol * (scThr * (env.peak["sc_" .. sc] or 0.3)
-			+ (1 - scThr) * 0.5 * (env.peak["sc_" .. sc .. "_off"] or 0.3)) or 0) ^ 2
+		+ (scOn and scVol * (scThr * (env.peak[scNames[scLo][1]] or 0.3)
+			+ (1 - scThr) * 0.5 * (env.peak[scNames[scLo][2]] or 0.3)) or 0) ^ 2
 		+ (humVol * (env and env.peak and env.peak.evhum or 0.3)) ^ 2
 		+ (turboOn and (g * b ^ 1.5 * 0.5 * (cfg.profile.turboVol or 1) * (env.peak.turbo or 0.9)) or 0) ^ 2
 		+ (env and (roadVol * (env.peak and env.peak.road or 0.3)) or 0) ^ 2
@@ -546,9 +594,14 @@ local function updateSound(car, dt)
 	end
 	if scOn then
 		scVol = scVol * car.bus * (car.prox or 1)
-		local pitch = math.Clamp(100 * det * (cfg.scPitch or 1) * scRpm / Synth.SC_REF_RPM, 5, 255)
-		setGroup(car, "sc", { env["sc_" .. sc], env["sc_" .. sc .. "_off"] },
-			{ scVol * scThr, scVol * 0.5 * (1 - scThr) }, pitch, dt)
+		for k = 1, #bands do
+			local wk = (k == scLo and scWLo) or (k == scLo + 1 and scWHi) or 0
+			local key = SC_KEYS[k]
+			if wk > 0 or car.active[key] then
+				local pitch = math.Clamp(100 * det * scE / bands[k], 5, 255)
+				setGroup(car, key, scNames[k], { scVol * wk * scThr, scVol * wk * 0.5 * (1 - scThr) }, pitch, dt)
+			end
+		end
 	end
 	if humVol > 0 or car.active.evhum then
 		local pitch = math.Clamp(100 * (car.dop or 1) * (1 + 0.12 * math.Clamp(humSpd / 0.2, 0, 1)), 20, 220)

@@ -1222,10 +1222,13 @@ end
 
 --[[
 	Supercharger loop: a belt-driven blower spins with the crank, so unlike the turbo its whine
-	is locked to the revs. Rendered at SC_REF_RPM; cl_engine pitches it by rpm / SC_REF_RPM (the
-	game's pitch tops out at 255, so the reference sits low enough for a 7000 rpm redline).
-	Each variant has two loops: on boost (`off` false) and bypass open (`off` true: off the
-	throttle the blower idles through its bypass valve, duller and quieter).
+	is locked to the revs. Rendered in bands an octave apart (SC_BANDS, rpm at the whine pitch
+	the variant is tuned to); cl_engine cross-fades the two around the revs x cfg.scPitch, like
+	the engine's bands. The game's pitch is a whole percent: one loop pitched from rpm / 2800
+	played at ~27% at idle (3.7% steps, a staircase as the revs crept) and a lower-geared blower
+	(scPitch 0.35) would have been at ~10%. In bands it stays between ~55 and 200%.
+	Each variant has two loops a band: on boost (`off` false) and bypass open (`off` true: off
+	the throttle the blower idles through its bypass valve, duller and quieter).
 	Beyond the whine itself: the firing pulses wobble the belt and rotor speed (FM at a V8's
 	firing rate), each lobe pushes a puff of intake air, rotor runout puts sidebands on the
 	whine, the timing gears add a faint second line, boost hisses on load, and the partials
@@ -1241,7 +1244,7 @@ end
 	wobbles the tone came back out of phase and the cross-fade cancelled it: a 5 dB dip on every
 	pass, a pulse ~1.5 times a second when pitched up at redline.
 ]]
-Synth.SC_REF_RPM = 2800
+Synth.SC_BANDS = { 375, 750, 1500, 3000, 6000 }
 local SC_DESIGN_RPM = 4000
 Synth.SC_VARIANTS = {
 	sport = { fw = 1350, h = { 1, 0.16, 0.06 }, ripple = 0.08, rippleDiv = 6, air = 1.0, airQ = 2.5,
@@ -1257,11 +1260,11 @@ Synth.SC_VARIANTS = {
 
 Synth.SC_ORDER = { "sport", "regular", "heavy" }
 
-function Synth.RenderSuperchargerLoop(sr, variant, yieldFn, off)
+function Synth.RenderSuperchargerLoop(sr, variant, yieldFn, off, bandRpm)
 	local v = Synth.SC_VARIANTS[variant] or Synth.SC_VARIANTS.sport
-	-- designed at SC_DESIGN_RPM and rendered at SC_REF_RPM: render as if at a higher sample
-	-- rate, which is exactly the game pitching it back down
-	local fs = sr * SC_DESIGN_RPM / Synth.SC_REF_RPM
+	-- designed at SC_DESIGN_RPM and rendered at the band's rpm: render as if at another sample
+	-- rate, which is exactly the game pitching it
+	local fs = sr * SC_DESIGN_RPM / bandRpm
 	local rnd = noiseGen(0x5C0A1)
 	local L = floor(sr * 1.5)
 	local X = floor(sr * 0.15)

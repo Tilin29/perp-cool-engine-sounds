@@ -353,11 +353,25 @@ E.CAR_SUPERCHARGER = {
 
 --[[
 	Whine pitch against the others (cfg.scPitch, cl_engine), for a blower geared unlike the
-	~20 lobe passes per crank turn the whine is tuned to. SLR: its twin-screw tops out at 23,000
-	rpm at the 6,500 redline, 4 male lobes = ~14 per turn (1.5 kHz, not 2.2). Runtime only.
+	~20 lobe passes per crank turn the whine is tuned to. A Roots / TVS blower (two rotors, each
+	pushing its own pockets) passes 2 x lobes x drive ratio a turn, a twin-screw male lobes x ratio.
+	  Eaton TVS (LSA: ZL1, HSV GTS; AJ133: F-Type, Bowler, Range Rover; GT500): 4 lobes, ~2.6:1 =
+	  ~21 per turn: as tuned, not listed
+	  Mercedes twin-screw (IHI, 3-lobe male rotor): C32 155/74 mm pulleys = 21,600 rpm at 6,200,
+	  3 lobes = 10.5 per turn; SLR 23,000 rpm at 6,500 = 10.6
+	  Ford GT (Lysholm 2300), Hellcat (2.4 l twin-screw): ratios not published; their boost needs
+	  ~2.5x crank speed, ~10 per turn with 4 male lobes (estimates)
+	  hot-rod blower (1970 Challenger, Trans Am): a 6-71 style 3-lobe Roots on a ~15% overdrive =
+	  ~7 per turn: the low classic whine
+	Shelby 1000 (twin-screw, drive unknown) is left as tuned. Runtime only.
 ]]
 E.SC_PITCH = {
-	["Mercedes McLaren SLR"] = 0.7,
+	["Mercedes McLaren SLR"] = 0.52,
+	["Mercedes C32 AMG"] = 0.52,
+	["Ford GT 05"] = 0.52,
+	["Dodge Challenger 2015"] = 0.52,
+	["Dodge Challenger 1970"] = 0.35,
+	["Pontiac Firebird Trans Am"] = 0.35,
 }
 
 -- gear count with fitted gearing (sh_presets.lua E.FitGearCount), where one per 40 km/h of

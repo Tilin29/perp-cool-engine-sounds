@@ -5,24 +5,48 @@
 	several redlines is baked once, at the highest, and E.BAKED_FAMILY points the others at it.
 	The WAVs live in sound/audio_engine/<dir>/. cl_soundbank.lua loads these instead of
 	generating, so stock cars cost no CPU; tuned engines are still generated in game.
-	Synth version: fb06090eb1
+	Synth version: 9c947ac510
 ]]
 
 local E = AUDIO_ENGINE
-E.BAKED_VERSION = "fb06090eb1"
+E.BAKED_VERSION = "9c947ac510"
 E.BAKED_ENV = {
-	dir = "env_de35a3df",
+	dir = "env_9c51341c",
 	peak = {
 		bov1 = 0.35331,
 		bov2 = 0.363128,
 		evhum = 0.144744,
 		road = 0.298855,
-		sc_heavy = 0.188033,
-		sc_heavy_off = 0.119352,
-		sc_regular = 0.166478,
-		sc_regular_off = 0.130055,
-		sc_sport = 0.190223,
-		sc_sport_off = 0.109218,
+		sc_heavy_1 = 0.140719,
+		sc_heavy_1_off = 0.0666027,
+		sc_heavy_2 = 0.146252,
+		sc_heavy_2_off = 0.0813803,
+		sc_heavy_3 = 0.165813,
+		sc_heavy_3_off = 0.0991802,
+		sc_heavy_4 = 0.209072,
+		sc_heavy_4_off = 0.120071,
+		sc_heavy_5 = 0.204353,
+		sc_heavy_5_off = 0.144404,
+		sc_regular_1 = 0.117524,
+		sc_regular_1_off = 0.0718965,
+		sc_regular_2 = 0.132873,
+		sc_regular_2_off = 0.0756056,
+		sc_regular_3 = 0.143693,
+		sc_regular_3_off = 0.0912383,
+		sc_regular_4 = 0.168177,
+		sc_regular_4_off = 0.109142,
+		sc_regular_5 = 0.189545,
+		sc_regular_5_off = 0.123184,
+		sc_sport_1 = 0.131014,
+		sc_sport_1_off = 0.0674736,
+		sc_sport_2 = 0.137526,
+		sc_sport_2_off = 0.0747046,
+		sc_sport_3 = 0.154492,
+		sc_sport_3_off = 0.0876464,
+		sc_sport_4 = 0.16972,
+		sc_sport_4_off = 0.110806,
+		sc_sport_5 = 0.205019,
+		sc_sport_5_off = 0.13951,
 		turbo = 0.074635,
 		wind = 0.23615,
 	},
@@ -251,7 +275,7 @@ E.BAKED = {
 		bangs = 0,
 		cars = { "Nissan Leaf" },
 		cyl = 1,
-		dir = "ev_10400_711c69",
+		dir = "ev_10400_e68d44",
 		engine = "Electric motor",
 		layers = { 540, 720, 970, 1300, 1750, 2360, 3170, 4270, 5750, 7730, 10400 },
 		limitedDb = 0,
@@ -303,7 +327,7 @@ E.BAKED = {
 		bangs = 0,
 		cars = { "Tesla Model S" },
 		cyl = 1,
-		dir = "ev_16000_27f0a3",
+		dir = "ev_16000_593a63",
 		engine = "Electric motor",
 		layers = { 540, 710, 940, 1250, 1660, 2200, 2930, 3880, 5150, 6840, 9080, 12050, 16000 },
 		limitedDb = 0,

@@ -28,12 +28,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   (0.8 + 2.2 x pops) s and with the revs; back on the throttle ends it; a long coast only pops now and then (a per-frame chance
   spread lone pops over every coast: popcorn).
   `CAR_SUPERCHARGER[name]` = "sport" | "regular" | "heavy" (13 cars; heavy: trucks, none stock): the blower whine, locked to the revs
-  (cl_engine pitches the env loop `sc_<v>` by rpm / `Synth.SC_REF_RPM` 2800, level x `SC_VARIANTS[v].level` x (rpm/redline)^0.9,
-  off throttle the bypass loop `sc_<v>_off` at half). The bypass follows the throttle, not the limiter's fuel cuts (`car.scThr`,
+  (env loops `sc_<v>_<k>` in octave bands `Synth.SC_BANDS` 375..6000 rpm, cross-faded by rpm x scPitch so the pitch stays ~55-200%:
+  one loop at rpm / 2800 played at 27% at idle, stepping 3.7% a whole-percent pitch step; level x `SC_VARIANTS[v].level` x (rpm/redline)^0.9,
+  off throttle the bypass loop `sc_<v>_<k>_off` at half). The bypass follows the throttle, not the limiter's fuel cuts (`car.scThr`,
   shuts 0.15 s / opens 0.1 s), and on the limiter the whine holds at 0.985 x redline (`scRpm`): following the cuts it warbled.
   Played at `SC_GAIN` 0.7; at speed it fades to `SC_FAST_GAIN` 0.4 (-8 dB) between `SC_FADE_FROM` 0.4 and `SC_FADE_TO` 0.8 of
   `cfg.topSpeed` (fixed km/h: slow cars never faded). `E.SC_PITCH[name]` (cfg.scPitch) for a blower geared unlike the ~20 lobe
-  passes per crank turn (SLR twin-screw 0.7). The loops are seamless (every tone and wobble whole cycles over the loop, only
+  passes per crank turn (twin-screws SLR, C32, Ford GT, Hellcat 0.52; hot-rod Roots 0.35). The loops are seamless (every tone and wobble whole cycles over the loop, only
   the air noise cross-faded): random wobbles put the tone out of phase at the seam, a 5 dB dip each pass.
   A supercharged car's preset turbo/BOV is off (CarStockProfile). Runtime only.
   `CAR_EMOTION[name]`: high-powered cars that rev-flare on start-up (`cfg.emotionStart`, picked by sv_engine; runtime only); others get the gentle start.
@@ -83,7 +84,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - **loudness matching** (TARGET_DB -21, electric -30, measured as rms above 250 Hz of the on-throttle loops), then `limitPeaks` (look-ahead, circular for loops)
   - band loops stored at 0.95 peak with `layer.trim` (manifest `trims`) as the volume that restores their level: volume caps at 1, so quiet bands had no room for the pass-by swell (not electric)
 
-  A shared env bank holds road, wind, turbo whistle, the EV hum, 2 blow-off sounds and the supercharger loops (`Synth.RenderSuperchargerLoop`: on boost + bypass per variant; the bypass loop keeps its on loop's gain). Sample rate is `audio_engine_samplerate`, 44100 or 22050; changing it rebuilds.
+  A shared env bank holds road, wind, turbo whistle, the EV hum, 2 blow-off sounds and the supercharger loops (`Synth.RenderSuperchargerLoop`: on boost + bypass per variant and band; the bypass loop keeps its on loop's gain). Sample rate is `audio_engine_samplerate`, 44100 or 22050; changing it rebuilds.
   - `Bank.Build` first tries the baked copy (`Bank.BakedEntry(cfg)`: own key or family, + file exists): names are then file paths `audio_engine/<dir>/<stem>.wav`.
     `audio_engine_baked 0` forces generation. Baked banks load lazily (when a car using them appears) and don't count toward maxsounds.
 - `cl_engine.lua`: per-car playback.
