@@ -1232,7 +1232,11 @@ end
 	  "soft2"  soft, with what makes a real one: the firing pulses wobble the belt and rotor speed
 	           (FM at the firing rate), each lobe pushes a puff of air (noise pulsing with the lobes),
 	           rotor runout sidebands, a faint timing-gear whine, boost hiss on load, slow jitter
-	  "soft3"  soft2 with all of that more pronounced and a little more bite
+	  "soft3"  soft2 with all of that more pronounced and a little more bite (sporty cars)
+	  "soft3r" regular: soft3's realism, gentler and darker, quieter (saloons, SUVs)
+	  "soft3h" heavy duty: a bigger, slower-driven blower (lower whine), deep lobe puffs, little
+	           hiss, rolled off early, quietest (trucks, work vehicles)
+	`level` is how loud the variant plays relative to the sporty one (runtime gain).
 ]]
 Synth.SC_REF_RPM = 4000
 -- firing rate of a V8 at SC_REF_RPM (4 per crank turn), most of the supercharged cars
@@ -1250,6 +1254,12 @@ Synth.SC_VARIANTS = {
 	soft3 = { fw = 1350, h = { 1, 0.16, 0.06 }, ripple = 0.08, rippleDiv = 6, air = 1.0, airQ = 2.5,
 		sizzle = 0, cut = 3600, drift = 0.010,
 		fm = 0.008, am = 0.18, puff = 0.7, runout = 0.10, gear = 0.12, hiss = 0.5, jitter = 0.2 },
+	soft3r = { fw = 1300, h = { 1, 0.11, 0.03 }, ripple = 0.06, rippleDiv = 6, air = 1.1, airQ = 2,
+		sizzle = 0, cut = 2900, drift = 0.009, level = 0.6,
+		fm = 0.006, am = 0.14, puff = 0.6, runout = 0.08, gear = 0.08, hiss = 0.3, jitter = 0.18 },
+	soft3h = { fw = 950, h = { 1, 0.20, 0.07 }, ripple = 0.10, rippleDiv = 6, air = 1.2, airQ = 1.6,
+		sizzle = 0, cut = 2100, drift = 0.010, level = 0.45,
+		fm = 0.010, am = 0.22, puff = 0.85, runout = 0.12, gear = 0.06, hiss = 0.15, jitter = 0.2 },
 }
 
 function Synth.RenderSuperchargerLoop(sr, variant, yieldFn, off)
