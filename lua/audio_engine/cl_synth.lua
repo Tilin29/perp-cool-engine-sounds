@@ -1221,6 +1221,60 @@ function Synth.RenderTurboLoop(sr, yieldFn)
 end
 
 --[[
+	Supercharger loop: a belt-driven blower spins with the crank, so unlike the turbo its whine
+	is locked to the revs. Rendered at SC_REF_RPM; the game pitches it by rpm / SC_REF_RPM.
+	Variants (candidates, not wired into the game yet):
+	  "roots"  Roots / Eaton TVS (modern muscle, Jaguar 5.0): a round gear whine with its 2nd and
+	           3rd harmonics and a faint lobe ripple, in a narrow band of intake air
+	  "screw"  twin-screw / Lysholm (Ford GT, SLR, C32): higher and sharper, two meshing lines
+	           (4/6 lobe rotors, 3:2) and a thin metallic sizzle above them
+	  "soft"   refined factory blower behind a big intake box: one quiet, smooth tone in a breath
+	           of air, everything over ~2.8 kHz rolled off
+]]
+Synth.SC_REF_RPM = 4000
+Synth.SC_VARIANTS = {
+	roots = { fw = 1150, h = { 1, 0.38, 0.14 }, ripple = 0.14, rippleDiv = 6, air = 0.9, airQ = 4,
+		sizzle = 0, cut = 4800, drift = 0.006 },
+	screw = { fw = 1750, h = { 1, 0.22, 0.10 }, mesh = 0.55, ripple = 0.06, rippleDiv = 4, air = 0.7, airQ = 6,
+		sizzle = 0.35, cut = 7000, drift = 0.004 },
+	soft = { fw = 1350, h = { 1, 0.08, 0 }, ripple = 0.04, rippleDiv = 6, air = 1.3, airQ = 2,
+		sizzle = 0, cut = 2800, drift = 0.008 },
+}
+
+function Synth.RenderSuperchargerLoop(sr, variant, yieldFn)
+	local v = Synth.SC_VARIANTS[variant or "roots"] or Synth.SC_VARIANTS.roots
+	local rnd = noiseGen(0x5C0A1)
+	local L = floor(sr * 1.5)
+	local X = floor(sr * 0.15)
+	local total = L + X
+	local buf = {}
+	local ph, phm, phr = 0, 0, 0
+	local drift = 0
+	local air = biquad("bandpass", v.fw, sr, v.airQ)
+	local siz = biquad("bandpass", v.fw * 2.5, sr, 3)
+	local cut1 = biquad("lowpass", v.cut, sr, 0)
+	local cut2 = biquad("lowpass", v.cut, sr, 0)
+	local h1, h2, h3 = v.h[1], v.h[2], v.h[3]
+	local mesh = v.mesh or 0
+	for i = 1, total do
+		local nz = rnd()
+		drift = drift + (nz - drift) * 0.0004
+		local f = v.fw * (1 + v.drift * drift * 30)
+		ph = ph + f / sr; if ph >= 1 then ph = ph - 1 end
+		phm = phm + f * 1.5 / sr; if phm >= 1 then phm = phm - 1 end
+		phr = phr + f / v.rippleDiv / sr; if phr >= 1 then phr = phr - 1 end
+		local a = TAU * ph
+		local tone = h1 * sin(a) + h2 * sin(2 * a + 0.4) + h3 * sin(3 * a + 1.1) + mesh * sin(TAU * phm)
+		tone = tone * (1 + v.ripple * sin(TAU * phr)) * 0.6
+		local x = tone + runBiquad(air, nz) * v.air
+		if v.sizzle > 0 then x = x + runBiquad(siz, rnd()) * v.sizzle end
+		buf[i] = runBiquad(cut2, runBiquad(cut1, x))
+		if yieldFn and i % 8192 == 0 then yieldFn() end
+	end
+	return makeLoop(buf, L, X), L
+end
+
+--[[
 	Electric low-speed hum, like the pedestrian warning sound EVs play at walking pace: a soft,
 	low tone (220 Hz and a little of its octave) in a breath of air, with a slow shimmer, no motor in it.
 	cl_engine plays it at an almost fixed pitch and fades it out by ~30 km/h. Shared by every
