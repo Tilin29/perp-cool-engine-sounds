@@ -27,10 +27,14 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Pop timing (cl_engine): lifting off over half redline starts a burble 0.12-0.3 s later, uneven clusters thinning out over
   (0.8 + 2.2 x pops) s and with the revs; back on the throttle ends it; a long coast only pops now and then (a per-frame chance
   spread lone pops over every coast: popcorn).
-  `CAR_SUPERCHARGER[name]` = "sport" | "regular" | "heavy" (11 cars; heavy: trucks, none stock): the blower whine, locked to the revs
+  `CAR_SUPERCHARGER[name]` = "sport" | "regular" | "heavy" (13 cars; heavy: trucks, none stock): the blower whine, locked to the revs
   (cl_engine pitches the env loop `sc_<v>` by rpm / `Synth.SC_REF_RPM` 2800, level x `SC_VARIANTS[v].level` x (rpm/redline)^0.9,
   off throttle the bypass loop `sc_<v>_off` at half). The bypass follows the throttle, not the limiter's fuel cuts (`car.scThr`,
   shuts 0.15 s / opens 0.1 s), and on the limiter the whine holds at 0.985 x redline (`scRpm`): following the cuts it warbled.
+  Played at `SC_GAIN` 0.7; at speed it fades to `SC_FAST_GAIN` 0.4 (-8 dB) between `SC_FADE_FROM` 0.4 and `SC_FADE_TO` 0.8 of
+  `cfg.topSpeed` (fixed km/h: slow cars never faded). `E.SC_PITCH[name]` (cfg.scPitch) for a blower geared unlike the ~20 lobe
+  passes per crank turn (SLR twin-screw 0.7). The loops are seamless (every tone and wobble whole cycles over the loop, only
+  the air noise cross-faded): random wobbles put the tone out of phase at the seam, a 5 dB dip each pass.
   A supercharged car's preset turbo/BOV is off (CarStockProfile). Runtime only.
   `CAR_EMOTION[name]`: high-powered cars that rev-flare on start-up (`cfg.emotionStart`, picked by sv_engine; runtime only); others get the gentle start.
   `ECONOMY[name]` + `ECONOMY_SOUND`: economy cars get tone x0.5 and gurgle 0 (in the sound key: re-bake), volume 0.8, soundLevel 80.

@@ -76,6 +76,10 @@ end
 	second. Loops start from silence and fade out before they stop.
 ]]
 local VOL_SLEW = 4
+-- the supercharger whine plays at SC_GAIN (-3 dB) and fades from SC_FADE_FROM to SC_FADE_TO of
+-- the car's top speed, down to SC_FAST_GAIN (-8 dB): by km/h slow cars never reached the fade
+local SC_GAIN = 0.7
+local SC_FADE_FROM, SC_FADE_TO, SC_FAST_GAIN = 0.4, 0.8, 0.4
 -- electric motors (and their low-speed hum) play at this fraction: their banks are rendered at a
 -- workable level for 16-bit files, a real EV is far quieter than any engine
 E.EV_VOLUME = 0.1
@@ -457,13 +461,20 @@ local function updateSound(car, dt)
 		like a valve too: shuts in ~0.15 s as the throttle opens, opens in ~0.1 s on a lift.
 		On the limiter the whine holds near redline: the limiter loop is steady, and a whine
 		following every cut's 150 rpm bounce beat against it.
+		At speed it fades back (to SC_FAST_GAIN by SC_FADE_TO of top speed): cruising, the steady
+		whine wore on the ear over the engine; revving and pulling away it's at full level.
+		cfg.scPitch (sh_carlist SC_PITCH) moves the whine for a blower geared unlike the others.
 	]]
 	local sc = cfg.supercharger
 	local scV = sc and Synth.SC_VARIANTS[sc]
 	local scOn = scV and not cfg.electric and env and env.ready and env["sc_" .. sc] and true or false
 	local scRpm = rpm + (cfg.redline * 0.985 - rpm) * car.limW
 	local scVol = 0
-	if scOn and st.on then scVol = g * scV.level * min(1, scRpm / cfg.redline) ^ 0.9 end
+	if scOn and st.on then
+		local share = abs(car.v) * 3.6 / max(cfg.topSpeed or 250, 30)
+		local fast = math.Clamp((share - SC_FADE_FROM) / (SC_FADE_TO - SC_FADE_FROM), 0, 1)
+		scVol = g * SC_GAIN * scV.level * min(1, scRpm / cfg.redline) ^ 0.9 * (1 - (1 - SC_FAST_GAIN) * fast)
+	end
 	local bypT = max(st.soundThr, st.cut and st.thr or 0)
 	car.scThr = approach(car.scThr or 0, bypT, dt / (bypT > (car.scThr or 0) and 0.15 or 0.1))
 	local scThr = car.scThr
@@ -535,7 +546,7 @@ local function updateSound(car, dt)
 	end
 	if scOn then
 		scVol = scVol * car.bus * (car.prox or 1)
-		local pitch = math.Clamp(100 * det * scRpm / Synth.SC_REF_RPM, 5, 255)
+		local pitch = math.Clamp(100 * det * (cfg.scPitch or 1) * scRpm / Synth.SC_REF_RPM, 5, 255)
 		setGroup(car, "sc", { env["sc_" .. sc], env["sc_" .. sc .. "_off"] },
 			{ scVol * scThr, scVol * 0.5 * (1 - scThr) }, pitch, dt)
 	end

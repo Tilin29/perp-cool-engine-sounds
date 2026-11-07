@@ -331,8 +331,9 @@ E.CAR_BOV = {
 --[[
 	Stock supercharger: the belt-driven blower's whine, locked to the revs (cl_synth
 	RenderSuperchargerLoop, env bank). sport / regular / heavy (heavy: trucks, no stock car has
-	one). A supercharged car's preset turbo is switched off (Range Rover 2012: on the twin-turbo
-	V8 preset). Runtime only: no re-bake.
+	one). The 1970 Challenger and the Trans Am get it as a hot-rod blower. A supercharged car's
+	preset turbo is switched off (Range Rover 2012: on the twin-turbo V8 preset). Runtime only:
+	no re-bake.
 ]]
 E.CAR_SUPERCHARGER = {
 	["Ford GT 05"] = "sport",              -- 5.4 V8, Lysholm twin-screw
@@ -345,7 +346,18 @@ E.CAR_SUPERCHARGER = {
 	["Holden HSV GTS"] = "sport",          -- Gen-F 6.2 LSA
 	["Jaguar F-Type"] = "sport",
 	["Bowler EXR-S"] = "sport",            -- Jaguar 5.0 V8
+	["Dodge Challenger 1970"] = "sport",   -- hot-rod blower
+	["Pontiac Firebird Trans Am"] = "sport",   -- hot-rod blower
 	["Land Rover Range Rover 2012"] = "regular",   -- 5.0 V8 supercharged
+}
+
+--[[
+	Whine pitch against the others (cfg.scPitch, cl_engine), for a blower geared unlike the
+	~20 lobe passes per crank turn the whine is tuned to. SLR: its twin-screw tops out at 23,000
+	rpm at the 6,500 redline, 4 male lobes = ~14 per turn (1.5 kHz, not 2.2). Runtime only.
+]]
+E.SC_PITCH = {
+	["Mercedes McLaren SLR"] = 0.7,
 }
 
 -- gear count with fitted gearing (sh_presets.lua E.FitGearCount), where one per 40 km/h of
@@ -516,6 +528,7 @@ function E.RegisterCarNamed(model, carName, extra)
 		stockBov = E.CAR_BOV[carName] and true or false,
 		stockBovVol = E.STOCK_BOV_VOLUME,
 		supercharger = E.CAR_SUPERCHARGER[carName],
+		scPitch = E.SC_PITCH[carName],
 		emotionStart = E.CAR_EMOTION[carName] or false,
 		gaugeParts = E.GAUGE_PARTS[carName],
 		brakeWing = E.BRAKE_WINGS[carName],

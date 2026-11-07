@@ -1235,6 +1235,11 @@ end
 	  heavy    trucks: a bigger, slower-driven blower (lower whine), deep lobe puffs, little hiss
 	fw (whine Hz), cut and the air bands are given at SC_DESIGN_RPM. `level` is how loud the
 	variant plays relative to sport (cl_engine, runtime).
+	Seamless: every tone (whine, rotor turn, timing gears, firing rate) and every slow wobble is
+	rounded to whole cycles over the loop, so its end runs straight into its start. The tone then
+	crosses over unchanged and only the air noise is cross-faded (equal power). With random
+	wobbles the tone came back out of phase and the cross-fade cancelled it: a 5 dB dip on every
+	pass, a pulse ~1.5 times a second when pitched up at redline.
 ]]
 Synth.SC_REF_RPM = 2800
 local SC_DESIGN_RPM = 4000
@@ -1257,41 +1262,48 @@ function Synth.RenderSuperchargerLoop(sr, variant, yieldFn, off)
 	-- designed at SC_DESIGN_RPM and rendered at SC_REF_RPM: render as if at a higher sample
 	-- rate, which is exactly the game pitching it back down
 	local fs = sr * SC_DESIGN_RPM / Synth.SC_REF_RPM
-	local fireHz = SC_DESIGN_RPM / 60 * 4   -- a V8 fires 4 times a crank turn
 	local rnd = noiseGen(0x5C0A1)
 	local L = floor(sr * 1.5)
 	local X = floor(sr * 0.15)
 	local total = L + X
-	local buf = {}
+	-- the loop's length in design time: every periodic part gets a whole number of cycles in it
+	local T = L / fs
+	local function whole(hz) return max(1, floor(hz * T + 0.5)) / T end
+	-- the whine, so the rotor turn (whine / rippleDiv) comes out whole too
+	local fw = max(1, floor(v.fw * T / v.rippleDiv + 0.5)) * v.rippleDiv / T
+	local gearRatio = floor(1.37 * fw * T + 0.5) / (fw * T)
+	local fireHz = whole(SC_DESIGN_RPM / 60 * 4)   -- a V8 fires 4 times a crank turn
+	-- slow wobbles: two whole-cycle sines each, random phases, at the size of the low-passed noise
+	-- they replace (rms 0.0097 drift, 0.0059 / 0.0059 / 0.0048 partial levels)
+	local function wobble(rms, hzA, hzB)
+		local a, b = whole(hzA), whole(hzB)
+		return { a / fs, b / fs, rnd() * TAU, rnd() * TAU, rms }
+	end
+	local wobbles = { wobble(0.0097, 1.9, 3.1), wobble(0.0059, 1.3, 2.3), wobble(0.0059, 1.1, 2.7), wobble(0.0048, 0.95, 1.7) }
+	local function wob(w, i) return w[5] * (sin(TAU * w[1] * i + w[3]) + sin(TAU * w[2] * i + w[4])) end
+	local toneBuf, airBuf = {}, {}
 	local ph, phr, phf, phg = 0, 0, 0, 0
-	local drift, j2, j3, jl = 0, 0, 0, 0
 	-- bypass open: the tone falls back, darker; on boost the intake hisses
 	local toneLvl = off and 0.45 or 1
 	local cut = off and v.cut * 0.6 or v.cut
 	local air = biquad("bandpass", v.fw, fs, v.airQ)
 	local hissF = biquad("bandpass", 2600, fs, 0.9)
-	local cut1 = biquad("lowpass", cut, fs, 0)
-	local cut2 = biquad("lowpass", cut, fs, 0)
+	local cut1, cut2 = biquad("lowpass", cut, fs, 0), biquad("lowpass", cut, fs, 0)
+	local cut3, cut4 = biquad("lowpass", cut, fs, 0), biquad("lowpass", cut, fs, 0)
 	local h1, h2, h3 = v.h[1], v.h[2], v.h[3]
 	local fm, am, puff, runout, gear, jit = v.fm, v.am, v.puff, v.runout, v.gear, v.jitter
 	local hiss = off and 0 or v.hiss
-	-- the slow jitter and drift are tuned per sample at 44.1 kHz
-	local kr = 44100 / fs
 	for i = 1, total do
-		local nz = rnd()
-		drift = drift + (nz - drift) * 0.0004 * kr
-		j2 = j2 + (rnd() - j2) * 0.00015 * kr
-		j3 = j3 + (rnd() - j3) * 0.00012 * kr
-		jl = jl + (rnd() - jl) * 0.0001 * kr
+		local drift, j2, j3, jl = wob(wobbles[1], i), wob(wobbles[2], i), wob(wobbles[3], i), wob(wobbles[4], i)
 		-- firing pulses: the belt and rotors speed up and slow a hair on every power stroke
 		phf = phf + fireHz / fs; if phf >= 1 then phf = phf - 1 end
 		local pulse = sin(TAU * phf)
-		local f = v.fw * (1 + v.drift * drift * 30) * (1 + fm * pulse)
+		local f = fw * (1 + v.drift * drift * 30) * (1 + fm * pulse)
 		ph = ph + f / fs; if ph >= 1 then ph = ph - 1 end
 		-- rotor turn (lobe pass / rippleDiv): runout puts sidebands either side of the whine
 		phr = phr + f / v.rippleDiv / fs; if phr >= 1 then phr = phr - 1 end
 		-- timing gears: a fainter, higher whine at their own ratio
-		phg = phg + f * 1.37 / fs; if phg >= 1 then phg = phg - 1 end
+		phg = phg + f * gearRatio / fs; if phg >= 1 then phg = phg - 1 end
 		local a = TAU * ph
 		local rot = sin(TAU * phr)
 		local tone = h1 * sin(a + runout * 3 * rot)
@@ -1301,12 +1313,24 @@ function Synth.RenderSuperchargerLoop(sr, variant, yieldFn, off)
 		tone = tone * (1 + v.ripple * rot) * (1 + am * pulse) * (1 + jit * 6 * jl) * 0.6 * toneLvl
 		-- intake air, pushed in puffs as each lobe passes
 		local lobe = 0.5 + 0.5 * sin(a)
-		local x = tone + runBiquad(air, nz) * v.air * (1 - puff + puff * 2 * lobe * lobe)
+		local x = runBiquad(air, rnd()) * v.air * (1 - puff + puff * 2 * lobe * lobe)
 		if hiss > 0 then x = x + runBiquad(hissF, rnd()) * hiss * (1 + am * pulse) end
-		buf[i] = runBiquad(cut2, runBiquad(cut1, x))
+		toneBuf[i] = runBiquad(cut2, runBiquad(cut1, tone))
+		airBuf[i] = runBiquad(cut4, runBiquad(cut3, x))
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
-	return makeLoop(buf, L, X), L
+	-- the tone repeats exactly (its second pass has the filters settled); the noise doesn't, so
+	-- it's cross-faded at equal power
+	local y = {}
+	for i = 1, L do
+		if i <= X then
+			local t = (i - 0.5) / X
+			y[i] = toneBuf[L + i] + airBuf[i] * sin(t * pi / 2) + airBuf[L + i] * cos(t * pi / 2)
+		else
+			y[i] = toneBuf[i] + airBuf[i]
+		end
+	end
+	return y, L
 end
 
 --[[
