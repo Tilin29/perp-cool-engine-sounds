@@ -2,7 +2,7 @@
 	Glue between the page and the addon. Not part of the addon: it plays the server's part
 	(engine on/off, applying a tuned profile, the networked keys) and reports state to the page.
 ]]
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 BR = {}
 
 -- generation progress: count the top-level renders and sounds of the bank being built
@@ -37,7 +37,7 @@ function BR.progress()
 	return cfg.engineName or "engine", math.min(0.99, p)
 end
 
--- the server's side of audio_engine_set
+-- the server's side of the set-profile net message
 function BR.apply(str)
 	if str == "" then
 		CAR.nw.audio_prof = ""

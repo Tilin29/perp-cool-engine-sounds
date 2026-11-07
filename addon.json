@@ -2,5 +2,5 @@
 	"title": "Audio Engine",
 	"type": "vehicle",
 	"tags": [ "roleplay", "realism" ],
-	"ignore": [ "*.md", "*.psd", "dev/*" ]
+	"ignore": [ "*.md", "*.psd", "*.toml", ".styluaignore", "dev/*" ]
 }

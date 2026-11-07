@@ -7,8 +7,8 @@
 	An empty string means the car's stock preset.
 ]]
 
-AUDIO_ENGINE = AUDIO_ENGINE or {}
-local E = AUDIO_ENGINE
+PerpAudioEngine = PerpAudioEngine or {}
+local E = PerpAudioEngine
 
 local min, max, floor, pi = math.min, math.max, math.floor, math.pi
 
@@ -35,20 +35,42 @@ E.LAYOUT_ORDER = {
 	{ "electric", "Electric motor" },
 }
 -- firings per 720 degrees (for a Wankel, rotor firings: one per rotor per shaft turn)
-E.LAYOUT_CYL = { single = 1, vtwin = 2, ptwin = 2, triple = 3, i4 = 4, boxer = 4, i5 = 5, i6 = 6, v6odd = 6, v8cross = 8, v8flat = 8, v10 = 10, v12 = 12,
-	v6 = 6, flat6 = 6, flat12 = 12, w16 = 16, rotary2 = 4, rotary3 = 6, electric = 1 }
+E.LAYOUT_CYL = {
+	single = 1,
+	vtwin = 2,
+	ptwin = 2,
+	triple = 3,
+	i4 = 4,
+	boxer = 4,
+	i5 = 5,
+	i6 = 6,
+	v6odd = 6,
+	v8cross = 8,
+	v8flat = 8,
+	v10 = 10,
+	v12 = 12,
+	v6 = 6,
+	flat6 = 6,
+	flat12 = 12,
+	w16 = 16,
+	rotary2 = 4,
+	rotary3 = 6,
+	electric = 1,
+}
 
 E.GEAR_PRESETS = {
-	{ id = "amg5",    name = "AMG 5-speed auto", gears = { 3.59, 2.19, 1.41, 1.00, 0.83 }, final = 2.82 },
-	{ id = "road",    name = "Road 6-speed",     gears = { 3.60, 2.10, 1.45, 1.10, 0.90, 0.76 }, final = 3.90 },
-	{ id = "close",   name = "Close-ratio 6",    gears = { 3.00, 2.10, 1.60, 1.30, 1.10, 0.95 }, final = 4.30 },
-	{ id = "seven",   name = "7-speed auto",     gears = { 4.38, 2.86, 1.92, 1.37, 1.00, 0.82, 0.73 }, final = 2.65 },
-	{ id = "eco",     name = "Economy 5",        gears = { 3.45, 1.94, 1.29, 0.97, 0.78 }, final = 3.65 },
-	{ id = "classic", name = "Classic 4",        gears = { 2.97, 1.84, 1.31, 1.00 }, final = 3.70 },
-	{ id = "ev",      name = "Single-speed (electric)", gears = { 1.00 }, final = 9.00 },
+	{ id = "amg5", name = "AMG 5-speed auto", gears = { 3.59, 2.19, 1.41, 1.00, 0.83 }, final = 2.82 },
+	{ id = "road", name = "Road 6-speed", gears = { 3.60, 2.10, 1.45, 1.10, 0.90, 0.76 }, final = 3.90 },
+	{ id = "close", name = "Close-ratio 6", gears = { 3.00, 2.10, 1.60, 1.30, 1.10, 0.95 }, final = 4.30 },
+	{ id = "seven", name = "7-speed auto", gears = { 4.38, 2.86, 1.92, 1.37, 1.00, 0.82, 0.73 }, final = 2.65 },
+	{ id = "eco", name = "Economy 5", gears = { 3.45, 1.94, 1.29, 0.97, 0.78 }, final = 3.65 },
+	{ id = "classic", name = "Classic 4", gears = { 2.97, 1.84, 1.31, 1.00 }, final = 3.70 },
+	{ id = "ev", name = "Single-speed (electric)", gears = { 1.00 }, final = 9.00 },
 }
 local function gearPreset(id)
-	for _, g in ipairs(E.GEAR_PRESETS) do if g.id == id then return g end end
+	for _, g in ipairs(E.GEAR_PRESETS) do
+		if g.id == id then return g end
+	end
 	return E.GEAR_PRESETS[1]
 end
 E.GearPreset = gearPreset
@@ -56,67 +78,146 @@ E.GearPreset = gearPreset
 --[[ Engine presets. topSpeed: the gearing is fitted so top gear reaches redline there. ]]
 -- One preset per engine type in the game (see sh_carlist.lua for which car uses which),
 -- plus the SL65's own engine and the original Rev Bench sound.
+-- stylua: ignore
 E.ENGINE_PRESETS = {
-	{ id = "sl65",   name = "SL65 AMG · 6.0 V12 biturbo",               layout = "v12",     pitch = 1.00, tone = 0.40, idle = 700,  redline = 6000,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.15, gearbox = "amg5" },
+	{ id = "sl65",   name = "SL65 AMG · 6.0 V12 biturbo",
+	  layout = "v12",     pitch = 1.00, tone = 0.40, idle = 700,  redline = 6000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.15, gearbox = "amg5" },
 	-- V12 / flat-12 / W16
-	{ id = "v12na",  name = "V12",                                      layout = "v12",     pitch = 1.00, tone = 0.60, idle = 1000, redline = 8000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.25, popTone = 0.3,  gearbox = "seven" },
-	{ id = "v12t",   name = "V12 · turbo",                              layout = "v12",     pitch = 1.00, tone = 0.50, idle = 900,  redline = 8000,  realism = 1, turbo = true,  bov = true,  pops = 0.3,  gurgle = 0.25, popTone = 0.25, gearbox = "close" },
-	{ id = "f12",    name = "Flat-12 (180° V12)",                       layout = "flat12",  pitch = 1.00, tone = 0.60, idle = 1000, redline = 7200,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.3,  popTone = 0.3,  gearbox = "close" },
-	{ id = "w16",    name = "W16 · quad-turbo",                         layout = "w16",     pitch = 0.90, tone = 0.50, idle = 750,  redline = 6600,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.2,  gearbox = "seven" },
+	{ id = "v12na",  name = "V12",
+	  layout = "v12",     pitch = 1.00, tone = 0.60, idle = 1000, redline = 8000,
+	  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.25, popTone = 0.3,  gearbox = "seven" },
+	{ id = "v12t",   name = "V12 · turbo",
+	  layout = "v12",     pitch = 1.00, tone = 0.50, idle = 900,  redline = 8000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.3,  gurgle = 0.25, popTone = 0.25, gearbox = "close" },
+	{ id = "f12",    name = "Flat-12 (180° V12)",
+	  layout = "flat12",  pitch = 1.00, tone = 0.60, idle = 1000, redline = 7200,
+	  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.3,  popTone = 0.3,  gearbox = "close" },
+	{ id = "w16",    name = "W16 · quad-turbo",
+	  layout = "w16",     pitch = 0.90, tone = 0.50, idle = 750,  redline = 6600,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.2,  gearbox = "seven" },
 	-- V10
-	{ id = "v10",    name = "V10",                                      layout = "v10",     pitch = 1.00, tone = 0.65, idle = 950,  redline = 8500,  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.4,  gearbox = "close" },
-	{ id = "v10l",   name = "V10 · big-block (Viper, Ram SRT-10)",      layout = "v10",     pitch = 0.90, tone = 0.55, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.45, popTone = 0.3,  gearbox = "road" },
+	{ id = "v10",    name = "V10",
+	  layout = "v10",     pitch = 1.00, tone = 0.65, idle = 950,  redline = 8500,
+	  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.4,  gearbox = "close" },
+	{ id = "v10l",   name = "V10 · big-block (Viper, Ram SRT-10)",
+	  layout = "v10",     pitch = 0.90, tone = 0.55, idle = 750,  redline = 6000,
+	  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.45, popTone = 0.3,  gearbox = "road" },
 	-- V8
-	{ id = "v8x",    name = "V8 · crossplane (heavy duty, trucks)",     layout = "v8cross", pitch = 0.95, tone = 0.65, idle = 700,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.6,  popTone = 0.25, gearbox = "road" },
+	{ id = "v8x",    name = "V8 · crossplane (heavy duty, trucks)",
+	  layout = "v8cross", pitch = 0.95, tone = 0.65, idle = 700,  redline = 6000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.6,  popTone = 0.25, gearbox = "road" },
 	-- own voices, tuned in Tone Studio; muffle = the car's silencer (cfg.muffle)
-	{ id = "v8m",    name = "V8 · old muscle",                          layout = "v8cross", pitch = 0.90, tone = 0.85, idle = 800,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.85, popTone = 0.25, gearbox = "road",
+	{ id = "v8m",    name = "V8 · old muscle",
+	  layout = "v8cross", pitch = 0.90, tone = 0.85, idle = 800,  redline = 6000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.85, popTone = 0.25, gearbox = "road",
 	  character = { f1 = 56, f2 = 340, f3 = 150, w = 1.25, o1 = 0.32, o05 = 0.45 } },
-	{ id = "v8p",    name = "V8 · modern performance",                  layout = "v8cross", pitch = 1.00, tone = 0.80, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.4,  popTone = 0.25, gearbox = "road",
+	{ id = "v8p",    name = "V8 · modern performance",
+	  layout = "v8cross", pitch = 1.00, tone = 0.80, idle = 750,  redline = 6000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.4,  popTone = 0.25, gearbox = "road",
 	  character = { f1 = 85, f2 = 450, f3 = 195, w = 0.88, o1 = 0.15, o05 = 0.18 } },
-	{ id = "v8r",    name = "V8 · refined sedan",                       layout = "v8cross", pitch = 1.00, tone = 0.30, idle = 650,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.2,  popTone = 0.25, gearbox = "road",
+	{ id = "v8r",    name = "V8 · refined sedan",
+	  layout = "v8cross", pitch = 1.00, tone = 0.30, idle = 650,  redline = 6000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.2,  popTone = 0.25, gearbox = "road",
 	  character = { f1 = 70, f2 = 220, f3 = 125, w = 1.35, o1 = 0.09, o05 = 0.12 }, muffle = 0.65 },
-	{ id = "v8s",    name = "V8 · crossplane, high-revving (M3, AMG)",  layout = "v8cross", pitch = 1.05, tone = 0.60, idle = 800,  redline = 8000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.4,  popTone = 0.3,  gearbox = "seven" },
-	{ id = "v8flat", name = "V8 · flat-plane (Ferrari, McLaren)",       layout = "v8flat",  pitch = 1.05, tone = 0.70, idle = 950,  redline = 8500,  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.45, gearbox = "close" },
-	{ id = "v8xt",   name = "V8 · twin-turbo",                          layout = "v8cross", pitch = 1.00, tone = 0.55, idle = 750,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.6,  gurgle = 0.5,  popTone = 0.25, gearbox = "seven" },
-	{ id = "v8h",    name = "V8 hybrid (918 Spyder, P1)",               layout = "v8flat",  pitch = 1.05, tone = 0.65, idle = 1000, redline = 9000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.2,  popTone = 0.4,  gearbox = "seven" },
+	{ id = "v8s",    name = "V8 · crossplane, high-revving (M3, AMG)",
+	  layout = "v8cross", pitch = 1.05, tone = 0.60, idle = 800,  redline = 8000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.4,  popTone = 0.3,  gearbox = "seven" },
+	{ id = "v8flat", name = "V8 · flat-plane (Ferrari, McLaren)",
+	  layout = "v8flat",  pitch = 1.05, tone = 0.70, idle = 950,  redline = 8500,
+	  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.45, gearbox = "close" },
+	{ id = "v8xt",   name = "V8 · twin-turbo",
+	  layout = "v8cross", pitch = 1.00, tone = 0.55, idle = 750,  redline = 7000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.6,  gurgle = 0.5,  popTone = 0.25, gearbox = "seven" },
+	{ id = "v8h",    name = "V8 hybrid (918 Spyder, P1)",
+	  layout = "v8flat",  pitch = 1.05, tone = 0.65, idle = 1000, redline = 9000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.2,  popTone = 0.4,  gearbox = "seven" },
 	-- V6
-	{ id = "v6",     name = "V6",                                       layout = "v6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 6800,  realism = 1, turbo = false, bov = false, pops = 0.2,  gurgle = 0.3,  popTone = 0.2,  gearbox = "eco" },
-	{ id = "v6odd",  name = "V6 · 90° odd-fire (DeLorean)",              layout = "v6odd",   pitch = 1.00, tone = 0.45, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.2,  gurgle = 0.4,  popTone = 0.2,  gearbox = "classic" },
-	{ id = "v6t",    name = "V6 · twin-turbo",                          layout = "v6",      pitch = 1.00, tone = 0.55, idle = 800,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.4,  gurgle = 0.3,  popTone = 0.3,  gearbox = "close" },
+	{ id = "v6",     name = "V6",
+	  layout = "v6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 6800,
+	  realism = 1, turbo = false, bov = false, pops = 0.2,  gurgle = 0.3,  popTone = 0.2,  gearbox = "eco" },
+	{ id = "v6odd",  name = "V6 · 90° odd-fire (DeLorean)",
+	  layout = "v6odd",   pitch = 1.00, tone = 0.45, idle = 750,  redline = 6000,
+	  realism = 1, turbo = false, bov = false, pops = 0.2,  gurgle = 0.4,  popTone = 0.2,  gearbox = "classic" },
+	{ id = "v6t",    name = "V6 · twin-turbo",
+	  layout = "v6",      pitch = 1.00, tone = 0.55, idle = 800,  redline = 7000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.4,  gurgle = 0.3,  popTone = 0.3,  gearbox = "close" },
 	-- flat-six / straight six / five
-	{ id = "f6",     name = "Flat-6 (Porsche GT3)",                     layout = "flat6",   pitch = 1.05, tone = 0.70, idle = 950,  redline = 9000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.25, popTone = 0.4,  gearbox = "close" },
-	{ id = "i6",     name = "Inline-6",                                 layout = "i6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 7000,  realism = 1, turbo = false, bov = false, pops = 0.2,  gurgle = 0.25, popTone = 0.2,  gearbox = "road" },
-	{ id = "i6t",    name = "Inline-6 · turbo",                         layout = "i6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.4,  gurgle = 0.3,  popTone = 0.25, gearbox = "road" },
-	{ id = "i5t",    name = "Inline-5 · turbo",                         layout = "i5",      pitch = 1.00, tone = 0.60, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.7,  gurgle = 0.45, popTone = 0.35, gearbox = "close" },
+	{ id = "f6",     name = "Flat-6 (Porsche GT3)",
+	  layout = "flat6",   pitch = 1.05, tone = 0.70, idle = 950,  redline = 9000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.25, popTone = 0.4,  gearbox = "close" },
+	{ id = "i6",     name = "Inline-6",
+	  layout = "i6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 7000,
+	  realism = 1, turbo = false, bov = false, pops = 0.2,  gurgle = 0.25, popTone = 0.2,  gearbox = "road" },
+	{ id = "i6t",    name = "Inline-6 · turbo",
+	  layout = "i6",      pitch = 1.00, tone = 0.50, idle = 750,  redline = 7000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.4,  gurgle = 0.3,  popTone = 0.25, gearbox = "road" },
+	{ id = "i5t",    name = "Inline-5 · turbo",
+	  layout = "i5",      pitch = 1.00, tone = 0.60, idle = 850,  redline = 7000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.7,  gurgle = 0.45, popTone = 0.35, gearbox = "close" },
 	-- four, three
 	-- i4: tuned in Tone Studio on an economy car, now the sporty voice (i4st with a turbo); i4w and i4q are the
 	-- economy voices. economyTuned: economy cars keep the preset's tone and burble
-	{ id = "i4",     name = "Inline-4 · sporty",                        layout = "i4",      pitch = 1.25, tone = 0.75, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
+	{ id = "i4",     name = "Inline-4 · sporty",
+	  layout = "i4",      pitch = 1.25, tone = 0.75, idle = 800,  redline = 6200,
+	  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
 	  character = { f1 = 130, f2 = 647, f3 = 193, w = 1.44, o1 = 0.3, o05 = 0.15 }, economyTuned = true },
-	{ id = "i4st",   name = "Inline-4 · sporty turbo",                  layout = "i4",      pitch = 1.25, tone = 0.75, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.5,  gurgle = 0.05, popTone = 0.3,  gearbox = "road",
+	{ id = "i4st",   name = "Inline-4 · sporty turbo",
+	  layout = "i4",      pitch = 1.25, tone = 0.75, idle = 850,  redline = 7000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.5,  gurgle = 0.05, popTone = 0.3,  gearbox = "road",
 	  character = { f1 = 130, f2 = 647, f3 = 193, w = 1.44, o1 = 0.3, o05 = 0.15 } },
-	{ id = "i4w",    name = "Inline-4 · warm hatch",                    layout = "i4",      pitch = 1.00, tone = 0.42, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
+	{ id = "i4w",    name = "Inline-4 · warm hatch",
+	  layout = "i4",      pitch = 1.00, tone = 0.42, idle = 800,  redline = 6200,
+	  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.05, popTone = 0.2,  gearbox = "eco",
 	  character = { f1 = 92, f2 = 320, f3 = 175, w = 1.15, o1 = 0.14, o05 = 0.1 }, economyTuned = true, muffle = 0.7 },
-	{ id = "i4q",    name = "Inline-4 · quiet hum",                     layout = "i4",      pitch = 1.15, tone = 0.30, idle = 800,  redline = 6200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0,    popTone = 0.2,  gearbox = "eco",
+	{ id = "i4q",    name = "Inline-4 · quiet hum",
+	  layout = "i4",      pitch = 1.15, tone = 0.30, idle = 800,  redline = 6200,
+	  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0,    popTone = 0.2,  gearbox = "eco",
 	  character = { f1 = 120, f2 = 420, f3 = 215, w = 1.0, o1 = 0.05, o05 = 0.03 }, economyTuned = true, muffle = 0.9 },
-	{ id = "i4s",    name = "Inline-4 · high-revving (Type R, S2000)",  layout = "i4",      pitch = 1.05, tone = 0.65, idle = 900,  redline = 8800,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.15, popTone = 0.3,  gearbox = "close" },
-	{ id = "i4t",    name = "Inline-4 · turbo",                         layout = "i4",      pitch = 1.05, tone = 0.55, idle = 850,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.5,  gurgle = 0.3,  popTone = 0.3,  gearbox = "road" },
-	{ id = "i4h",    name = "Inline-4 hybrid (Prius)",                  layout = "i4",      pitch = 0.95, tone = 0.25, idle = 1000, redline = 5200,  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.0,  popTone = 0.1,  gearbox = "eco" },
-	{ id = "i3",     name = "Inline-3",                                 layout = "triple",  pitch = 1.00, tone = 0.45, idle = 850,  redline = 6300,  realism = 1, turbo = false, bov = false, pops = 0.1,  gurgle = 0.2,  popTone = 0.2,  gearbox = "eco" },
-	{ id = "f4",     name = "Flat-4 (FR-S)",                            layout = "boxer",   pitch = 1.00, tone = 0.55, idle = 800,  redline = 7400,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.35, popTone = 0.25, gearbox = "road" },
-	{ id = "f4air",  name = "Flat-4 · air-cooled (Beetle, Camper)",     layout = "boxer",   pitch = 0.90, tone = 0.55, idle = 850,  redline = 4500,  realism = 1, turbo = false, bov = false, pops = 0.1,  gurgle = 0.5,  popTone = 0.2,  gearbox = "classic" },
-	{ id = "boxer",  name = "Flat-4 · turbo (Subaru)",                  layout = "boxer",   pitch = 1.00, tone = 0.60, idle = 800,  redline = 7000,  realism = 1, turbo = true,  bov = true,  pops = 0.6,  gurgle = 0.5,  popTone = 0.3,  gearbox = "road" },
+	{ id = "i4s",    name = "Inline-4 · high-revving (Type R, S2000)",
+	  layout = "i4",      pitch = 1.05, tone = 0.65, idle = 900,  redline = 8800,
+	  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.15, popTone = 0.3,  gearbox = "close" },
+	{ id = "i4t",    name = "Inline-4 · turbo",
+	  layout = "i4",      pitch = 1.05, tone = 0.55, idle = 850,  redline = 7000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.5,  gurgle = 0.3,  popTone = 0.3,  gearbox = "road" },
+	{ id = "i4h",    name = "Inline-4 hybrid (Prius)",
+	  layout = "i4",      pitch = 0.95, tone = 0.25, idle = 1000, redline = 5200,
+	  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.0,  popTone = 0.1,  gearbox = "eco" },
+	{ id = "i3",     name = "Inline-3",
+	  layout = "triple",  pitch = 1.00, tone = 0.45, idle = 850,  redline = 6300,
+	  realism = 1, turbo = false, bov = false, pops = 0.1,  gurgle = 0.2,  popTone = 0.2,  gearbox = "eco" },
+	{ id = "f4",     name = "Flat-4 (FR-S)",
+	  layout = "boxer",   pitch = 1.00, tone = 0.55, idle = 800,  redline = 7400,
+	  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.35, popTone = 0.25, gearbox = "road" },
+	{ id = "f4air",  name = "Flat-4 · air-cooled (Beetle, Camper)",
+	  layout = "boxer",   pitch = 0.90, tone = 0.55, idle = 850,  redline = 4500,
+	  realism = 1, turbo = false, bov = false, pops = 0.1,  gurgle = 0.5,  popTone = 0.2,  gearbox = "classic" },
+	{ id = "boxer",  name = "Flat-4 · turbo (Subaru)",
+	  layout = "boxer",   pitch = 1.00, tone = 0.60, idle = 800,  redline = 7000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.6,  gurgle = 0.5,  popTone = 0.3,  gearbox = "road" },
 	-- rotary
-	{ id = "r2",     name = "2-rotor Wankel (RX-8)",                    layout = "rotary2", pitch = 1.00, tone = 0.60, idle = 900,  redline = 9000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.7,  popTone = 0.4,  gearbox = "road" },
-	{ id = "r2t",    name = "2-rotor Wankel · turbo (RX-7)",            layout = "rotary2", pitch = 1.00, tone = 0.60, idle = 900,  redline = 8000,  realism = 1, turbo = true,  bov = true,  pops = 0.6,  gurgle = 0.6,  popTone = 0.4,  gearbox = "close" },
-	{ id = "r3",     name = "3-rotor Wankel (Mazda Furai)",             layout = "rotary3", pitch = 1.00, tone = 0.80, idle = 1100, redline = 10000, realism = 1, turbo = false, bov = false, pops = 0.7,  gurgle = 0.6,  popTone = 0.6,  gearbox = "close" },
+	{ id = "r2",     name = "2-rotor Wankel (RX-8)",
+	  layout = "rotary2", pitch = 1.00, tone = 0.60, idle = 900,  redline = 9000,
+	  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.7,  popTone = 0.4,  gearbox = "road" },
+	{ id = "r2t",    name = "2-rotor Wankel · turbo (RX-7)",
+	  layout = "rotary2", pitch = 1.00, tone = 0.60, idle = 900,  redline = 8000,
+	  realism = 1, turbo = true,  bov = true,  pops = 0.6,  gurgle = 0.6,  popTone = 0.4,  gearbox = "close" },
+	{ id = "r3",     name = "3-rotor Wankel (Mazda Furai)",
+	  layout = "rotary3", pitch = 1.00, tone = 0.80, idle = 1100, redline = 10000,
+	  realism = 1, turbo = false, bov = false, pops = 0.7,  gurgle = 0.6,  popTone = 0.6,  gearbox = "close" },
 	-- electric
-	{ id = "ev",     name = "Electric motor",                           layout = "electric",pitch = 1.00, tone = 0.40, idle = 500,  redline = 16000, realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.0,  popTone = 0.2,  gearbox = "ev" },
+	{ id = "ev",     name = "Electric motor",
+	  layout = "electric",pitch = 1.00, tone = 0.40, idle = 500,  redline = 16000,
+	  realism = 1, turbo = false, bov = false, pops = 0.0,  gurgle = 0.0,  popTone = 0.2,  gearbox = "ev" },
 	-- the original page
-	{ id = "rb",     name = "Rev Bench classic (inline-4)",             layout = "i4",      pitch = 1.00, tone = 0.55, idle = 850,  redline = 7000,  realism = 0, turbo = false, bov = false, pops = 0.3,  gurgle = 0.0,  popTone = 0.25, gearbox = "road" },
+	{ id = "rb",     name = "Rev Bench classic (inline-4)",
+	  layout = "i4",      pitch = 1.00, tone = 0.55, idle = 850,  redline = 7000,
+	  realism = 0, turbo = false, bov = false, pops = 0.3,  gurgle = 0.0,  popTone = 0.25, gearbox = "road" },
 }
 function E.EnginePreset(id)
-	for _, p in ipairs(E.ENGINE_PRESETS) do if p.id == id then return p end end
+	for _, p in ipairs(E.ENGINE_PRESETS) do
+		if p.id == id then return p end
+	end
 	return nil
 end
 
@@ -125,14 +226,31 @@ function E.ProfileFromPreset(id)
 	local p = E.EnginePreset(id) or E.ENGINE_PRESETS[1]
 	local g = gearPreset(p.gearbox)
 	local gears = {}
-	for i, r in ipairs(g.gears) do gears[i] = r end
+	for i, r in ipairs(g.gears) do
+		gears[i] = r
+	end
 	return {
-		preset = p.id, layout = p.layout, pitch = p.pitch, tone = p.tone, volume = 1,
-		idle = p.idle, redline = p.redline, realism = p.realism, turbo = p.turbo,
-		gears = gears, final = g.final, fit = 1,
-		accel = 1, vmax = 0, pops = p.pops or 0, bov = p.bov and true or false,
-		gurgle = p.gurgle or 0, popVol = 1, popTone = p.popTone or 0.2,
-		turboVol = 1, bovVol = 1,
+		preset = p.id,
+		layout = p.layout,
+		pitch = p.pitch,
+		tone = p.tone,
+		volume = 1,
+		idle = p.idle,
+		redline = p.redline,
+		realism = p.realism,
+		turbo = p.turbo,
+		gears = gears,
+		final = g.final,
+		fit = 1,
+		accel = 1,
+		vmax = 0,
+		pops = p.pops or 0,
+		bov = p.bov and true or false,
+		gurgle = p.gurgle or 0,
+		popVol = 1,
+		popTone = p.popTone or 0.2,
+		turboVol = 1,
+		bovVol = 1,
 	}
 end
 
@@ -141,6 +259,9 @@ end
 ---------------------------------------------------------------------------
 local function clampRound(x, a, b, step)
 	x = tonumber(x) or a
+	-- LuaJIT's tonumber takes "nan", and a client sent this string: the bands and gears built
+	-- from it would loop on nothing
+	if x ~= x then x = a end
 	x = min(b, max(a, x))
 	return floor(x / step + 0.5) * step
 end
@@ -158,13 +279,15 @@ function E.SanitizeProfile(p)
 	o.turbo = p.turbo and true or false
 	o.gears = {}
 	local src = type(p.gears) == "table" and p.gears or gearPreset("road").gears
-	for i = 1, min(8, #src) do o.gears[i] = clampRound(src[i], 0.3, 8, 0.01) end
+	for i = 1, min(8, #src) do
+		o.gears[i] = clampRound(src[i], 0.3, 8, 0.01)
+	end
 	if #o.gears < 1 then o.gears[1] = 1 end
 	o.final = clampRound(p.final, 2, 6, 0.01)
 	o.fit = (tonumber(p.fit) or 0) > 0 and 1 or 0
 	-- performance: acceleration (engine power multiplier) and top speed (km/h, 0 = car's own)
 	o.accel = clampRound(p.accel or 1, 0.5, 2.5, 0.05)
-	o.vmax = (tonumber(p.vmax) or 0) > 0 and clampRound(p.vmax, 40, 450, 1) or 0   -- km/h (the menu sets it in whole mph)
+	o.vmax = (tonumber(p.vmax) or 0) > 0 and clampRound(p.vmax, 40, 450, 1) or 0 -- km/h (the menu sets it in whole mph)
 	-- pops & bangs: how often (0 = off) and how loud; the turbo blow-off valve
 	o.pops = clampRound(p.pops or 0, 0, 1, 0.05)
 	o.popVol = clampRound(p.popVol or 1, 0, 2, 0.05)
@@ -184,17 +307,39 @@ function E.SanitizeProfile(p)
 end
 
 -- compact text form for networking:
--- preset|layout|pitch|tone|vol|idle|red|realism|turbo|g1,g2,..|final|fit|accel|vmax|pops|bov|gurgle|popVol|popTone|turboVol|bovVol
-local function fmt(x) return (string.format("%.2f", x):gsub("0+$", ""):gsub("%.$", "")) end
+-- preset|layout|pitch|tone|vol|idle|red|realism|turbo|g1,g2,..|final|fit|accel|vmax|pops|bov|gurgle|
+-- popVol|popTone|turboVol|bovVol
+local function fmt(x)
+	return (string.format("%.2f", x):gsub("0+$", ""):gsub("%.$", ""))
+end
 function E.EncodeProfile(p)
 	p = E.SanitizeProfile(p)
 	local g = {}
-	for i, r in ipairs(p.gears) do g[i] = fmt(r) end
+	for i, r in ipairs(p.gears) do
+		g[i] = fmt(r)
+	end
 	return table.concat({
-		p.preset, p.layout, fmt(p.pitch), fmt(p.tone), fmt(p.volume), tostring(p.idle), tostring(p.redline),
-		fmt(p.realism), p.turbo and "1" or "0", table.concat(g, ","), fmt(p.final), tostring(p.fit),
-		fmt(p.accel), tostring(p.vmax), fmt(p.pops), p.bov and "1" or "0", fmt(p.gurgle), fmt(p.popVol), fmt(p.popTone),
-		fmt(p.turboVol), fmt(p.bovVol),
+		p.preset,
+		p.layout,
+		fmt(p.pitch),
+		fmt(p.tone),
+		fmt(p.volume),
+		tostring(p.idle),
+		tostring(p.redline),
+		fmt(p.realism),
+		p.turbo and "1" or "0",
+		table.concat(g, ","),
+		fmt(p.final),
+		tostring(p.fit),
+		fmt(p.accel),
+		tostring(p.vmax),
+		fmt(p.pops),
+		p.bov and "1" or "0",
+		fmt(p.gurgle),
+		fmt(p.popVol),
+		fmt(p.popTone),
+		fmt(p.turboVol),
+		fmt(p.bovVol),
 	}, "|")
 end
 
@@ -203,7 +348,10 @@ local function split(s, sep)
 	local start = 1
 	while true do
 		local i = string.find(s, sep, start, true)
-		if not i then t[#t + 1] = s:sub(start); break end
+		if not i then
+			t[#t + 1] = s:sub(start)
+			break
+		end
 		t[#t + 1] = s:sub(start, i - 1)
 		start = i + 1
 	end
@@ -215,15 +363,34 @@ function E.DecodeProfile(s)
 	local f = split(s, "|")
 	if #f < 12 then return nil end
 	local gears = {}
-	for _, v in ipairs(split(f[10], ",")) do gears[#gears + 1] = tonumber(v) end
+	for _, v in ipairs(split(f[10], ",")) do
+		gears[#gears + 1] = tonumber(v)
+	end
 	-- blow-off valve: "0" must stay off (older strings without the field default to on with a turbo)
 	local bov = nil
 	if f[16] ~= nil and f[16] ~= "" then bov = (f[16] == "1") end
 	return E.SanitizeProfile({
-		preset = f[1], layout = f[2], pitch = f[3], tone = f[4], volume = f[5], idle = f[6], redline = f[7],
-		realism = f[8], turbo = f[9] == "1", gears = gears, final = f[11], fit = f[12],
-		accel = f[13], vmax = f[14], pops = f[15], bov = bov,
-		gurgle = f[17], popVol = f[18], popTone = f[19], turboVol = f[20], bovVol = f[21],
+		preset = f[1],
+		layout = f[2],
+		pitch = f[3],
+		tone = f[4],
+		volume = f[5],
+		idle = f[6],
+		redline = f[7],
+		realism = f[8],
+		turbo = f[9] == "1",
+		gears = gears,
+		final = f[11],
+		fit = f[12],
+		accel = f[13],
+		vmax = f[14],
+		pops = f[15],
+		bov = bov,
+		gurgle = f[17],
+		popVol = f[18],
+		popTone = f[19],
+		turboVol = f[20],
+		bovVol = f[21],
 	})
 end
 
@@ -239,7 +406,9 @@ function E.MakeBands(idle, redline, step)
 	local n = math.max(4, math.ceil(math.log(redline / lo) / math.log(step)) + 1)
 	local r = (redline / lo) ^ (1 / (n - 1))
 	local b = {}
-	for i = 1, n do b[i] = floor(lo * r ^ (i - 1) / 10 + 0.5) * 10 end
+	for i = 1, n do
+		b[i] = floor(lo * r ^ (i - 1) / 10 + 0.5) * 10
+	end
 	return b
 end
 
@@ -265,7 +434,8 @@ end
 	so 2.2: each gear spans less speed than the one before. If that makes a step bigger than
 	GEAR_STEP_MAX (few gears over a wide span) the spread is lowered until it fits.
 	So the Veyron (135 mph, 5 by CAR_GEARS) ends its gears at redline at about 61, 137, 185, 223
-	and 256 km/h (217 km/h top speed in 5th at 5,600 rpm, 1,000 under redline), the M5 (81 mph) gets 3 and a 35 mph van 2. Taking the box's own ratios instead put
+	and 256 km/h (217 km/h top speed in 5th at 5,600 rpm, 1,000 under redline), the M5 (81 mph) gets 3
+	and a 35 mph van 2. Taking the box's own ratios instead put
 	six gears into the M5's 81 mph, or cut a 5-speed down to 3 on a 155 mph car.
 ]]
 E.FIRST_GEAR_MIN, E.FIRST_GEAR_SHARE, E.KMH_PER_GEAR, E.GEAR_STEP_MAX = 25, 0.28, 40, 2.3
@@ -300,13 +470,17 @@ function E.FitGearCount(gears, topKmh, count, redline)
 	repeat
 		e = ends(p)
 		local ok = true
-		for i = 2, n do if e[i] / e[i - 1] > E.GEAR_STEP_MAX then ok = false end end
+		for i = 2, n do
+			if e[i] / e[i - 1] > E.GEAR_STEP_MAX then ok = false end
+		end
 		if ok then break end
 		p = p - 0.25
 	until p < 0.05
 	if p < 0.05 then e = ends(0) end
 	local g = {}
-	for i = 1, n do g[i] = floor(gears[1] / e[i] * 100 + 0.5) / 100 end
+	for i = 1, n do
+		g[i] = floor(gears[1] / e[i] * 100 + 0.5) / 100
+	end
 	return g
 end
 
@@ -320,7 +494,9 @@ local resolveCache = setmetatable({}, { __mode = "k" })
 function E.CarStockProfile(car)
 	local p = E.ProfileFromPreset(car.preset or "sl65")
 	if type(car.stock) == "table" then
-		for k, v in pairs(car.stock) do p[k] = v end
+		for k, v in pairs(car.stock) do
+			p[k] = v
+		end
 		p = E.SanitizeProfile(p)
 	end
 	-- stock pops & bangs (sh_carlist.lua CAR_POPS): runtime only, so not part of the sound key
@@ -336,16 +512,26 @@ function E.ResolveProfile(car, prof)
 	prof = prof or E.CarStockProfile(car)
 	local r = prof.realism
 	local cfg = {}
-	for k, v in pairs(car) do cfg[k] = v end
+	for k, v in pairs(car) do
+		cfg[k] = v
+	end
 	cfg.profile = prof
 	cfg.layout, cfg.pitch, cfg.tone = prof.layout, prof.pitch, prof.tone
 	cfg.volume = prof.volume * (car.volume or 1)
 	cfg.idle, cfg.redline = prof.idle, prof.redline
 	cfg.bands = E.MakeBands(prof.idle, prof.redline, prof.layout == "electric" and 1.35 or nil)
 	cfg.realism = {
-		bankSpread = 1.0 * r, cylinderVar = 0.07 * r, cylinderTiming = 1.5 * r, combustionVar = 0.12 * r,
-		flowNoise = 1.0 * r, mufflerMode = 0.5 * r, mechanical = 1.0 * r, turboSoften = 0.6 * r,
-		tailpipe = 0.3 * r, reverb = 0.2 - 0.05 * r, voice = r,
+		bankSpread = 1.0 * r,
+		cylinderVar = 0.07 * r,
+		cylinderTiming = 1.5 * r,
+		combustionVar = 0.12 * r,
+		flowNoise = 1.0 * r,
+		mufflerMode = 0.5 * r,
+		mechanical = 1.0 * r,
+		turboSoften = 0.6 * r,
+		tailpipe = 0.3 * r,
+		reverb = 0.2 - 0.05 * r,
+		voice = r,
 	}
 	cfg.electric = prof.layout == "electric"
 	cfg.turbo = (prof.turbo and not cfg.electric) and { whine = 1.0, blowoff = 1.0 } or nil
@@ -365,14 +551,24 @@ function E.ResolveProfile(car, prof)
 	-- everything that changes the generated sound; cars with the same key share sounds.
 	-- The turbo, blow-off valve, volumes and how often pops happen are not in it: they are
 	-- played on top at runtime, so changing them never generates a new engine.
-	local key = { prof.layout, fmt(prof.pitch), fmt(prof.tone), prof.idle, prof.redline,
-		fmt(r), fmt(prof.gurgle), fmt(prof.popTone) }
+	local key = {
+		prof.layout,
+		fmt(prof.pitch),
+		fmt(prof.tone),
+		prof.idle,
+		prof.redline,
+		fmt(r),
+		fmt(prof.gurgle),
+		fmt(prof.popTone),
+	}
 	-- the car's silencer (economy cars); only in the key when set, so other keys stay as they were
 	if (car.muffle or 0) > 0 then key[#key + 1] = "m" .. fmt(car.muffle) end
 	-- the car's own exhaust voice (sh_carlist.lua character): likewise only when set
 	if type(cfg.character) == "table" then
 		local c = {}
-		for _, k in ipairs({ "f1", "f2", "f3", "w", "o1", "o05" }) do c[#c + 1] = cfg.character[k] and fmt(cfg.character[k]) or "" end
+		for _, k in ipairs({ "f1", "f2", "f3", "w", "o1", "o05" }) do
+			c[#c + 1] = cfg.character[k] and fmt(cfg.character[k]) or ""
+		end
 		key[#key + 1] = "c" .. table.concat(c, ",")
 	end
 	cfg.soundKey = table.concat(key, "_")
@@ -407,7 +603,9 @@ function E.GetEngineConfig(ent)
 	local c = resolveCache[ent]
 	if c and c.str == s and c.car == car and c.top == top then return c.cfg end
 	local carEff = {}
-	for k, v in pairs(car) do carEff[k] = v end
+	for k, v in pairs(car) do
+		carEff[k] = v
+	end
 	carEff.topSpeed = top
 	local cfg = E.ResolveProfile(carEff, E.DecodeProfile(s))
 	resolveCache[ent] = { str = s, car = car, top = top, cfg = cfg }

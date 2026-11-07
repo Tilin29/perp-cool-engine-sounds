@@ -18,24 +18,35 @@
 	  stability    the drift-friendly handling assist (false = off for this car)
 ]]
 
-AUDIO_ENGINE = AUDIO_ENGINE or {}
-AUDIO_ENGINE.Cars = AUDIO_ENGINE.Cars or {}
+PerpAudioEngine = PerpAudioEngine or {}
+PerpAudioEngine.Cars = PerpAudioEngine.Cars or {}
 
-function AUDIO_ENGINE.RegisterCar(model, cfg)
+-- by the model string as entities report it: looked up per car, per tick
+local carByModel = {}
+
+function PerpAudioEngine.RegisterCar(model, cfg)
 	cfg.model = string.lower(model)
-	AUDIO_ENGINE.Cars[cfg.model] = cfg
+	PerpAudioEngine.Cars[cfg.model] = cfg
+	carByModel = {}
+
 	return cfg
 end
 
-function AUDIO_ENGINE.GetCarConfig(ent)
+function PerpAudioEngine.GetCarConfig(ent)
 	if not ent or not ent.GetModel then return nil end
 	local mdl = ent:GetModel()
 	if not mdl then return nil end
-	return AUDIO_ENGINE.Cars[string.lower(mdl)]
+	local car = carByModel[mdl]
+	if car == nil then
+		car = PerpAudioEngine.Cars[string.lower(mdl)] or false
+		carByModel[mdl] = car
+	end
+
+	return car or nil
 end
 
 -- Mercedes-Benz SL65 AMG (R230): 6.0 L twin-turbo V12, 5-speed automatic.
-AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
+PerpAudioEngine.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 	carId = "sl65",
 	name = "SL65 AMG",
 	preset = "sl65",
@@ -45,19 +56,19 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 	stockPopVol = 0.7,
 	stockBov = false,
 	stockBovVol = 0.6,
-	emotionStart = true,   -- rev flare on start-up (sh_carlist.lua CAR_EMOTION)
-	topSpeed = "auto",     -- "auto" = MaxSpeed from the car's vehicle script, or a number in km/h
+	emotionStart = true, -- rev flare on start-up (sh_carlist.lua CAR_EMOTION)
+	topSpeed = "auto", -- "auto" = MaxSpeed from the car's vehicle script, or a number in km/h
 
 	-- arcade gearbox shift points as fractions of redline (remove to use the defaults).
 	-- For the SL65's 6,000 rpm redline:
 	shift = {
-		upRpm = 0.92,      -- W held: shift up at 5,520 rpm
-		kickRpm = 0.60,    -- pressing W below 3,600 rpm kicks down...
-		sagRpm = 0.38,     -- ...and so does holding W while the revs sag under 2,280
-		kickLand = 0.88,   -- kickdown picks the lowest gear that stays under 5,280
-		brakeRpm = 0.45,   -- braking: shift down once the revs fall below 2,700...
-		brakeLand = 0.70,  -- ...if the lower gear keeps them under 4,200
-		lugRpm = 0.40,     -- coasting: shift down below 2,400
+		upRpm = 0.92, -- W held: shift up at 5,520 rpm
+		kickRpm = 0.60, -- pressing W below 3,600 rpm kicks down...
+		sagRpm = 0.38, -- ...and so does holding W while the revs sag under 2,280
+		kickLand = 0.88, -- kickdown picks the lowest gear that stays under 5,280
+		brakeRpm = 0.45, -- braking: shift down once the revs fall below 2,700...
+		brakeLand = 0.70, -- ...if the lower gear keeps them under 4,200
+		lugRpm = 0.40, -- coasting: shift down below 2,400
 	},
 	wheelRadius = 0.376,
 	soundLevel = 85,
@@ -66,16 +77,16 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 	-- stability control (server): follows your steering, catches spins, helps the car turn in.
 	-- Remove a line to use the default; set stability = false to turn it off for this car.
 	stability = {
-		steerSlow = 35,        -- front wheel angle at full lock at parking speeds (degrees)
-		steerFast = 10,        -- ... at 100+ km/h
-		grip = 1.5,            -- cornering (g) the car may pull before it counts as sliding
-		yawAllow = 10,         -- extra rotation (deg/s) allowed before it steps in
-		driftYaw = 70,         -- ... with the handbrake held (drifting)
-		overDamp = 9,          -- how firmly it catches oversteer
-		turnHelp = 4,          -- how much turn-in it adds when the car pushes wide (0 = none)
-		driftAngle = 30,       -- last-resort guard: tail-out slide angle (degrees)
-		handbrakeAngle = 70,   -- ... while drifting (started with the handbrake)
-		driftHold = 8,         -- a drift lasts while the car slides at least this many degrees
-		minSpeed = 8,          -- km/h
+		steerSlow = 35, -- front wheel angle at full lock at parking speeds (degrees)
+		steerFast = 10, -- ... at 100+ km/h
+		grip = 1.5, -- cornering (g) the car may pull before it counts as sliding
+		yawAllow = 10, -- extra rotation (deg/s) allowed before it steps in
+		driftYaw = 70, -- ... with the handbrake held (drifting)
+		overDamp = 9, -- how firmly it catches oversteer
+		turnHelp = 4, -- how much turn-in it adds when the car pushes wide (0 = none)
+		driftAngle = 30, -- last-resort guard: tail-out slide angle (degrees)
+		handbrakeAngle = 70, -- ... while drifting (started with the handbrake)
+		driftHold = 8, -- a drift lasts while the car slides at least this many degrees
+		minSpeed = 8, -- km/h
 	},
 })

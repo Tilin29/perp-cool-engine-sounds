@@ -8,7 +8,7 @@
 	Synth version: 5fb2ed58ad
 ]]
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 E.BAKED_VERSION = "5fb2ed58ad"
 E.BAKED_ENV = {
 	dir = "env_a4a97542",

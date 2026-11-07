@@ -1,5 +1,5 @@
 -- Audio Engine loader: procedural engine sound + rpm/speed HUD for registered cars
-AUDIO_ENGINE = AUDIO_ENGINE or {}
+PerpAudioEngine = PerpAudioEngine or {}
 
 local base = "audio_engine/"
 local shared = { "sh_config.lua", "sh_presets.lua", "sh_drivetrain.lua", "sh_carlist.lua", "sh_perp.lua" }
@@ -7,18 +7,26 @@ local shared = { "sh_config.lua", "sh_presets.lua", "sh_drivetrain.lua", "sh_car
 local client = { "cl_baked.lua", "cl_synth.lua", "cl_soundbank.lua", "cl_engine.lua", "cl_hud.lua", "cl_menu.lua" }
 
 if SERVER then
-	for _, f in ipairs(shared) do AddCSLuaFile(base .. f) end
-	for _, f in ipairs(client) do AddCSLuaFile(base .. f) end
+	for _, f in ipairs(shared) do
+		AddCSLuaFile(base .. f)
+	end
+	for _, f in ipairs(client) do
+		AddCSLuaFile(base .. f)
+	end
 end
 
-for _, f in ipairs(shared) do include(base .. f) end
+for _, f in ipairs(shared) do
+	include(base .. f)
+end
 
 if SERVER then
-	include(base .. "sv_perp_physics.lua")   -- generated: PERP's base-script physics per car
+	include(base .. "sv_perp_physics.lua") -- generated: PERP's base-script physics per car
 	include(base .. "sv_handling.lua")
 	include(base .. "sv_engine.lua")
 	include(base .. "sv_stability.lua")
 	include(base .. "sv_cruise.lua")
 else
-	for _, f in ipairs(client) do include(base .. f) end
+	for _, f in ipairs(client) do
+		include(base .. f)
+	end
 end

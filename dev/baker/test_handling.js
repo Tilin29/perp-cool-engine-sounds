@@ -44,13 +44,13 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     V.__tostring = function(a) return string.format("%g %g %g", a.x, a.y, a.z) end
     function V:LengthSqr() return self.x * self.x + self.y * self.y + self.z * self.z end
     function isvector(x) return getmetatable(x) == V end
-    AUDIO_ENGINE = {}`)
+    PerpAudioEngine = {}`)
   for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'sv_perp_physics.lua', 'sv_handling.lua'])
     await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
 
   // a vehicle whose params start as a given script's values (speeds in inches/s)
   await run('fake vehicle', `
-    E = AUDIO_ENGINE
+    E = PerpAudioEngine
     local HU = 17.6
     function NewCar(model, script, s)
       local veh = { kv = { vehiclescript = script }, mass = s.mass }

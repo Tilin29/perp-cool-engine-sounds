@@ -8,7 +8,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu. Server: sv_engine, sv_stability.
-- `sh_config.lua`: `RegisterCar(model, cfg)`; the SL65 entry (shift points, stability, wheel radius).
+- `sh_config.lua`: `RegisterCar(model, cfg)`; the SL65 entry (shift points, stability, wheel radius). `GetCarConfig` is memoized by the raw model string (per car, per tick). Its spawn entries are at the end of sh_perp.
 - `sh_presets.lua`: layouts, gearbox presets, 38 engine presets, profile Sanitize/Encode/Decode
   (21 pipe-separated fields, ending `...|popTone|turboVol|bovVol`), `ResolveProfile`, `CarStockProfile`.
   `cfg.soundKey` = what forces a new sound bank (layout, pitch, tone, idle, redline, realism, gurgle, popTone).
@@ -78,6 +78,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - `Bank.Build` first tries the baked copy (`Bank.BakedEntry(cfg)`: own key or family, + file exists): names are then file paths `audio_engine/<dir>/<stem>.wav`.
     `audio_engine_baked 0` forces generation. Baked banks load lazily (when a car using them appears) and don't count toward maxsounds.
 - `cl_engine.lua`: per-car playback.
+  - detail tiers, because a native car plays one sound and runs no Lua, and 40 of these would run out of channels and frame time: `rankCars` (4 Hz) sorts by distance (parked idlers x2.5, current cars x0.85 so they don't flap); your own car always `TIER_FULL`; the next `audio_engine_maxcars` (8) within 30% of `audio_engine_range` (200 m at 85 dB, x10 per 20 dB) `TIER_FULL`; twice that `TIER_LIGHT` (one loop, nearest band, on or off, 15 Hz, `ChangeVolume` faded over the step, no road/wind/turbo/pops); the rest `TIER_SILENT` (no bank, gearbox at 5 Hz). Moving down fades over `TIER_FADE` via `car.tierGain`, then `stopAll`. `audio_engine_lod_info` prints the counts. `dev/baker/test_lod.js` holds the budget
+  - nothing allocates per frame in the steady path: `setLoop`/`twoVols`/`bandWeights`/`mix` are reused, `L.names` cached, `car.inp` reused. At `TIER_FULL` the calls to the game must stay exactly as they were
   - band crossfade with pitch; volumes glide (VOL_SLEW), which avoids per-frame zipper clicks
   - per-car headroom (ceiling 0.66 driving / 0.68 neutral, leaving room for band peaks lining up mid cross-fade, using measured peaks; pops/BOV limited with `popLoad`)
   - Doppler pitch bends over past `DOPPLER_KNEE` 4 semitones towards `DOPPLER_MAX` 7 (`softPitch`): at four times real it was nearly an octave at 40 m/s
@@ -109,6 +111,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
     shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
 - `sv_engine.lua`: ignition, run by the server.
+  - `E.TrackedVehicles` is every registered car, `E.ActiveVehicles` the driven ones plus 3 s after (`activate`, `settled`, the 1 Hz housekeeping timer; a spawn, a start or a driver makes a car active). All per-tick work loops over active only, so parked cars cost nothing: native cars cost no Lua
+  - per-car state stays on NW2, against the glua-style rule: SetNW* reaches all clients and re-sends every 10 s, NW2 is PVS-limited and on change. `audio_on` is set last
+  - `audio_engine_idletimeout` (180 s, 0 = never): an empty idling car's engine stops. Native cars go quiet when the driver leaves
   - Engine off on entry; start key `audio_engine_startkey` (default I; polled by cl_engine, which sends `audio_engine_toggle`: the server's
     PlayerButtonDown rides on usercmds and missed presses). A press within 1.5 s of starting can't switch it off (`START_LOCK`: at 150 ms ping a second press did). Getting out leaves it
     idling (`audio_engine_keeprunning` 1, default, not archived: a saved 0 from the old default overrode it); getting back in drives off.
@@ -149,7 +154,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `sound/audio_engine/` + `lua/audio_engine/cl_baked.lua`. Re-bake after changing cl_synth, cl_soundbank, sh_presets or the car list.
   `node bake.js --electric` re-bakes only the electric motors + env bank (~15 s) and keeps every other entry and folder:
   only for changes that can't touch other engines (it fails if any other engine's sound key is missing from the manifest).
-  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
+  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle. `test_server.js` runs all sv_ files on fake cars (ignition, traction, limiter, idle timeout, parked cost); `test_lod.js` runs 40 cars through cl_engine (sound budget, tiers) and the HUD and menu on fakes; both take `<lua dir> <global>` to compare another copy. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - Offline harnesses run under LuaJIT (`luajit file.lua` from `dev/`). Fix the hard-coded paths at the top first: they point at /home/claude/....
   - `gmod_sim5.lua`: drive mix
@@ -179,6 +184,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Engine ideas panel: `dev/tone_studio/candidates.json` lists sounds to audition before they reach sh_carlist (each is an ordinary edit of its
   example car; `[]` hides the panel). Nothing in it reaches the game.
 
+## Style
+GLua style skill in `.claude/skills/glua-style`. `stylua lua` (`.stylua.toml`, column 120) formats; cl_baked and sv_perp_physics are generated and ignored. Hooks, timers and net messages are `perpheads/audio-engine/<purpose>`. Global `PerpAudioEngine`. cl_synth has only been formatted: its render functions go past the nesting limit, and any change means a re-bake.
+
 ## Gotchas
 - `sound.Generate` sounds can't be freed or overridden; names are `audeng_<serial>_<name>`. Volume caps at 1, pitch 0-255 and truncates to an integer.
 - CSoundPatch volume/pitch only change once per frame. Never jump volumes; use the glide.
@@ -188,6 +196,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   For 1:1 local testing, `addons/perp_vehicle_scripts_local/` (outside this repo, never shipped) holds a copy of the pack's
   `scripts/vehicles`: cars then spawn on their real scripts and `perpOnto` is skipped.
 - wasmoon: never return JS `null` to Lua (crashes); use `''`.
+- `util.PrecacheSound` does nothing on the client and only takes soundscripts; a baked WAV loads when it first plays.
+- `E.SetParams` reads back only the first time (the speed unit is the engine's): `veh.audioParams` is one reused full params table; traction sends at most every `E.TRACTION.applyInterval` 0.05 s.
 - Generation cost: ~2 s CPU per engine at 44.1 kHz in game (~16 s in the browser page); ~4 MB each, `audio_engine_maxsounds` cap.
 
 ## Open ideas (not requested yet)

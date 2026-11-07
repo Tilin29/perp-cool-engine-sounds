@@ -29,37 +29,77 @@
 	hard to drive.
 ]]
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 
-local cvHandling = CreateConVar("audio_engine_handling", "1", FCVAR_ARCHIVE,
-	"1 = anti-spin setup on cars with the procedural engine (front brake bias, less power while steering at speed, lower centre of mass); applies to cars spawned after")
+local cvHandling = CreateConVar(
+	"audio_engine_handling",
+	"1",
+	FCVAR_ARCHIVE,
+	"1 = anti-spin setup on cars with the procedural engine (front brake bias, less power while steering "
+		.. "at speed, lower centre of mass); applies to cars spawned after"
+)
 
 ---------------------------------------------------------------------------
 -- setting vehicle params
 ---------------------------------------------------------------------------
-local HU_PER_MPH = 17.6   -- GetVehicleParams speeds are inches/s; SetVehicleParams takes mph
+local HU_PER_MPH = 17.6 -- GetVehicleParams speeds are inches/s; SetVehicleParams takes mph
 local SPEED_KEYS = { "maxSpeed", "maxRevSpeed", "boostMaxSpeed" }
 E.HU_PER_MPH = HU_PER_MPH
 
--- p is a table as GetVehicleParams returns it (speeds in its units). Sets it on the car, giving
--- SetVehicleParams the speeds it wants, and checks the unit took.
-function E.SetParams(veh, p)
-	p = table.Copy(p)
-	for _, k in ipairs(SPEED_KEYS) do
-		if p.engine and p.engine[k] then p.engine[k] = p.engine[k] / HU_PER_MPH end
+-- the driven (or settling) cars: what the per-tick hooks loop over. sv_engine.lua keeps it
+E.ActiveVehicles = E.ActiveVehicles or {}
+
+-- GetVehicleParams, or nil on a vehicle that has none (a seat on a car's model)
+function E.ReadParams(veh)
+	local ok, p = pcall(veh.GetVehicleParams, veh)
+	if not ok then
+		ErrorNoHalt("[Audio Engine] GetVehicleParams failed: " .. tostring(p) .. "\n")
+		return nil
 	end
-	if not pcall(veh.SetVehicleParams, veh, p) then return false end
-	-- self-check the speed unit: if the engine took our mph as inches/s, set it again scaled
-	local ok, chk = pcall(veh.GetVehicleParams, veh)
-	if ok and istable(chk) and chk.engine and chk.engine.maxSpeed and p.engine and p.engine.maxSpeed then
-		local want = p.engine.maxSpeed * HU_PER_MPH
-		if math.abs(chk.engine.maxSpeed - p.engine.maxSpeed) < math.abs(chk.engine.maxSpeed - want) then
-			for _, k in ipairs(SPEED_KEYS) do
-				if p.engine[k] then p.engine[k] = p.engine[k] * HU_PER_MPH end
-			end
-			pcall(veh.SetVehicleParams, veh, p)
+	if istable(p) and istable(p.engine) then return p end
+end
+
+-- what the speeds are divided by for SetVehicleParams; proved on the first car (E.SetParams)
+local speedDivisor = HU_PER_MPH
+local speedUnitChecked = false
+
+-- sets p on the car with its speeds divided by divisor, leaving p as it was
+local function sendParams(veh, p, divisor)
+	local engineParams = p.engine
+	local maxSpeed, maxRevSpeed, boostMaxSpeed
+	if engineParams then
+		maxSpeed, maxRevSpeed, boostMaxSpeed =
+			engineParams.maxSpeed, engineParams.maxRevSpeed, engineParams.boostMaxSpeed
+		for _, k in ipairs(SPEED_KEYS) do
+			if engineParams[k] then engineParams[k] = engineParams[k] / divisor end
 		end
 	end
+	local ok, err = pcall(veh.SetVehicleParams, veh, p)
+	if engineParams then
+		engineParams.maxSpeed, engineParams.maxRevSpeed = maxSpeed, maxRevSpeed
+		engineParams.boostMaxSpeed = boostMaxSpeed
+	end
+	if not ok then ErrorNoHalt("[Audio Engine] SetVehicleParams failed: " .. tostring(err) .. "\n") end
+
+	return ok
+end
+
+-- p is a table as GetVehicleParams returns it (speeds in its units). Sets it on the car, giving
+-- SetVehicleParams the speeds it wants. Reading back a whole params table on every traction
+-- change is too dear, and the unit is the engine's, not the car's: it's checked the first time.
+function E.SetParams(veh, p)
+	if not sendParams(veh, p, speedDivisor) then return false end
+	if speedUnitChecked or not (p.engine and p.engine.maxSpeed) then return true end
+	local chk = E.ReadParams(veh)
+	if not (chk and chk.engine.maxSpeed) then return true end
+	speedUnitChecked = true
+	-- self-check the speed unit: if the engine took our mph as inches/s, set it again scaled
+	local sent = p.engine.maxSpeed / HU_PER_MPH
+	if math.abs(chk.engine.maxSpeed - sent) < math.abs(chk.engine.maxSpeed - p.engine.maxSpeed) then
+		speedDivisor = 1
+		sendParams(veh, p, speedDivisor)
+	end
+
 	return true
 end
 
@@ -84,14 +124,33 @@ end
 -- test_car.txt's values (keep in step with the file): the PERP value is applied as
 -- current * perp / test, so whatever unit Source keeps a field in, the result is right
 local TEST = {
-	engine = { horsepower = 320, maxRPM = 6000, maxSpeed = 125, maxRevSpeed = 20, shiftUpRPM = 5600, shiftDownRPM = 2600 },
+	engine = {
+		horsepower = 320,
+		maxRPM = 6000,
+		maxSpeed = 125,
+		maxRevSpeed = 20,
+		shiftUpRPM = 5600,
+		shiftDownRPM = 2600,
+	},
 	body = { massOverride = 1600, maxAngularVelocity = 200, massCenterZ = -5 },
 	steering = { degreesSlow = 38, degreesFast = 14, degreesBoost = 10, powerSlideAccel = 150 },
 	axles = {
-		{ suspension_springConstant = 110, suspension_springDamping = 0.9, suspension_springDampingCompression = 5.5,
-		  suspension_stabilizerConstant = 120, suspension_maxBodyForce = 30, wheels_mass = 170 },
-		{ suspension_springConstant = 105, suspension_springDamping = 0.9, suspension_springDampingCompression = 5.5,
-		  suspension_stabilizerConstant = 110, suspension_maxBodyForce = 30, wheels_mass = 170 },
+		{
+			suspension_springConstant = 110,
+			suspension_springDamping = 0.9,
+			suspension_springDampingCompression = 5.5,
+			suspension_stabilizerConstant = 120,
+			suspension_maxBodyForce = 30,
+			wheels_mass = 170,
+		},
+		{
+			suspension_springConstant = 105,
+			suspension_springDamping = 0.9,
+			suspension_springDampingCompression = 5.5,
+			suspension_stabilizerConstant = 110,
+			suspension_maxBodyForce = 30,
+			wheels_mass = 170,
+		},
 	},
 }
 
@@ -146,7 +205,12 @@ local function perpOnto(p, ph)
 		if pa and ta then
 			ratio(a, "suspension_springConstant", pa.springconstant, ta.suspension_springConstant)
 			ratio(a, "suspension_springDamping", pa.springdamping, ta.suspension_springDamping)
-			ratio(a, "suspension_springDampingCompression", pa.springdampingcompression, ta.suspension_springDampingCompression)
+			ratio(
+				a,
+				"suspension_springDampingCompression",
+				pa.springdampingcompression,
+				ta.suspension_springDampingCompression
+			)
 			ratio(a, "suspension_stabilizerConstant", pa.stabilizerconstant, ta.suspension_stabilizerConstant)
 			ratio(a, "suspension_maxBodyForce", pa.maxbodyforce, ta.suspension_maxBodyForce)
 			ratio(a, "wheels_mass", pa.mass, ta.wheels_mass)
@@ -160,14 +224,14 @@ end
 -- 2. anti-spin setup (relative changes, any car, any script)
 ---------------------------------------------------------------------------
 E.ANTI_SPIN = {
-	frontBrake = 0.6,       -- at least this share of the braking on the front axle
+	frontBrake = 0.6, -- at least this share of the braking on the front axle
 	-- at most this much power cut while steering at speed (the scripts cut 0.5-0.9: a fast turn
 	-- lost its speed and revs; spins are caught by sv_stability and the traction control's slide cut)
 	throttleReduceFast = 0.2,
-	powerSlide = 1.0,       -- handbrake slide push x this (1 = the script's own: lower kills drifts)
-	minGravity = 1.0,       -- at least normal grip
-	lowerCentre = 0.25,     -- lower the centre of mass by this many wheel radii
-	steerFast = 1.5,        -- steering angle at speed x this (the scripts' 8-13 degrees turn too little; 1.3 still did)
+	powerSlide = 1.0, -- handbrake slide push x this (1 = the script's own: lower kills drifts)
+	minGravity = 1.0, -- at least normal grip
+	lowerCentre = 0.25, -- lower the centre of mass by this many wheel radii
+	steerFast = 1.5, -- steering angle at speed x this (the scripts' 8-13 degrees turn too little; 1.3 still did)
 }
 
 local function antiSpin(p)
@@ -180,7 +244,9 @@ local function antiSpin(p)
 		end
 	end
 	local s, b = p.steering, p.body
-	if s and s.turnThrottleReduceFast then s.turnThrottleReduceFast = math.min(s.turnThrottleReduceFast, A.throttleReduceFast) end
+	if s and s.turnThrottleReduceFast then
+		s.turnThrottleReduceFast = math.min(s.turnThrottleReduceFast, A.throttleReduceFast)
+	end
 	if s and s.powerSlideAccel then s.powerSlideAccel = s.powerSlideAccel * A.powerSlide end
 	if s and s.degreesFast then s.degreesFast = s.degreesFast * A.steerFast end
 	if b and b.addGravity then b.addGravity = math.max(b.addGravity, A.minGravity) end
@@ -203,8 +269,8 @@ function E.PrepareHandling(veh)
 	veh.audioSpiked = script ~= nil and script:find("/spiked/", 1, true) ~= nil
 	if veh.audioSpiked then return end
 
-	local ok, p = pcall(veh.GetVehicleParams, veh)
-	if not ok or not istable(p) or not istable(p.engine) then return end
+	local p = E.ReadParams(veh)
+	if not p then return end
 	local changed = false
 	-- the script the spawn entry asked for (a job variant's own), else the car's base script
 	local want = istable(veh.VehicleTable) and veh.VehicleTable.AudioPerpScript or car.script
@@ -217,7 +283,7 @@ function E.PrepareHandling(veh)
 	if cvHandling:GetBool() then
 		antiSpin(p)
 		veh.audioAntiSpin = true
-		veh.audioSteerFast = E.ANTI_SPIN.steerFast   -- sv_stability expects the wider lock
+		veh.audioSteerFast = E.ANTI_SPIN.steerFast -- sv_stability expects the wider lock
 		changed = true
 	end
 	if changed then
@@ -246,26 +312,36 @@ end
 ---------------------------------------------------------------------------
 -- 4. launch traction control
 ---------------------------------------------------------------------------
-local cvTraction = CreateConVar("audio_engine_traction", "1", FCVAR_ARCHIVE,
-	"1 = traction control: less power while the driven wheels spin (strong cars launch instead of spinning)")
+local INCH_TO_M = 0.0254
+local MPH_PER_MS = 2.23694
+
+local cvTraction = CreateConVar(
+	"audio_engine_traction",
+	"1",
+	FCVAR_ARCHIVE,
+	"1 = traction control: less power while the driven wheels spin (strong cars launch instead of spinning)"
+)
 
 E.TRACTION = {
-	slip = 0.25,      -- wheel surface speed this much above the car's speed counts as spinning
-	minSpeed = 2,     -- m/s: below this the slip is measured against this speed
+	slip = 0.25, -- wheel surface speed this much above the car's speed counts as spinning
+	minSpeed = 2, -- m/s: below this the slip is measured against this speed
 	-- it works at any speed, but how much it may take away shrinks from fadeFrom to fadeTo. (A
 	-- hard cut-off at 40 m/s held a car whose wheels read as slipping at the floor all the way to
 	-- ~85 mph, then gave it 4x the power at once; switching it off by fadeTo let them slide.)
-	fadeFrom = 6,     -- m/s (~13 mph)
-	fadeTo = 16,      -- m/s (~36 mph)
-	floorFast = 0.6,  -- the least power it leaves from fadeTo up (wheelspin)
+	fadeFrom = 6, -- m/s (~13 mph)
+	fadeTo = 16, -- m/s (~36 mph)
+	floorFast = 0.6, -- the least power it leaves from fadeTo up (wheelspin)
 	-- sliding (sv_stability.lua's veh.audioSlide: tail out or over-rotating, not in a drift):
 	-- the wheel speeds can't show it, but cutting the power is what stops it
-	slideCut = 4,     -- per second at full slide
+	slideCut = 4, -- per second at full slide
 	slideFloor = 0.2, -- it may take the power down to this while sliding, at any speed
-	cut = 2.5,        -- how fast it takes power away while spinning (per second)
-	restore = 1.2,    -- ... and gives it back while gripping
-	floor = 0.25,     -- never below this share of the power (at a standstill)
-	step = 0.04,      -- only re-sends the params when the trim moved this much
+	cut = 2.5, -- how fast it takes power away while spinning (per second)
+	restore = 1.2, -- ... and gives it back while gripping
+	floor = 0.25, -- never below this share of the power (at a standstill)
+	step = 0.04, -- only re-sends the params when the trim moved this much
+	-- ...and no more often than this (s): at 2.5/s the 0.04 step came round on every tick, and
+	-- SetVehicleParams with a whole params table is the dearest thing a driven car does
+	applyInterval = 0.05,
 }
 
 -- steering lock at speed, x the (already widened) degreesFast: 1 up to fromMph, `scale` from toMph.
@@ -302,6 +378,15 @@ local function lockScale(veh, mph)
 	return math.Clamp(fast / F, 0.3, 4)
 end
 
+-- a wheel's surface speed (m/s), or nil if it has no physics object
+local function wheelSurfaceSpeed(veh, index, radius)
+	local w = veh:GetWheel(index)
+	if not IsValid(w) then return nil end
+
+	-- deg/s about the axle; the steering turn is small next to a spinning wheel
+	return math.rad(w:GetAngleVelocity():Length()) * radius * INCH_TO_M
+end
+
 -- the fastest-turning driven wheel's surface speed (m/s), from the wheel physics objects
 local function drivenWheelSpeed(veh)
 	local p = veh.audioBase
@@ -310,16 +395,13 @@ local function drivenWheelSpeed(veh)
 	for axle = 1, #p.axles do
 		local a = p.axles[axle]
 		if (a.torqueFactor or 0) > 0 and a.wheels_radius then
-			for side = 0, 1 do
-				local w = veh:GetWheel((axle - 1) * 2 + side)
-				if IsValid(w) then
-					-- deg/s about the axle; the steering turn is small next to a spinning wheel
-					local surf = math.rad(w:GetAngleVelocity():Length()) * a.wheels_radius * 0.0254
-					if not fastest or surf > fastest then fastest = surf end
-				end
-			end
+			local left = wheelSurfaceSpeed(veh, (axle - 1) * 2, a.wheels_radius)
+			local right = wheelSurfaceSpeed(veh, (axle - 1) * 2 + 1, a.wheels_radius)
+			if left and (not fastest or left > fastest) then fastest = left end
+			if right and (not fastest or right > fastest) then fastest = right end
 		end
 	end
+
 	return fastest
 end
 
@@ -333,81 +415,102 @@ local function profileOf(veh)
 	return prof
 end
 
--- traction control and the steering lock at speed: both change the car's params on the fly
-hook.Add("Tick", "audio_engine_traction", function()
-	local on = cvTraction:GetBool()
-	local T, dt = E.TRACTION, engine.TickInterval()
-	for veh in pairs(E.TrackedVehicles or {}) do
-		if IsValid(veh) and not veh.audioSpiked and veh.audioBase then
-			local phys = veh:GetPhysicsObject()
-			local v = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 or 0
-			-- steering: only on cars that got the wider lock (anti-spin setup)
-			local steer = veh.audioAntiSpin and lockScale(veh, v * 2.23694) or nil
-			if steer and math.abs(steer - (veh.audioSteerSent or 1)) >= 0.03 then
-				veh.audioSteerLock = steer   -- (not audioSteer: sv_stability keeps the A/D input there)
-				veh.audioSteerSent = steer
-				veh.audioSteerFast = E.ANTI_SPIN.steerFast * steer   -- sv_stability follows the lock
-				veh.audioParamsDirty = true
-			end
+-- the steering lock at speed: only on cars that got the wider lock (anti-spin setup)
+local function updateSteerLock(veh, v)
+	if not veh.audioAntiSpin then return end
+	local steer = lockScale(veh, v * MPH_PER_MS)
+	if math.abs(steer - (veh.audioSteerSent or 1)) < 0.03 then return end
+	veh.audioSteerLock = steer -- (not audioSteer: sv_stability keeps the A/D input there)
+	veh.audioSteerSent = steer
+	veh.audioSteerFast = E.ANTI_SPIN.steerFast * steer -- sv_stability follows the lock
+	veh.audioParamsDirty = true
+end
 
-			local tc = veh.audioTC or 1
-			local want = tc
-			local drv = veh:GetDriver()
-			-- the lowest trim allowed at this speed: T.floor at a standstill, T.floorFast from fadeTo
-			local f = math.Clamp((v - T.fadeFrom) / (T.fadeTo - T.fadeFrom), 0, 1)
-			local floor = T.floor + (T.floorFast - T.floor) * f * f * (3 - 2 * f)
-			if on and IsValid(drv) and IsValid(phys) and drv:KeyDown(IN_FORWARD) then
-				-- (only a fresh reading: with the stability assist off nothing updates it)
-				local slide = CurTime() - (veh.audioSlideT or 0) < 0.2 and veh.audioSlide or 0
-				local ws = drivenWheelSpeed(veh)
-				local slip = ws and (ws - v) / math.max(v, T.minSpeed) or 0
-				veh.audioSlip = slip
-				if slide > 0.05 then
-					want = tc - T.slideCut * slide * dt
-					floor = math.min(floor, T.slideFloor)
-				elseif slip > T.slip then want = tc - T.cut * dt
-				else want = tc + T.restore * dt end
-				want = math.Clamp(want, math.min(floor, tc), 1)
-			else
-				want = 1
-			end
-			-- speed limiter (sv_cruise.lua): W held near the limit, the power trimmed to hold it;
-			-- over it, off (it brakes there too)
-			local cp
-			if veh.audioCruise then
-				local C, mph = E.CRUISE, v * 2.23694
-				-- the car's acceleration (mph/s, smoothed)
-				local acc = veh.audioLimLastV and (mph - veh.audioLimLastV) / dt or 0
-				veh.audioLimAcc = (veh.audioLimAcc or 0) + (acc - (veh.audioLimAcc or 0)) * math.min(1, dt * 10)
-				veh.audioLimLastV = mph
-				if veh.audioLimBrake then
-					cp = C.minPow
-				elseif veh.audioLimHold then
-					-- the acceleration it wants shrinks to nothing at the limit; the power follows
-					local want = C.k * (veh.audioCruise - mph)
-					veh.audioCruiseI = math.Clamp((veh.audioCruiseI or 1) + C.ki * (want - veh.audioLimAcc) * dt, C.minPow, 1)
-					cp = veh.audioCruiseI
-				end
-			else
-				veh.audioLimLastV, veh.audioLimAcc = nil, nil
-			end
-			local cstep = veh.audioCruise and E.CRUISE.powStep or T.step
-			if math.abs((cp or 1) - (veh.audioCruisePowSent or 1)) >= cstep or (cp == nil and veh.audioCruisePowSent ~= nil) then
-				veh.audioCruisePowSent = cp
-				veh.audioParamsDirty = true
-			end
-			veh.audioCruisePow = cp
-			-- params are re-sent only on a real change (and always when it's back to full)
-			if math.abs(want - (veh.audioTCSent or 1)) >= T.step or (want == 1 and (veh.audioTCSent or 1) ~= 1) then
-				veh.audioTCSent = want
-				veh.audioParamsDirty = true
-			end
-			veh.audioTC = want
-			if veh.audioParamsDirty then
-				veh.audioParamsDirty = false
-				E.ApplyPerformance(veh, profileOf(veh))
-			end
-		end
+-- the power share traction control wants now
+local function tractionTrim(veh, phys, v, on, dt)
+	local T = E.TRACTION
+	local drv = veh:GetDriver()
+	if not (on and IsValid(drv) and IsValid(phys) and drv:KeyDown(IN_FORWARD)) then return 1 end
+	local tc = veh.audioTC or 1
+	-- the lowest trim allowed at this speed: T.floor at a standstill, T.floorFast from fadeTo
+	local f = math.Clamp((v - T.fadeFrom) / (T.fadeTo - T.fadeFrom), 0, 1)
+	local floor = T.floor + (T.floorFast - T.floor) * f * f * (3 - 2 * f)
+	-- (only a fresh reading: with the stability assist off nothing updates it)
+	local slide = CurTime() - (veh.audioSlideT or 0) < 0.2 and veh.audioSlide or 0
+	local ws = drivenWheelSpeed(veh)
+	local slip = ws and (ws - v) / math.max(v, T.minSpeed) or 0
+	veh.audioSlip = slip
+	local want
+	if slide > 0.05 then
+		want = tc - T.slideCut * slide * dt
+		floor = math.min(floor, T.slideFloor)
+	elseif slip > T.slip then
+		want = tc - T.cut * dt
+	else
+		want = tc + T.restore * dt
+	end
+
+	return math.Clamp(want, math.min(floor, tc), 1)
+end
+
+-- speed limiter (sv_cruise.lua): W held near the limit, the power trimmed to hold it;
+-- over it, off (it brakes there too). nil = no limit on the power
+local function limiterPower(veh, v, dt)
+	if not veh.audioCruise then
+		veh.audioLimLastV, veh.audioLimAcc = nil, nil
+		return nil
+	end
+	local C, mph = E.CRUISE, v * MPH_PER_MS
+	-- the car's acceleration (mph/s, smoothed)
+	local acc = veh.audioLimLastV and (mph - veh.audioLimLastV) / dt or 0
+	veh.audioLimAcc = (veh.audioLimAcc or 0) + (acc - (veh.audioLimAcc or 0)) * math.min(1, dt * 10)
+	veh.audioLimLastV = mph
+	if veh.audioLimBrake then return C.minPow end
+	if not veh.audioLimHold then return nil end
+	-- the acceleration it wants shrinks to nothing at the limit; the power follows
+	local want = C.k * (veh.audioCruise - mph)
+	local power = (veh.audioCruiseI or 1) + C.ki * (want - veh.audioLimAcc) * dt
+	veh.audioCruiseI = math.Clamp(power, C.minPow, 1)
+
+	return veh.audioCruiseI
+end
+
+-- params are re-sent only on a real change (and always when it's back to full)
+local function noteTrims(veh, tc, cruisePow)
+	local T = E.TRACTION
+	local step = veh.audioCruise and E.CRUISE.powStep or T.step
+	local sentPow = veh.audioCruisePowSent
+	if math.abs((cruisePow or 1) - (sentPow or 1)) >= step or (cruisePow == nil and sentPow ~= nil) then
+		veh.audioCruisePowSent = cruisePow
+		veh.audioParamsDirty = true
+	end
+	veh.audioCruisePow = cruisePow
+	local sentTc = veh.audioTCSent or 1
+	if math.abs(tc - sentTc) >= T.step or (tc == 1 and sentTc ~= 1) then
+		veh.audioTCSent = tc
+		veh.audioParamsDirty = true
+	end
+	veh.audioTC = tc
+end
+
+local function updateCarPower(veh, on, dt, now)
+	local phys = veh:GetPhysicsObject()
+	local v = IsValid(phys) and phys:GetVelocity():Length() * INCH_TO_M or 0
+	updateSteerLock(veh, v)
+	local tc = tractionTrim(veh, phys, v, on, dt)
+	noteTrims(veh, tc, limiterPower(veh, v, dt))
+	if not veh.audioParamsDirty or now < (veh.audioParamsNext or 0) then return end
+	veh.audioParamsDirty = false
+	veh.audioParamsNext = now + E.TRACTION.applyInterval
+	E.ApplyPerformance(veh, profileOf(veh))
+end
+
+-- traction control and the steering lock at speed: both change the car's params on the fly
+hook.Add("Tick", "perpheads/audio-engine/traction", function()
+	local on = cvTraction:GetBool()
+	local dt, now = engine.TickInterval(), CurTime()
+	for veh in pairs(E.ActiveVehicles) do
+		if IsValid(veh) and not veh.audioSpiked and veh.audioBase then updateCarPower(veh, on, dt, now) end
 	end
 end)
 
@@ -420,17 +523,33 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 	if not IsValid(veh) then return end
 	local secs = math.Clamp(tonumber(args[1]) or 12, 1, 60)
 	local t0 = CurTime()
-	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end end
+	local function out(s)
+		if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end
+	end
 	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x")
 	local id = "audio_engine_accel_log_" .. veh:EntIndex()
 	timer.Create(id, 0.25, math.floor(secs * 4), function()
-		if not IsValid(veh) then timer.Remove(id) return end
+		if not IsValid(veh) then
+			timer.Remove(id)
+			return
+		end
 		local phys = veh:GetPhysicsObject()
 		local mph = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 * 2.23694 or 0
 		local okp, op = pcall(veh.GetOperatingParams, veh)
 		op = okp and istable(op) and op or {}
-		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f", CurTime() - t0, mph,
-			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioSlide or 0, veh.audioTC or 1, veh.audioSteerLock or 1))
+		out(
+			string.format(
+				"  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f",
+				CurTime() - t0,
+				mph,
+				tostring(op.gear or "?"),
+				op.RPM or 0,
+				veh.audioSlip or 0,
+				veh.audioSlide or 0,
+				veh.audioTC or 1,
+				veh.audioSteerLock or 1
+			)
+		)
 	end)
 end, nil, "Log speed, Source gear/rpm, wheel slip and traction trim of the car you drive (admins)")
 
@@ -439,21 +558,49 @@ concommand.Add("audio_engine_handling_info", function(ply)
 	if IsValid(ply) and not ply:IsAdmin() then return end
 	local veh = IsValid(ply) and ply:GetVehicle()
 	if IsValid(ply) and not IsValid(veh) then veh = ply:GetEyeTrace().Entity end
-	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) else print(s) end end
-	if not IsValid(veh) or not veh:IsVehicle() then out("[Audio Engine] look at or sit in a car") return end
+	local function out(s)
+		if IsValid(ply) then
+			ply:PrintMessage(HUD_PRINTCONSOLE, s)
+		else
+			print(s)
+		end
+	end
+	if not IsValid(veh) or not veh:IsVehicle() then
+		out("[Audio Engine] look at or sit in a car")
+		return
+	end
 	local car = E.GetCarConfig(veh)
 	local ok, p = pcall(veh.GetVehicleParams, veh)
-	out(string.format("[Audio Engine] %s | script %s | PERP physics %s | anti-spin %s | spiked %s | stability %s",
-		car and car.name or veh:GetModel(), tostring(veh.audioScript), tostring(veh.audioPerpPhysics or false),
-		tostring(veh.audioAntiSpin or false), tostring(veh.audioSpiked or false),
-		tostring(car ~= nil and car.stability ~= false and not veh.audioSpiked)))
+	out(
+		string.format(
+			"[Audio Engine] %s | script %s | PERP physics %s | anti-spin %s | spiked %s | stability %s",
+			car and car.name or veh:GetModel(),
+			tostring(veh.audioScript),
+			tostring(veh.audioPerpPhysics or false),
+			tostring(veh.audioAntiSpin or false),
+			tostring(veh.audioSpiked or false),
+			tostring(car ~= nil and car.stability ~= false and not veh.audioSpiked)
+		)
+	)
 	if ok and istable(p) and p.engine then
 		local f, r = p.axles and p.axles[1] or {}, p.axles and p.axles[2] or {}
 		local phys = veh:GetPhysicsObject()
-		out(string.format("  traction control: power x%.2f, last wheel slip %.2f", veh.audioTC or 1, veh.audioSlip or 0))
-		out(string.format("  %.0f hp, top %.0f mph, mass %.0f kg, brakes %.2f/%.2f, torque %.2f/%.2f, grip x%.2f, centre %s",
-			p.engine.horsepower or 0, (p.engine.maxSpeed or 0) / HU_PER_MPH, IsValid(phys) and phys:GetMass() or 0,
-			f.brakeFactor or 0, r.brakeFactor or 0, f.torqueFactor or 0, r.torqueFactor or 0,
-			p.body and p.body.addGravity or 0, tostring(p.body and p.body.massCenterOverride)))
+		out(
+			string.format("  traction control: power x%.2f, last wheel slip %.2f", veh.audioTC or 1, veh.audioSlip or 0)
+		)
+		out(
+			string.format(
+				"  %.0f hp, top %.0f mph, mass %.0f kg, brakes %.2f/%.2f, torque %.2f/%.2f, grip x%.2f, centre %s",
+				p.engine.horsepower or 0,
+				(p.engine.maxSpeed or 0) / HU_PER_MPH,
+				IsValid(phys) and phys:GetMass() or 0,
+				f.brakeFactor or 0,
+				r.brakeFactor or 0,
+				f.torqueFactor or 0,
+				r.torqueFactor or 0,
+				p.body and p.body.addGravity or 0,
+				tostring(p.body and p.body.massCenterOverride)
+			)
+		)
 	end
 end, nil, "Print the handling setup of the car you're in or looking at (admins)")

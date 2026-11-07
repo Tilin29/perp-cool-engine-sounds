@@ -5,7 +5,7 @@
 	the synth a re-bake would ship. Results go to JS through callbacks (__result, __push): wasmoon
 	leaks stack slots on doString return values.
 ]]
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 local Synth = E.Synth
 local DT = E.Drivetrain
 STUDIO = {}

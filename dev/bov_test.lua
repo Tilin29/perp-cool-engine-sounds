@@ -94,7 +94,7 @@ function ply:GetVehicle() return car end
 function ply:KeyDown(k) return self.keys[k] or false end
 bit = require("bit")
 
-AUDIO_ENGINE = {}
+PerpAudioEngine = {}
 dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "audio_engine/sh_presets.lua"); dofile(A .. "audio_engine/sh_drivetrain.lua")
 dofile(A .. "audio_engine/cl_synth.lua"); dofile(A .. "audio_engine/cl_soundbank.lua")
 util = util or {}; util.TraceLine = function() return { Hit = false, Fraction = 1 } end
@@ -103,14 +103,14 @@ cookie = { GetNumber = function(_, d) return d end, Set = function() end }
 dofile(A .. "audio_engine/cl_engine.lua")
 run("InitPostEntity")
 local t0 = os.clock()
-local stockKey = AUDIO_ENGINE.ResolveProfile(AUDIO_ENGINE.Cars["models/plpd/sl65amg_rtu.mdl"]).id
-for i = 1, 100000 do run("Think") if AUDIO_ENGINE.Bank.list[stockKey].ready then break end end
+local stockKey = PerpAudioEngine.ResolveProfile(PerpAudioEngine.Cars["models/plpd/sl65amg_rtu.mdl"]).id
+for i = 1, 100000 do run("Think") if PerpAudioEngine.Bank.list[stockKey].ready then break end end
 print("bank ready", stockKey, "cpu", os.clock() - t0)
 local sdump = 0 for k, v in pairs(generated) do sdump = sdump + #v.buf end print("generated samples", sdump)
 
 
 local function keys(f, b, h) ply.keys[IN_FORWARD] = f ply.keys[IN_BACK] = b ply.keys[IN_JUMP] = h end
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 local function run3(prof, label)
   car.nw.audio_prof = prof
   for i = 1, 100000 do run("Think") local c = E.ClientCars[car] if c and c.bank and c.bank.ready and c.bank.key == E.GetEngineConfig(car).id then break end end

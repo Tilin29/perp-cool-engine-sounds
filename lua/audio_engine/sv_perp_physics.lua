@@ -6,7 +6,7 @@
 	scripts aren't mounted, so it still accelerates, tops out and handles like on the PERP server.
 ]]
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 E.PERP_PHYSICS = {
 	["scripts/vehicles/tdmcars/alfa_stradale.txt"] = {
 		axles = { {

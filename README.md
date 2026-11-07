@@ -117,6 +117,8 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_windnoise` | client | 1 | wind volume, 0–2 (0 = off) |
 | `audio_engine_doppler` | client | 0.25 | Doppler on passing cars, 0 = off, 0.25 = real, 1 = four times real (the maximum) |
 | `audio_engine_passby` | client | 1 | how much passing cars swell in loudness, 0 = off, up to 2 |
+| `audio_engine_maxcars` | client | 8 | other cars in full detail; twice as many more play one loop, the rest are silent |
+| `audio_engine_range` | client | 200 | metres past which other cars are not played (85 dB car; louder ones carry further) |
 | `audio_engine_tunnel` | client | 1 | Source DSP preset for cars in tunnels, 0 = off, 1 = the map's own, 6 = medium tunnel, 7 = large tunnel |
 | `audio_engine_hud` | client | 1 | show the HUD |
 | `audio_engine_units` | client | mph | `mph` or `kmh` |
@@ -132,6 +134,7 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_autostart` | server | 0 | 1 = start the engine when a driver gets in; 0 = the driver starts it |
 | `audio_engine_emotionstart` | server | 1 | rev flare on start-up (high-powered cars only: `CAR_EMOTION`) |
 | `audio_engine_keeprunning` | server | 1 | keep idling after the driver gets out (0 = getting out switches the engine off; not saved, set it in server.cfg) |
+| `audio_engine_idletimeout` | server | 180 | seconds an empty car keeps idling before its engine stops, 0 = never |
 | `audio_engine_cruise` | server | 1 | speed limiter on registered cars (middle mouse switches it, the mouse wheel sets the limit) |
 | `audio_engine_stability` | server | 1 | drift-friendly stability assist (all cars except spiked tyres) |
 | `audio_engine_handling` | server | 1 | anti-spin setup: front brake bias, less power while steering at speed, lower centre of mass (cars spawned after) |
@@ -149,7 +152,7 @@ Commands:
 - `audio_engine_bonedump` (superadmins) writes the bone manipulations of the car you're in or looking at to `data/audio_engine_bones.txt`.
 
 ## Files to edit
-- `lua/audio_engine/sh_carlist.lua`: which preset each of the server's 165 cars uses, with a few per-car changes (redline, tone). Register a car by name once its model is known: `AUDIO_ENGINE.RegisterCarNamed("models/....mdl", "Ferrari 458 Spider")`.
+- `lua/audio_engine/sh_carlist.lua`: which preset each of the server's 165 cars uses, with a few per-car changes (redline, tone). Register a car by name once its model is known: `PerpAudioEngine.RegisterCarNamed("models/....mdl", "Ferrari 458 Spider")`.
 - `lua/audio_engine/sh_presets.lua`: the engine presets and gearbox presets. Add your own here and they show up in the menu.
 - `lua/audio_engine/sh_config.lua`: per car. Sets:
   - the stock `preset`
@@ -159,4 +162,4 @@ Commands:
   - `stability`: the assist (`false` turns it off)
 - `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling (power, grip, suspension, top speed).
 
-To give another jeep-rigged car this engine, call `AUDIO_ENGINE.RegisterCar("models/....mdl", { ... })` in `sh_config.lua`.
+To give another jeep-rigged car this engine, call `PerpAudioEngine.RegisterCar("models/....mdl", { ... })` in `sh_config.lua`.

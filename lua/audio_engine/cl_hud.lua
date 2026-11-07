@@ -4,7 +4,7 @@
 	Same look as the Rev Bench instrument cluster.
 ]]
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 
 local cvHud = CreateClientConVar("audio_engine_hud", "1", true, false, "Show the speed/rpm HUD")
 local cvUnits = CreateClientConVar("audio_engine_units", "mph", true, false, "HUD speed units: mph or kmh")
@@ -40,7 +40,10 @@ local function makeFonts(s)
 	if fontScale == s then return end
 	fontScale = s
 	local function f(name, size, weight)
-		surface.CreateFont(name, { font = "Roboto", size = math.max(8, floor(size * s)), weight = weight, antialias = true, extended = true })
+		surface.CreateFont(
+			name,
+			{ font = "Roboto", size = math.max(8, floor(size * s)), weight = weight, antialias = true, extended = true }
+		)
 	end
 	f("AudioHud_Gear", 96, 800)
 	f("AudioHud_Big", 40, 700)
@@ -53,53 +56,56 @@ end
 ---------------------------------------------------------------------------
 -- drawing helpers
 ---------------------------------------------------------------------------
--- draw.RoundedBox / text change the bound texture, so every polygon resets it first;
--- otherwise the needle and dial draw with a corner texture and vanish
-local function poly(pts, col)
-	draw.NoTexture()
-	surface.SetDrawColor(col)
-	surface.DrawPoly(pts)
-	-- draw the reversed winding too, so either orientation shows
-	local r = {}
-	for i = #pts, 1, -1 do r[#r + 1] = pts[i] end
-	surface.DrawPoly(r)
+-- a list of { pts, col } the dial is drawn from: built once per car and size, not per frame
+local function addPoly(list, pts, col)
+	list[#list + 1] = { pts = pts, col = col }
 end
 
-local function thickLine(x1, y1, x2, y2, w, col)
+-- draw.RoundedBox / text change the bound texture, so polygons reset it first; otherwise the
+-- needle and dial draw with a corner texture and vanish
+local function drawPolys(list)
+	draw.NoTexture()
+	for _, item in ipairs(list) do
+		surface.SetDrawColor(item.col)
+		surface.DrawPoly(item.pts)
+	end
+end
+
+-- both windings, so either orientation shows
+local function addThickLine(list, x1, y1, x2, y2, w, col)
 	local dx, dy = x2 - x1, y2 - y1
 	local len = math.sqrt(dx * dx + dy * dy)
 	if len < 0.001 then return end
 	local nx, ny = -dy / len * w / 2, dx / len * w / 2
-	poly({ { x = x1 + nx, y = y1 + ny }, { x = x2 + nx, y = y2 + ny }, { x = x2 - nx, y = y2 - ny }, { x = x1 - nx, y = y1 - ny } }, col)
+	local a, b = { x = x1 + nx, y = y1 + ny }, { x = x2 + nx, y = y2 + ny }
+	local c, d = { x = x2 - nx, y = y2 - ny }, { x = x1 - nx, y = y1 - ny }
+	addPoly(list, { a, b, c, d }, col)
+	addPoly(list, { d, c, b, a }, col)
 end
 
-local function arc(cx, cy, r0, r1, a0, a1, col)
+local function addArc(list, cx, cy, r0, r1, a0, a1, col)
 	local segs = max(4, floor((a1 - a0) / (pi / 48)))
-	draw.NoTexture()
-	surface.SetDrawColor(col)
 	for i = 0, segs - 1 do
 		local t0 = a0 + (a1 - a0) * i / segs
 		local t1 = a0 + (a1 - a0) * (i + 1) / segs
 		local c0, s0, c1, s1 = cos(t0), sin(t0), cos(t1), sin(t1)
-		surface.DrawPoly({
+		addPoly(list, {
 			{ x = cx + c0 * r1, y = cy + s0 * r1 },
 			{ x = cx + c1 * r1, y = cy + s1 * r1 },
 			{ x = cx + c1 * r0, y = cy + s1 * r0 },
 			{ x = cx + c0 * r0, y = cy + s0 * r0 },
-		})
+		}, col)
 	end
 end
 
-local function circle(cx, cy, r, col)
+local function addCircle(list, cx, cy, r, col)
 	local pts = {}
 	local n = 40
 	for i = 0, n - 1 do
 		local a = i / n * pi * 2
 		pts[#pts + 1] = { x = cx + cos(a) * r, y = cy + sin(a) * r }
 	end
-	draw.NoTexture()
-	surface.SetDrawColor(col)
-	surface.DrawPoly(pts)
+	addPoly(list, pts, col)
 end
 
 local function box(x, y, w, h, s, col, border)
@@ -116,48 +122,90 @@ end
 ---------------------------------------------------------------------------
 -- tachometer
 ---------------------------------------------------------------------------
-local function drawTach(cx, cy, R, s, rpm, cfg)
-	local redline = cfg.redline
+local DIAL_START, DIAL_SWEEP = pi * 0.75, pi * 1.5
+local DIAL_PAGE_RADIUS = 194 -- the page's dial is this many px in radius
+
+local function dialAngle(r, maxR)
+	return DIAL_START + DIAL_SWEEP * math.Clamp(r, 0, maxR) / maxR
+end
+
+-- everything on the dial that doesn't move
+local function buildDial(cx, cy, R, redline)
 	local stepMajor = (redline + 500 > 12000) and 2000 or 1000
 	local maxR = math.ceil((redline + 500) / stepMajor) * stepMajor
-	local a0, sw = pi * 0.75, pi * 1.5
-	local function ang(r) return a0 + sw * math.Clamp(r, 0, maxR) / maxR end
-	local k = R / 194 -- the page's dial is 194 px in radius
+	local k = R / DIAL_PAGE_RADIUS
+	local dial = { cx = cx, cy = cy, R = R, redline = redline, maxR = maxR, polys = {}, hub = {}, numerals = {} }
+	local polys = dial.polys
 
-	circle(cx, cy, R + 2 * k, C.line)
-	circle(cx, cy, R, C.face)
+	addCircle(polys, cx, cy, R + 2 * k, C.line)
+	addCircle(polys, cx, cy, R, C.face)
 
 	-- red zone
-	arc(cx, cy, R - 19 * k, R - 9 * k, ang(redline), ang(maxR), C.red)
+	addArc(polys, cx, cy, R - 19 * k, R - 9 * k, dialAngle(redline, maxR), dialAngle(maxR, maxR), C.red)
 
 	-- ticks and numerals
 	local minor = stepMajor / 4
 	for r = 0, maxR, minor do
-		local a = ang(r)
+		local a = dialAngle(r, maxR)
 		local major = r % stepMajor == 0
 		local half = r % (stepMajor / 2) == 0
 		local len = (major and 18 or half and 11 or 6) * k
 		local c, sn = cos(a), sin(a)
 		local col = r >= redline and C.red or (major and C.fg or C.muted)
-		thickLine(cx + c * (R - 8 * k), cy + sn * (R - 8 * k), cx + c * (R - 8 * k - len), cy + sn * (R - 8 * k - len), (major and 3 or 1.5) * k, col)
+		local outer, inner = R - 8 * k, R - 8 * k - len
+		addThickLine(
+			polys,
+			cx + c * outer,
+			cy + sn * outer,
+			cx + c * inner,
+			cy + sn * inner,
+			(major and 3 or 1.5) * k,
+			col
+		)
 		if major then
-			draw.SimpleText(tostring(r / 1000), "AudioHud_Dial", cx + c * (R - 44 * k), cy + sn * (R - 44 * k),
-				r >= redline and C.red or C.fg, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			dial.numerals[#dial.numerals + 1] = {
+				text = tostring(r / 1000),
+				x = cx + c * (R - 44 * k),
+				y = cy + sn * (R - 44 * k),
+				col = r >= redline and C.red or C.fg,
+			}
 		end
 	end
 
+	addCircle(dial.hub, cx, cy, 11 * k, C.line)
+	addCircle(dial.hub, cx, cy, 4 * k, C.amber)
+
+	return dial
+end
+
+local dial
+local needle = {}
+
+local function drawTach(cx, cy, R, rpm, cfg)
+	if not dial or dial.cx ~= cx or dial.cy ~= cy or dial.R ~= R or dial.redline ~= cfg.redline then
+		dial = buildDial(cx, cy, R, cfg.redline)
+	end
+	local k = R / DIAL_PAGE_RADIUS
+
+	drawPolys(dial.polys)
+	for _, n in ipairs(dial.numerals) do
+		draw.SimpleText(n.text, "AudioHud_Dial", n.x, n.y, n.col, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	end
 	draw.SimpleText("x1000 r/min", "AudioHud_Label", cx, cy + R * 0.34, C.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	draw.SimpleText(fmtThousands(rpm), "AudioHud_Dial", cx, cy + R * 0.52, C.fg, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 
 	-- needle with a soft glow
-	local a = ang(rpm)
+	local a = dialAngle(rpm, dial.maxR)
 	local c, sn = cos(a), sin(a)
 	local bx, by = cx - c * 16 * k, cy - sn * 16 * k
 	local tx, ty = cx + c * (R - 22 * k), cy + sn * (R - 22 * k)
-	thickLine(bx, by, tx, ty, 12 * k, C.amberGlow)
-	thickLine(bx, by, tx, ty, 4.5 * k, C.amber)
-	circle(cx, cy, 11 * k, C.line)
-	circle(cx, cy, 4 * k, C.amber)
+	for i = #needle, 1, -1 do
+		needle[i] = nil
+	end
+	addThickLine(needle, bx, by, tx, ty, 12 * k, C.amberGlow)
+	addThickLine(needle, bx, by, tx, ty, 4.5 * k, C.amber)
+	drawPolys(needle)
+	drawPolys(dial.hub)
 end
 
 ---------------------------------------------------------------------------
@@ -165,7 +213,7 @@ end
 ---------------------------------------------------------------------------
 local disp, blink, brk = 0, 0, 0
 
-hook.Add("HUDPaint", "audio_engine_hud", function()
+hook.Add("HUDPaint", "perpheads/audio-engine/hud", function()
 	if not cvHud:GetBool() then return end
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return end
@@ -201,18 +249,28 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		if not st.on then
 			local cv = GetConVar("audio_engine_startkey")
 			local key = string.upper(cv and cv:GetString() or "I")
-			msg = (key == "" or key == "NONE") and "Engine off · audio_engine_toggle starts it" or ("Engine off · press " .. key .. " to start")
+			msg = (key == "" or key == "NONE") and "Engine off · audio_engine_toggle starts it"
+				or ("Engine off · press " .. key .. " to start")
 		else
 			msg = "Starting…"
 		end
-		draw.SimpleText(msg, "AudioHud_Num", x + W / 2, y - 10 * s, st.on and C.amber or C.fg, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
+		draw.SimpleText(
+			msg,
+			"AudioHud_Num",
+			x + W / 2,
+			y - 10 * s,
+			st.on and C.amber or C.fg,
+			TEXT_ALIGN_CENTER,
+			TEXT_ALIGN_BOTTOM
+		)
 	end
 
 	-- speed limiter (sv_cruise.lua): the limit, in the HUD's units
 	local cruise = veh:GetNW2Float("audio_cruise", 0)
 	if cruise > 0 and st.on and st.phase == "run" then
 		local mphU = cvUnits:GetString() == "mph"
-		local txt = mphU and string.format("LIMIT %d mph", math.floor(cruise + 0.5)) or string.format("LIMIT %d km/h", math.floor(cruise * 1.609344 + 0.5))
+		local txt = mphU and string.format("LIMIT %d mph", math.floor(cruise + 0.5))
+			or string.format("LIMIT %d km/h", math.floor(cruise * 1.609344 + 0.5))
 		draw.SimpleText(txt, "AudioHud_Num", x + W - 10 * s, y - 10 * s, C.green, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
 	end
 
@@ -229,7 +287,7 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 
 	-- tach
 	local cy = y + pad + ledH + 12 * s + R
-	drawTach(cx, cy, R, s, disp, cfg)
+	drawTach(cx, cy, R, disp, cfg)
 
 	-- readouts
 	local rx = x + pad + 2 * R + 22 * s
@@ -242,11 +300,24 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	box(rx, ry, gearW, topH, s)
 	draw.SimpleText("GEAR", "AudioHud_Label", rx + 10 * s, ry + 8 * s, C.muted)
 	local gear = "N"
-	if not st.on then gear = "-"
-	elseif st.phase ~= "run" then gear = "N"
-	elseif st.gear == -1 then gear = "R"
-	elseif st.gear > 0 then gear = tostring(st.gear) end
-	draw.SimpleText(gear, "AudioHud_Gear", rx + gearW / 2, ry + topH / 2 + 8 * s, C.amber, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	if not st.on then
+		gear = "-"
+	elseif st.phase ~= "run" then
+		gear = "N"
+	elseif st.gear == -1 then
+		gear = "R"
+	elseif st.gear > 0 then
+		gear = tostring(st.gear)
+	end
+	draw.SimpleText(
+		gear,
+		"AudioHud_Gear",
+		rx + gearW / 2,
+		ry + topH / 2 + 8 * s,
+		C.amber,
+		TEXT_ALIGN_CENTER,
+		TEXT_ALIGN_CENTER
+	)
 
 	-- speed
 	local bx = rx + gearW + gap
@@ -260,7 +331,15 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	local sTxt = tostring(floor(speed + 0.5))
 	local tw = surface.GetTextSize(sTxt)
 	draw.SimpleText(sTxt, "AudioHud_Big", bx + 10 * s, ry + bh - 6 * s, C.fg, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
-	draw.SimpleText(mph and "mph" or "km/h", "AudioHud_Unit", bx + 14 * s + tw, ry + bh - 12 * s, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
+	draw.SimpleText(
+		mph and "mph" or "km/h",
+		"AudioHud_Unit",
+		bx + 14 * s + tw,
+		ry + bh - 12 * s,
+		C.muted,
+		TEXT_ALIGN_LEFT,
+		TEXT_ALIGN_BOTTOM
+	)
 
 	-- rpm
 	local by2 = ry + bh + gap
@@ -269,11 +348,29 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	surface.SetFont("AudioHud_Num")
 	local rTxt = fmtThousands(disp)
 	local rw = surface.GetTextSize(rTxt)
-	draw.SimpleText(rTxt, "AudioHud_Num", bx + 10 * s, by2 + bh - 6 * s, frac >= 1 and C.red or C.fg, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
-	draw.SimpleText("rpm", "AudioHud_Unit", bx + 14 * s + rw, by2 + bh - 10 * s, C.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
+	draw.SimpleText(
+		rTxt,
+		"AudioHud_Num",
+		bx + 10 * s,
+		by2 + bh - 6 * s,
+		frac >= 1 and C.red or C.fg,
+		TEXT_ALIGN_LEFT,
+		TEXT_ALIGN_BOTTOM
+	)
+	draw.SimpleText(
+		"rpm",
+		"AudioHud_Unit",
+		bx + 14 * s + rw,
+		by2 + bh - 10 * s,
+		C.muted,
+		TEXT_ALIGN_LEFT,
+		TEXT_ALIGN_BOTTOM
+	)
 
 	-- throttle / brake
-	local braking = (ply:KeyDown(IN_BACK) and car.v > 0.6) or (ply:KeyDown(IN_FORWARD) and car.v < -0.6) or ply:KeyDown(IN_JUMP)
+	local braking = (ply:KeyDown(IN_BACK) and car.v > 0.6)
+		or (ply:KeyDown(IN_FORWARD) and car.v < -0.6)
+		or ply:KeyDown(IN_JUMP)
 	brk = brk + math.Clamp((braking and 1 or 0) - brk, -dt * 8, dt * 4)
 	local ty = ry + topH + gap
 	local th = y + H - pad - ty
@@ -290,4 +387,6 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	if brkPct > 0 then draw.RoundedBox(floor(4 * s), rx + 10 * s, ty + 60 * s, barW * brk, barH, C.red) end
 end)
 
-hook.Add("OnScreenSizeChanged", "audio_engine_hud", function() fontScale = nil end)
+hook.Add("OnScreenSizeChanged", "perpheads/audio-engine/hud-fonts", function()
+	fontScale = nil
+end)

@@ -1,7 +1,7 @@
-AUDIO_ENGINE = {}
+PerpAudioEngine = {}
 local A = "/home/claude/addon/sl65amg_rtu/lua/audio_engine/"
 dofile(A.."sh_config.lua"); dofile(A.."sh_presets.lua")
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 local car = E.Cars["models/plpd/sl65amg_rtu.mdl"]
 for _, p in ipairs(E.ENGINE_PRESETS) do
   local prof = E.ProfileFromPreset(p.id)

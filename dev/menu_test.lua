@@ -31,7 +31,7 @@ properties = { Add = function() end }
 function GetConVar() return { GetInt = function() return 1 end } end
 function IsValid(x) return x ~= nil end
 function math.Clamp(x,a,b) return math.min(b, math.max(a, x)) end
-AUDIO_ENGINE = {}
+PerpAudioEngine = {}
 dofile(A.."sh_config.lua"); dofile(A.."sh_presets.lua")
 local veh = { nw = {} }
 function veh:GetModel() return "models/plpd/sl65amg_rtu.mdl" end
@@ -44,7 +44,7 @@ function ply:IsAdmin() return true end
 function ply:IsSuperAdmin() return true end
 function LocalPlayer() return ply end
 dofile(A.."cl_menu.lua")
-AUDIO_ENGINE.OpenMenu()
+PerpAudioEngine.OpenMenu()
 print("panels created on open:", #created)
 -- run deferred rebuilds and poke the callbacks the menu wired up
 local snap = {} for i, p in ipairs(created) do snap[i] = p end
@@ -66,4 +66,4 @@ end
 for i = 1, 5 do local t = timers; timers = {}; for _, f in ipairs(t) do local ok, e = pcall(f) if not ok then print("timer error", e) end end end
 for k, v in pairs(callbacks) do print("callback", k, v) end
 print("sent to server:", #sent)
-for _, s in ipairs(sent) do print("  ", s, s ~= "" and (AUDIO_ENGINE.DecodeProfile(s) and "decodes ok" or "DECODE FAIL") or "(stock)") end
+for _, s in ipairs(sent) do print("  ", s, s ~= "" and (PerpAudioEngine.DecodeProfile(s) and "decodes ok" or "DECODE FAIL") or "(stock)") end

@@ -94,7 +94,7 @@ function ply:GetVehicle() return car end
 function ply:KeyDown(k) return self.keys[k] or false end
 bit = require("bit")
 
-AUDIO_ENGINE = {}
+PerpAudioEngine = {}
 dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "audio_engine/sh_presets.lua"); dofile(A .. "audio_engine/sh_drivetrain.lua")
 dofile(A .. "audio_engine/cl_synth.lua"); dofile(A .. "audio_engine/cl_soundbank.lua")
 util = util or {}; util.TraceLine = function() return { Hit = false, Fraction = 1 } end
@@ -102,7 +102,7 @@ input = { IsKeyDown = function() return false end }
 cookie = { GetNumber = function(_, d) return d end, Set = function() end }
 dofile(A .. "audio_engine/cl_engine.lua")
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 local SRr = tonumber(os.getenv("SR") or "22050")
 cv["audio_engine_samplerate"].v = tostring(SRr)
 local function rms(buf, a, b) local s = 0 for i = a, b do s = s + buf[i] * buf[i] end return math.sqrt(s / (b - a + 1)) end

@@ -94,7 +94,7 @@ function ply:GetVehicle() return car end
 function ply:KeyDown(k) return self.keys[k] or false end
 bit = require("bit")
 
-AUDIO_ENGINE = {}
+PerpAudioEngine = {}
 dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "audio_engine/sh_presets.lua"); dofile(A .. "audio_engine/sh_drivetrain.lua")
 dofile(A .. "audio_engine/cl_synth.lua"); dofile(A .. "audio_engine/cl_soundbank.lua")
 util = util or {}; util.TraceLine = function() return { Hit = false, Fraction = 1 } end
@@ -103,8 +103,8 @@ cookie = { GetNumber = function(_, d) return d end, Set = function() end }
 dofile(A .. "audio_engine/cl_engine.lua")
 run("InitPostEntity")
 local t0 = os.clock()
-local stockKey = AUDIO_ENGINE.ResolveProfile(AUDIO_ENGINE.Cars["models/plpd/sl65amg_rtu.mdl"]).id
-for i = 1, 100000 do run("Think") if AUDIO_ENGINE.Bank.list[stockKey].ready then break end end
+local stockKey = PerpAudioEngine.ResolveProfile(PerpAudioEngine.Cars["models/plpd/sl65amg_rtu.mdl"]).id
+for i = 1, 100000 do run("Think") if PerpAudioEngine.Bank.list[stockKey].ready then break end end
 print("bank ready", stockKey, "cpu", os.clock() - t0)
 local sdump = 0 for k, v in pairs(generated) do sdump = sdump + #v.buf end print("generated samples", sdump)
 
@@ -120,7 +120,7 @@ local script = {
   { 5.3, function() keys(true, false, true) end },              -- ...rev to limiter
   { 7.3, function() keys(false, false, false) end },
   { 8.5, function() keys(true, false, false) end },             -- launch, full throttle
-  { 40, function() car.nw.audio_prof = (function() local p = AUDIO_ENGINE.ProfileFromPreset("v8x") p.pops = 1 return AUDIO_ENGINE.EncodeProfile(p) end)() end },
+  { 40, function() car.nw.audio_prof = (function() local p = PerpAudioEngine.ProfileFromPreset("v8x") p.pops = 1 return PerpAudioEngine.EncodeProfile(p) end)() end },
   { 52, function() keys(false, false, false) end },             -- lift (overrun)
   { 55, function() keys(false, true, false) end },              -- brake to stop
   { 62, function() keys(false, false, false) end },
@@ -139,7 +139,7 @@ while true do
   car.pos.y = car.pos.y + v / 0.0254 * dt
   now = now + dt
   run("Think")
-  local c = AUDIO_ENGINE.ClientCars[car]
+  local c = PerpAudioEngine.ClientCars[car]
   local st = c.st
   log:write(string.format("%.3f,%.1f,%.0f,%d,%.2f,%.2f,%s\n", now, c.v * 3.6, st.rpm, st.gear, st.thr, st.soundThr, st.phase))
   local n = SR / FPS

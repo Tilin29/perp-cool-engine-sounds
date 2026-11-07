@@ -36,7 +36,7 @@ function ply:GetVehicle() return self.inside and veh or nil end
 function ply:GetInfo(k) return self.info[k] end
 function ply:KeyDown() return false end
 ents = { GetAll = function() return { veh } end }
-AUDIO_ENGINE = {}
+PerpAudioEngine = {}
 dofile(A .. "sh_config.lua"); dofile(A .. "sh_presets.lua"); dofile(A .. "sh_drivetrain.lua"); dofile(A .. "sv_engine.lua")
 local function step(sec) for i = 1, math.floor(sec * 66) do now = now + 1 / 66 run("Think") end for _, f in ipairs(timers) do f() end timers = {} end
 local function show(l) print(string.format("%-34s on=%-5s drivable=%-5s EnableEngine=%s", l, tostring(veh.nw.audio_on), tostring(veh.audioDrivable), tostring(veh.enabled))) end

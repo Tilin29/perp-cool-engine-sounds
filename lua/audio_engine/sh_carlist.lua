@@ -8,206 +8,211 @@
 	Cars only get the procedural engine once they are registered with their model. All of them
 	are, from E.CAR_MODELS at the bottom of this file. To add another car, register it by name:
 
-	    AUDIO_ENGINE.RegisterCarNamed("models/tdmcars/458spider.mdl", "Ferrari 458 Spider")
+	    PerpAudioEngine.RegisterCarNamed("models/tdmcars/458spider.mdl", "Ferrari 458 Spider")
 
 	and optionally pass anything sh_config.lua takes (wheelRadius, soundLevel, stability...):
 
-	    AUDIO_ENGINE.RegisterCarNamed("models/tdmcars/c10.mdl", "Chevrolet C10", { wheelRadius = 0.37 })
+	    PerpAudioEngine.RegisterCarNamed("models/tdmcars/c10.mdl", "Chevrolet C10", { wheelRadius = 0.37 })
 
 	Each different preset + "stock" combination is its own set of sounds, so cars that share
 	one share their sounds. Diesels (Transit, Defender, Range Rover 08, Hummer H1) use the
 	closest petrol engine, slowed and softened.
 ]]
 
-AUDIO_ENGINE = AUDIO_ENGINE or {}
-local E = AUDIO_ENGINE
+PerpAudioEngine = PerpAudioEngine or {}
+local E = PerpAudioEngine
 
 -- character: the car's own exhaust voice over its engine type's (cl_synth.lua CHARACTER: f1, f2,
 -- f3, w, o1, o05; any left out keep the type's). A new sound: re-bake. dev/tone_studio.html edits it
-local function P(preset, stock, character) return { preset = preset, stock = stock, character = character } end
+local function spec(preset, stock, character)
+	return { preset = preset, stock = stock, character = character }
+end
 
 E.CAR_ENGINES = {
-	["Alfa Romeo 33 Stradale (1967)"] = P("v8flat", { redline = 8800 }),
-	["Alfa Romeo Giulietta"] = P("i4t"),
-	["Aston Martin DB5"] = P("i6", { redline = 5500 }),
-	["Aston Martin DBS"] = P("v12na", { redline = 7000 }),
-	["Aston Martin Rapide"] = P("v12na", { redline = 7000 }),
-	["Aston Martin V12 Vantage"] = P("v12na", { redline = 7000 }),
-	["Audi R8 Plus"] = P("v10"),
-	["Audi R8 Spyder"] = P("v10"),
-	["Audi R8 V10"] = P("v10"),
-	["Audi RS4 Avant"] = P("v8s"),
-	["Audi S5"] = P("v8s", { redline = 7000 }),
-	["Audi TT 2007"] = P("i4t"),
-	["BMW 1M"] = P("i6t"),
-	["BMW 340i"] = P("i6t"),
-	["BMW 507"] = P("v8r", { redline = 5000 }),
-	["BMW M1"] = P("i6"),
-	["BMW M3 E92"] = P("v8s", { redline = 8400 }),
-	["BMW M5 E34"] = P("i6"),
-	["BMW M5 E60"] = P("v10"),
-	["BMW M6 2013"] = P("v8xt"),
-	["Bowler EXR-S"] = P("v8p"),
-	["Bugatti EB110"] = P("v12t"),
+	["Alfa Romeo 33 Stradale (1967)"] = spec("v8flat", { redline = 8800 }),
+	["Alfa Romeo Giulietta"] = spec("i4t"),
+	["Aston Martin DB5"] = spec("i6", { redline = 5500 }),
+	["Aston Martin DBS"] = spec("v12na", { redline = 7000 }),
+	["Aston Martin Rapide"] = spec("v12na", { redline = 7000 }),
+	["Aston Martin V12 Vantage"] = spec("v12na", { redline = 7000 }),
+	["Audi R8 Plus"] = spec("v10"),
+	["Audi R8 Spyder"] = spec("v10"),
+	["Audi R8 V10"] = spec("v10"),
+	["Audi RS4 Avant"] = spec("v8s"),
+	["Audi S5"] = spec("v8s", { redline = 7000 }),
+	["Audi TT 2007"] = spec("i4t"),
+	["BMW 1M"] = spec("i6t"),
+	["BMW 340i"] = spec("i6t"),
+	["BMW 507"] = spec("v8r", { redline = 5000 }),
+	["BMW M1"] = spec("i6"),
+	["BMW M3 E92"] = spec("v8s", { redline = 8400 }),
+	["BMW M5 E34"] = spec("i6"),
+	["BMW M5 E60"] = spec("v10"),
+	["BMW M6 2013"] = spec("v8xt"),
+	["Bowler EXR-S"] = spec("v8p"),
+	["Bugatti EB110"] = spec("v12t"),
 	-- tuned in dev/tone_studio.html
-	["Bugatti Veyron 16.4"] = P("w16", { popTone = 0.65, tone = 0.4, gurgle = 0.2 },
-		{ f1 = 66, f2 = 486, f3 = 224, w = 0.88, o1 = 0.23, o05 = 0.42 }),
-	["Bugatti Veyron SS"] = P("w16"),
-	["Cadillac Escalade 2012"] = P("v8x"),
-	["Chevrolet Blazer"] = P("v6", { redline = 5000 }),
-	["Chevrolet C10"] = P("v8x", { redline = 5000 }),
-	["Chevrolet Camaro SS 69"] = P("v8m"),
-	["Chevrolet Camaro ZL1"] = P("v8p"),
-	["Chevrolet Chevelle SS"] = P("v8m"),
-	["Chevrolet Corvette GSC"] = P("v8p"),
-	["Chevrolet Corvette Stingray 427"] = P("v8m"),
-	["Chevrolet Impala SS 96"] = P("v8r", { redline = 5000 }),
-	["Chevrolet Spark"] = P("i4q"),
-	["Chrysler 300C"] = P("v8r"),
-	["Chrysler PT Cruiser"] = P("i4w"),
-	["Citroen C1"] = P("i3"),
-	["Citroen C4"] = P("i4w"),
-	["DeLorean DMC-12"] = P("v6odd"),
-	["Dodge Challenger 1970"] = P("v8m"),
-	["Dodge Challenger 2015"] = P("v8p"),
-	["Dodge Charger 2012"] = P("v8p"),
-	["Dodge Charger SRT-8"] = P("v8p"),
-	["Dodge RAM SRT10"] = P("v10l"),
-	["Dodge Viper GTS"] = P("v10l"),
-	["Dundreary Limousine"] = P("v8r"),
-	["Ferrari 250 GTO"] = P("v12na", { redline = 7500 }),
-	["Ferrari 250GT"] = P("v12na", { redline = 7000 }),
-	["Ferrari 458 Spider"] = P("v8flat", { redline = 9000 }),
-	["Ferrari 512 TR"] = P("f12"),
-	["Ferrari Enzo"] = P("v12na"),
-	["Ferrari F12 Berlinetta"] = P("v12na", { redline = 8700 }),
-	["Ferrari F430"] = P("v8flat"),
-	["Ferrari F50"] = P("v12na", { redline = 8500 }),
-	["Ferrari LaFerrari"] = P("v12na", { redline = 9200 }),
-	["Ford Crown Victoria"] = P("v8r", { redline = 5000 }),
-	["Ford Deluxe Coupe 1940"] = P("v8m", { redline = 4000 }),
-	["Ford F100"] = P("v8x", { redline = 5000 }),
-	["Ford F350"] = P("v8x", { redline = 5000 }),
-	["Ford Focus RS"] = P("i5t"),
-	["Ford Focus SVT"] = P("i4s", { redline = 7200 }),
-	["Ford GT 05"] = P("v8p", { redline = 6500 }),
-	["Ford Mustang GT"] = P("v8p", { redline = 7000 }),
-	["Ford Raptor SVT"] = P("v8x"),
-	["Ford Shelby GT500"] = P("v8m"),
-	["Ford Transit"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["GMC Sierra"] = P("v8x"),
-	["GMC Syclone"] = P("v6t", { redline = 5000 }),
-	["GMC Vandura"] = P("v8x", { redline = 5000 }),
-	["Holden HSV GTS"] = P("v8p"),
-	["Holden HSV W427"] = P("v8p", { redline = 6500 }),
-	["Honda CR-X SiR"] = P("i4s", { redline = 8000 }),
-	["Honda Civic Type R"] = P("i4s"),
-	["Honda Civic Type R 1997"] = P("i4s"),
-	["Honda S2000"] = P("i4s", { redline = 9000 }),
-	["Hudson Hornet"] = P("i6", { redline = 4500, tone = 0.4 }),
-	["Hummer H1"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
-	["Jaguar E-Type"] = P("i6", { redline = 6000 }),
-	["Jaguar F-Type"] = P("v8p", { redline = 6500 }),
-	["Jeep Grand Cherokee"] = P("v8x"),
-	["Jeep Wrangler"] = P("i6", { redline = 5000 }),
-	["Kia Ceed"] = P("i4q"),
-	["Kia Forte Koup"] = P("i4q"),
-	["Lamborghini Diablo"] = P("v12na", { redline = 7000 }),
-	["Lamborghini Gallardo"] = P("v10"),
-	["Lamborghini Gallardo LP570-4 Spyder Performante"] = P("v10"),
-	["Lamborghini Miura"] = P("v12na", { redline = 7500 }),
-	["Lamborghini Murcielago"] = P("v12na"),
-	["Lamborghini Murcielago LP670-4 SV"] = P("v12na"),
-	["Lamborghini Reventon Roadster"] = P("v12na"),
-	["Land Rover Defender"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["Land Rover Range Rover 08"] = P("v8xt", { redline = 4500, tone = 0.4 }),
-	["Land Rover Range Rover 2012"] = P("v8xt", { redline = 6000 }),
-	["Lexus IS 300"] = P("i6"),
-	["Lexus IS F"] = P("v8s", { redline = 7000 }),
-	["Maserati Ghibli S"] = P("v6t", { redline = 6500 }),
-	["Maserati Quattroporte Sport GT S"] = P("v8s", { redline = 7200 }),
-	["Mazda Furai"] = P("r3"),
-	["Mazda MX-5 2007"] = P("i4", { redline = 7000 }),
-	["Mazda RX-8"] = P("r2"),
-	["Mazda RX7"] = P("r2t"),
-	["Mazda Speed 3 2009"] = P("i4t"),
-	["McLaren F1"] = P("v12na", { redline = 7500 }),
-	["McLaren P1"] = P("v8h", { turbo = true, bov = true, redline = 8500 }),
-	["Mercedes 300 SEL"] = P("v8r", { redline = 5000 }),
-	["Mercedes 300SL Gullwing Coupe"] = P("i6", { redline = 6000 }),
-	["Mercedes C32 AMG"] = P("v6", { redline = 6200 }),
-	["Mercedes E63 AMG"] = P("v8s", { redline = 7200 }),
-	["Mercedes G-Class"] = P("v8x"),
-	["Mercedes ML63 AMG"] = P("v8s", { redline = 7200 }),
-	["Mercedes McLaren SLR"] = P("v8r", { redline = 6500 }),
-	["Mercedes SL65 AMG"] = P("sl65"),
-	["Mercedes SLS AMG"] = P("v8s", { redline = 7200 }),
-	["Mini Clubman"] = P("i4w"),
-	["Mini Cooper 1965"] = P("i4", { redline = 6000 }),
-	["Mini Cooper S 2011"] = P("i4st"),
-	["Mini Coupe"] = P("i4st"),
-	["Mitsubishi Colt Ralliart"] = P("i4st"),
-	["Mitsubishi Eclipse GSX"] = P("i4t"),
-	["Mitsubishi Eclipse GT"] = P("v6"),
-	["Mitsubishi Lancer Evo VIII"] = P("i4t"),
-	["Mitsubishi Lancer Evo X"] = P("i4t"),
-	["Morgan Aero SS"] = P("v8p", { redline = 6500 }),
-	["Nissan 350z"] = P("v6", { redline = 7000 }),
-	["Nissan 370Z"] = P("v6", { redline = 7500 }),
-	["Nissan GT-R SpecV"] = P("v6t"),
-	["Nissan Leaf"] = P("ev", { redline = 10400 }),
-	["Nissan Silvia"] = P("i4t"),
-	["Nissan Skyline R34"] = P("i6t", { redline = 8000 }),
-	["Noble M600"] = P("v8xt"),
-	["Pagani Zonda C12"] = P("v12na", { redline = 7500 }),
-	["Pontiac Fiero GT"] = P("v6", { redline = 5500 }),
-	["Pontiac Firebird Trans Am"] = P("v8m"),
-	["Porsche 911 GT3"] = P("f6"),
-	["Porsche 918 Spyder"] = P("v8h"),
-	["Porsche 997 GT3"] = P("f6", { redline = 8400 }),
-	["Porsche Carrera GT"] = P("v10"),
-	["Porsche Cayenne Turbo 2012"] = P("v8xt"),
-	["Porsche Cayenne Turbo S"] = P("v8xt"),
-	["Scion FR-S"] = P("f4"),
-	["Scion tC"] = P("i4w"),
-	["Scion xD"] = P("i4q"),
-	["Shelby 1000"] = P("v8m", { redline = 6500 }),
-	["Subaru Impreza WRX STI"] = P("boxer"),
-	["Subaru Legacy GT 2010"] = P("boxer"),
-	["Subaru Legacy RS 1990"] = P("boxer"),
-	["Tesla Model S"] = P("ev"),
-	["Toyota FJ Cruiser"] = P("v6"),
-	["Toyota MR2 GT"] = P("i4t"),
-	["Toyota Prius"] = P("i4h"),
-	["Toyota Supra"] = P("i6t"),
-	["Vauxhall Agila"] = P("i3"),
-	["Vauxhall Astra"] = P("i4w"),
-	["Vauxhall Corsa"] = P("i4q"),
-	["Vauxhall Insignia"] = P("i4t"),
-	["Volkswagen Beetle 1967"] = P("f4air"),
-	["Volkswagen Camper 1965"] = P("f4air"),
-	["Volkswagen Golf GTI 2014"] = P("i4st"),
-	["Volkswagen Golf MKII"] = P("i4w"),
-	["Volkswagen Golf MKIII"] = P("i4w"),
-	["Volkswagen New Beetle"] = P("i4w"),
-	["Volkswagen Scirocco GT"] = P("i4st"),
-	["Volvo 242 Turbo"] = P("i4t", { redline = 6000 }),
-	["Volvo 850R"] = P("i5t"),
-	["Volvo S60"] = P("i5t"),
+	["Bugatti Veyron 16.4"] = spec(
+		"w16",
+		{ popTone = 0.65, tone = 0.4, gurgle = 0.2 },
+		{ f1 = 66, f2 = 486, f3 = 224, w = 0.88, o1 = 0.23, o05 = 0.42 }
+	),
+	["Bugatti Veyron SS"] = spec("w16"),
+	["Cadillac Escalade 2012"] = spec("v8x"),
+	["Chevrolet Blazer"] = spec("v6", { redline = 5000 }),
+	["Chevrolet C10"] = spec("v8x", { redline = 5000 }),
+	["Chevrolet Camaro SS 69"] = spec("v8m"),
+	["Chevrolet Camaro ZL1"] = spec("v8p"),
+	["Chevrolet Chevelle SS"] = spec("v8m"),
+	["Chevrolet Corvette GSC"] = spec("v8p"),
+	["Chevrolet Corvette Stingray 427"] = spec("v8m"),
+	["Chevrolet Impala SS 96"] = spec("v8r", { redline = 5000 }),
+	["Chevrolet Spark"] = spec("i4q"),
+	["Chrysler 300C"] = spec("v8r"),
+	["Chrysler PT Cruiser"] = spec("i4w"),
+	["Citroen C1"] = spec("i3"),
+	["Citroen C4"] = spec("i4w"),
+	["DeLorean DMC-12"] = spec("v6odd"),
+	["Dodge Challenger 1970"] = spec("v8m"),
+	["Dodge Challenger 2015"] = spec("v8p"),
+	["Dodge Charger 2012"] = spec("v8p"),
+	["Dodge Charger SRT-8"] = spec("v8p"),
+	["Dodge RAM SRT10"] = spec("v10l"),
+	["Dodge Viper GTS"] = spec("v10l"),
+	["Dundreary Limousine"] = spec("v8r"),
+	["Ferrari 250 GTO"] = spec("v12na", { redline = 7500 }),
+	["Ferrari 250GT"] = spec("v12na", { redline = 7000 }),
+	["Ferrari 458 Spider"] = spec("v8flat", { redline = 9000 }),
+	["Ferrari 512 TR"] = spec("f12"),
+	["Ferrari Enzo"] = spec("v12na"),
+	["Ferrari F12 Berlinetta"] = spec("v12na", { redline = 8700 }),
+	["Ferrari F430"] = spec("v8flat"),
+	["Ferrari F50"] = spec("v12na", { redline = 8500 }),
+	["Ferrari LaFerrari"] = spec("v12na", { redline = 9200 }),
+	["Ford Crown Victoria"] = spec("v8r", { redline = 5000 }),
+	["Ford Deluxe Coupe 1940"] = spec("v8m", { redline = 4000 }),
+	["Ford F100"] = spec("v8x", { redline = 5000 }),
+	["Ford F350"] = spec("v8x", { redline = 5000 }),
+	["Ford Focus RS"] = spec("i5t"),
+	["Ford Focus SVT"] = spec("i4s", { redline = 7200 }),
+	["Ford GT 05"] = spec("v8p", { redline = 6500 }),
+	["Ford Mustang GT"] = spec("v8p", { redline = 7000 }),
+	["Ford Raptor SVT"] = spec("v8x"),
+	["Ford Shelby GT500"] = spec("v8m"),
+	["Ford Transit"] = spec("i4t", { redline = 4500, tone = 0.3 }),
+	["GMC Sierra"] = spec("v8x"),
+	["GMC Syclone"] = spec("v6t", { redline = 5000 }),
+	["GMC Vandura"] = spec("v8x", { redline = 5000 }),
+	["Holden HSV GTS"] = spec("v8p"),
+	["Holden HSV W427"] = spec("v8p", { redline = 6500 }),
+	["Honda CR-X SiR"] = spec("i4s", { redline = 8000 }),
+	["Honda Civic Type R"] = spec("i4s"),
+	["Honda Civic Type R 1997"] = spec("i4s"),
+	["Honda S2000"] = spec("i4s", { redline = 9000 }),
+	["Hudson Hornet"] = spec("i6", { redline = 4500, tone = 0.4 }),
+	["Hummer H1"] = spec("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
+	["Jaguar E-Type"] = spec("i6", { redline = 6000 }),
+	["Jaguar F-Type"] = spec("v8p", { redline = 6500 }),
+	["Jeep Grand Cherokee"] = spec("v8x"),
+	["Jeep Wrangler"] = spec("i6", { redline = 5000 }),
+	["Kia Ceed"] = spec("i4q"),
+	["Kia Forte Koup"] = spec("i4q"),
+	["Lamborghini Diablo"] = spec("v12na", { redline = 7000 }),
+	["Lamborghini Gallardo"] = spec("v10"),
+	["Lamborghini Gallardo LP570-4 Spyder Performante"] = spec("v10"),
+	["Lamborghini Miura"] = spec("v12na", { redline = 7500 }),
+	["Lamborghini Murcielago"] = spec("v12na"),
+	["Lamborghini Murcielago LP670-4 SV"] = spec("v12na"),
+	["Lamborghini Reventon Roadster"] = spec("v12na"),
+	["Land Rover Defender"] = spec("i4t", { redline = 4500, tone = 0.3 }),
+	["Land Rover Range Rover 08"] = spec("v8xt", { redline = 4500, tone = 0.4 }),
+	["Land Rover Range Rover 2012"] = spec("v8xt", { redline = 6000 }),
+	["Lexus IS 300"] = spec("i6"),
+	["Lexus IS F"] = spec("v8s", { redline = 7000 }),
+	["Maserati Ghibli S"] = spec("v6t", { redline = 6500 }),
+	["Maserati Quattroporte Sport GT S"] = spec("v8s", { redline = 7200 }),
+	["Mazda Furai"] = spec("r3"),
+	["Mazda MX-5 2007"] = spec("i4", { redline = 7000 }),
+	["Mazda RX-8"] = spec("r2"),
+	["Mazda RX7"] = spec("r2t"),
+	["Mazda Speed 3 2009"] = spec("i4t"),
+	["McLaren F1"] = spec("v12na", { redline = 7500 }),
+	["McLaren P1"] = spec("v8h", { turbo = true, bov = true, redline = 8500 }),
+	["Mercedes 300 SEL"] = spec("v8r", { redline = 5000 }),
+	["Mercedes 300SL Gullwing Coupe"] = spec("i6", { redline = 6000 }),
+	["Mercedes C32 AMG"] = spec("v6", { redline = 6200 }),
+	["Mercedes E63 AMG"] = spec("v8s", { redline = 7200 }),
+	["Mercedes G-Class"] = spec("v8x"),
+	["Mercedes ML63 AMG"] = spec("v8s", { redline = 7200 }),
+	["Mercedes McLaren SLR"] = spec("v8r", { redline = 6500 }),
+	["Mercedes SL65 AMG"] = spec("sl65"),
+	["Mercedes SLS AMG"] = spec("v8s", { redline = 7200 }),
+	["Mini Clubman"] = spec("i4w"),
+	["Mini Cooper 1965"] = spec("i4", { redline = 6000 }),
+	["Mini Cooper S 2011"] = spec("i4st"),
+	["Mini Coupe"] = spec("i4st"),
+	["Mitsubishi Colt Ralliart"] = spec("i4st"),
+	["Mitsubishi Eclipse GSX"] = spec("i4t"),
+	["Mitsubishi Eclipse GT"] = spec("v6"),
+	["Mitsubishi Lancer Evo VIII"] = spec("i4t"),
+	["Mitsubishi Lancer Evo X"] = spec("i4t"),
+	["Morgan Aero SS"] = spec("v8p", { redline = 6500 }),
+	["Nissan 350z"] = spec("v6", { redline = 7000 }),
+	["Nissan 370Z"] = spec("v6", { redline = 7500 }),
+	["Nissan GT-R SpecV"] = spec("v6t"),
+	["Nissan Leaf"] = spec("ev", { redline = 10400 }),
+	["Nissan Silvia"] = spec("i4t"),
+	["Nissan Skyline R34"] = spec("i6t", { redline = 8000 }),
+	["Noble M600"] = spec("v8xt"),
+	["Pagani Zonda C12"] = spec("v12na", { redline = 7500 }),
+	["Pontiac Fiero GT"] = spec("v6", { redline = 5500 }),
+	["Pontiac Firebird Trans Am"] = spec("v8m"),
+	["Porsche 911 GT3"] = spec("f6"),
+	["Porsche 918 Spyder"] = spec("v8h"),
+	["Porsche 997 GT3"] = spec("f6", { redline = 8400 }),
+	["Porsche Carrera GT"] = spec("v10"),
+	["Porsche Cayenne Turbo 2012"] = spec("v8xt"),
+	["Porsche Cayenne Turbo S"] = spec("v8xt"),
+	["Scion FR-S"] = spec("f4"),
+	["Scion tC"] = spec("i4w"),
+	["Scion xD"] = spec("i4q"),
+	["Shelby 1000"] = spec("v8m", { redline = 6500 }),
+	["Subaru Impreza WRX STI"] = spec("boxer"),
+	["Subaru Legacy GT 2010"] = spec("boxer"),
+	["Subaru Legacy RS 1990"] = spec("boxer"),
+	["Tesla Model S"] = spec("ev"),
+	["Toyota FJ Cruiser"] = spec("v6"),
+	["Toyota MR2 GT"] = spec("i4t"),
+	["Toyota Prius"] = spec("i4h"),
+	["Toyota Supra"] = spec("i6t"),
+	["Vauxhall Agila"] = spec("i3"),
+	["Vauxhall Astra"] = spec("i4w"),
+	["Vauxhall Corsa"] = spec("i4q"),
+	["Vauxhall Insignia"] = spec("i4t"),
+	["Volkswagen Beetle 1967"] = spec("f4air"),
+	["Volkswagen Camper 1965"] = spec("f4air"),
+	["Volkswagen Golf GTI 2014"] = spec("i4st"),
+	["Volkswagen Golf MKII"] = spec("i4w"),
+	["Volkswagen Golf MKIII"] = spec("i4w"),
+	["Volkswagen New Beetle"] = spec("i4w"),
+	["Volkswagen Scirocco GT"] = spec("i4st"),
+	["Volvo 242 Turbo"] = spec("i4t", { redline = 6000 }),
+	["Volvo 850R"] = spec("i5t"),
+	["Volvo S60"] = spec("i5t"),
 
 	-- work and emergency vehicles on their own models (not in the engine list). They reuse
 	-- engines already baked (the same sound at a lower redline needs no new bank):
 	-- the diesels as the Hummer H1's, the petrol V8s as the Ford F350's, the vans as the Transit's
-	["Ambulance"] = P("v8x", { redline = 5000 }),   -- GTA IV ambulance (Ford E-Series type)
-	["Courier Truck"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
-	["Fire Truck"] = P("v8xt", { redline = 3000, idle = 650, tone = 0.35 }),
-	["Ford F350 Fire Rescue"] = P("v8x", { redline = 5000 }),
-	["Ford F350 Tow Truck"] = P("v8x", { redline = 5000 }),
-	["Ford F450 Ambulance"] = P("v8x", { redline = 5000 }),
-	["Ford Transit 2016 (Police)"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["Ford Transit 2016 (Prisoner Transport)"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["Lenco BearCat"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),   -- 6.7 diesel V8
-	["SWAT Stockade"] = P("v8xt", { redline = 3200, idle = 650, tone = 0.35 }),   -- GTA IV police stockade
+	["Ambulance"] = spec("v8x", { redline = 5000 }), -- GTA IV ambulance (Ford E-Series type)
+	["Courier Truck"] = spec("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
+	["Fire Truck"] = spec("v8xt", { redline = 3000, idle = 650, tone = 0.35 }),
+	["Ford F350 Fire Rescue"] = spec("v8x", { redline = 5000 }),
+	["Ford F350 Tow Truck"] = spec("v8x", { redline = 5000 }),
+	["Ford F450 Ambulance"] = spec("v8x", { redline = 5000 }),
+	["Ford Transit 2016 (Police)"] = spec("i4t", { redline = 4500, tone = 0.3 }),
+	["Ford Transit 2016 (Prisoner Transport)"] = spec("i4t", { redline = 4500, tone = 0.3 }),
+	["Lenco BearCat"] = spec("v8xt", { redline = 3500, idle = 650, tone = 0.35 }), -- 6.7 diesel V8
+	["SWAT Stockade"] = spec("v8xt", { redline = 3200, idle = 650, tone = 0.35 }), -- GTA IV police stockade
 }
 
 --[[
@@ -218,7 +223,7 @@ E.CAR_ENGINES = {
 	own pop values are only the starting point when an engine is retuned in the menu.
 	Frequency and volume are runtime settings: changing them needs no re-bake.
 ]]
-E.STOCK_POP_VOLUME = 0.7   -- stock pops & bangs volume (the menu's 100% is 1)
+E.STOCK_POP_VOLUME = 0.7 -- stock pops & bangs volume (the menu's 100% is 1)
 E.CAR_POPS = {
 	-- frequent: famous for it
 	["Jaguar F-Type"] = 0.6,
@@ -315,7 +320,7 @@ E.CAR_POPS = {
 	audible stock blow-off or wastegate sound get it. Every other turbo car keeps the turbo
 	whistle without it. Runtime only: no re-bake.
 ]]
-E.STOCK_BOV_VOLUME = 0.6   -- stock blow-off volume (the menu's 100% is 1)
+E.STOCK_BOV_VOLUME = 0.6 -- stock blow-off volume (the menu's 100% is 1)
 E.CAR_BOV = {
 	["Bugatti Veyron 16.4"] = true,
 	["Bugatti Veyron SS"] = true,
@@ -345,33 +350,105 @@ E.CAR_GEARS = {
 E.CAR_EMOTION = {}
 for _, name in ipairs({
 	-- supercars and exotics
-	"Alfa Romeo 33 Stradale (1967)", "Aston Martin DBS", "Aston Martin Rapide", "Aston Martin V12 Vantage",
-	"Audi R8 Plus", "Audi R8 Spyder", "Audi R8 V10", "Bowler EXR-S", "Bugatti EB110",
-	"Bugatti Veyron 16.4", "Bugatti Veyron SS", "Dodge Viper GTS", "Ferrari 250 GTO", "Ferrari 250GT",
-	"Ferrari 458 Spider", "Ferrari 512 TR", "Ferrari Enzo", "Ferrari F12 Berlinetta", "Ferrari F430",
-	"Ferrari F50", "Ferrari LaFerrari", "Ford GT 05", "Lamborghini Diablo", "Lamborghini Gallardo",
-	"Lamborghini Gallardo LP570-4 Spyder Performante", "Lamborghini Miura", "Lamborghini Murcielago",
-	"Lamborghini Murcielago LP670-4 SV", "Lamborghini Reventon Roadster", "Mazda Furai", "McLaren F1",
-	"McLaren P1", "Mercedes McLaren SLR", "Mercedes SLS AMG", "Noble M600", "Pagani Zonda C12",
-	"Porsche 911 GT3", "Porsche 918 Spyder", "Porsche 997 GT3", "Porsche Carrera GT",
+	"Alfa Romeo 33 Stradale (1967)",
+	"Aston Martin DBS",
+	"Aston Martin Rapide",
+	"Aston Martin V12 Vantage",
+	"Audi R8 Plus",
+	"Audi R8 Spyder",
+	"Audi R8 V10",
+	"Bowler EXR-S",
+	"Bugatti EB110",
+	"Bugatti Veyron 16.4",
+	"Bugatti Veyron SS",
+	"Dodge Viper GTS",
+	"Ferrari 250 GTO",
+	"Ferrari 250GT",
+	"Ferrari 458 Spider",
+	"Ferrari 512 TR",
+	"Ferrari Enzo",
+	"Ferrari F12 Berlinetta",
+	"Ferrari F430",
+	"Ferrari F50",
+	"Ferrari LaFerrari",
+	"Ford GT 05",
+	"Lamborghini Diablo",
+	"Lamborghini Gallardo",
+	"Lamborghini Gallardo LP570-4 Spyder Performante",
+	"Lamborghini Miura",
+	"Lamborghini Murcielago",
+	"Lamborghini Murcielago LP670-4 SV",
+	"Lamborghini Reventon Roadster",
+	"Mazda Furai",
+	"McLaren F1",
+	"McLaren P1",
+	"Mercedes McLaren SLR",
+	"Mercedes SLS AMG",
+	"Noble M600",
+	"Pagani Zonda C12",
+	"Porsche 911 GT3",
+	"Porsche 918 Spyder",
+	"Porsche 997 GT3",
+	"Porsche Carrera GT",
 	-- sports and GT cars
-	"Aston Martin DB5", "BMW 1M", "BMW M1", "Chevrolet Corvette GSC", "Chevrolet Corvette Stingray 427",
-	"Honda S2000", "Jaguar E-Type", "Jaguar F-Type", "Mazda RX7", "Mercedes 300SL Gullwing Coupe",
-	"Mercedes SL65 AMG", "Morgan Aero SS", "Nissan 350z", "Nissan 370Z", "Nissan GT-R SpecV",
-	"Nissan Skyline R34", "Toyota Supra",
+	"Aston Martin DB5",
+	"BMW 1M",
+	"BMW M1",
+	"Chevrolet Corvette GSC",
+	"Chevrolet Corvette Stingray 427",
+	"Honda S2000",
+	"Jaguar E-Type",
+	"Jaguar F-Type",
+	"Mazda RX7",
+	"Mercedes 300SL Gullwing Coupe",
+	"Mercedes SL65 AMG",
+	"Morgan Aero SS",
+	"Nissan 350z",
+	"Nissan 370Z",
+	"Nissan GT-R SpecV",
+	"Nissan Skyline R34",
+	"Toyota Supra",
 	-- muscle cars
-	"Chevrolet Camaro SS 69", "Chevrolet Camaro ZL1", "Chevrolet Chevelle SS", "Dodge Challenger 1970",
-	"Dodge Challenger 2015", "Dodge Charger SRT-8", "Dodge RAM SRT10", "Ford Mustang GT",
-	"Ford Shelby GT500", "Holden HSV GTS", "Holden HSV W427", "Pontiac Firebird Trans Am", "Shelby 1000",
+	"Chevrolet Camaro SS 69",
+	"Chevrolet Camaro ZL1",
+	"Chevrolet Chevelle SS",
+	"Dodge Challenger 1970",
+	"Dodge Challenger 2015",
+	"Dodge Charger SRT-8",
+	"Dodge RAM SRT10",
+	"Ford Mustang GT",
+	"Ford Shelby GT500",
+	"Holden HSV GTS",
+	"Holden HSV W427",
+	"Pontiac Firebird Trans Am",
+	"Shelby 1000",
 	-- performance saloons and SUVs
-	"Audi RS4 Avant", "Audi S5", "BMW 340i", "BMW M3 E92", "BMW M5 E34", "BMW M5 E60", "BMW M6 2013",
-	"Lexus IS F", "Maserati Ghibli S", "Maserati Quattroporte Sport GT S", "Mercedes C32 AMG",
-	"Mercedes E63 AMG", "Mercedes ML63 AMG", "Porsche Cayenne Turbo 2012", "Porsche Cayenne Turbo S",
+	"Audi RS4 Avant",
+	"Audi S5",
+	"BMW 340i",
+	"BMW M3 E92",
+	"BMW M5 E34",
+	"BMW M5 E60",
+	"BMW M6 2013",
+	"Lexus IS F",
+	"Maserati Ghibli S",
+	"Maserati Quattroporte Sport GT S",
+	"Mercedes C32 AMG",
+	"Mercedes E63 AMG",
+	"Mercedes ML63 AMG",
+	"Porsche Cayenne Turbo 2012",
+	"Porsche Cayenne Turbo S",
 	"GMC Syclone",
 	-- hot hatches and rally specials
-	"Ford Focus RS", "Honda Civic Type R", "Honda Civic Type R 1997", "Mitsubishi Lancer Evo VIII",
-	"Mitsubishi Lancer Evo X", "Subaru Impreza WRX STI",
-}) do E.CAR_EMOTION[name] = true end
+	"Ford Focus RS",
+	"Honda Civic Type R",
+	"Honda Civic Type R 1997",
+	"Mitsubishi Lancer Evo VIII",
+	"Mitsubishi Lancer Evo X",
+	"Subaru Impreza WRX STI",
+}) do
+	E.CAR_EMOTION[name] = true
+end
 -- and they carry further (Source sound level in dB; other cars 85, economy cars 80)
 E.EMOTION_SOUNDLEVEL = 92
 
@@ -413,27 +490,28 @@ E.ECONOMY = {
 	the range). On these cars the server drives the pose from speed instead (sv_engine.lua): the parts rise once the
 	car reaches E.WING_UP of its top speed and lower only under E.WING_DOWN_MPH (the gap stops them
 	flapping), the needles still sweep with speed inside each range.
-	{ rest from, rest to, up from, up to, pose = name if not vehicle_guage }: pose ranges where every part is fully down / fully up,
+	{ rest from, rest to, up from, up to, pose = name if not vehicle_guage }: pose ranges where every
+	part is fully down / fully up,
 	read from the blend animations of each model's vehicle_guage sequence (the TDM .mdl files).
 ]]
 E.WING_UP = 0.7
 E.WING_DOWN_MPH = 30
 E.WING_RATE = 0.25 -- pose range per second the parts travel
 E.GAUGE_PARTS = {
-	["Audi R8 Plus"] = { 0, 0.30, 0.45, 0.70 },                      -- Spoiler (down again past 0.8)
-	["Audi R8 V10"] = { 0, 0.40, 0.75, 1 },                          -- Spoiler1, Spoiler2
-	["Bugatti Veyron 16.4"] = { 0, 0.35, 0.65, 1 },                  -- Spoiler01-03
-	["Bugatti Veyron SS"] = { 0, 0.30, 0.55, 1 },                    -- Spoiler1, Spoiler2
-	["Ferrari Enzo"] = { 0, 0.40, 0.50, 1 },                         -- spoiler
-	["Ferrari F12 Berlinetta"] = { 0.30, 0.30, 0.20, 0 },            -- spoiler1, spoiler2 (flaps open at the bottom of the range)
-	["Ferrari LaFerrari"] = { 0, 0.35, 0.45, 0.70 },                 -- spoiler, lower_spoiler (down again past 0.75)
-	["Jaguar F-Type"] = { 0, 0.35, 0.45, 1 },                        -- spoiler
-	["Lamborghini Murcielago LP670-4 SV"] = { 0, 0.45, 0.55, 1 },    -- ventl, ventr
-	["McLaren F1"] = { 0, 0.30, 0.35, 1 },                           -- spoiler
-	["Mercedes SLS AMG"] = { 0, 0.30, 0.60, 1 },                     -- spoiler1, spoiler2
-	["Mini Coupe"] = { 0, 0.35, 0.55, 1 },                           -- spoiler1, spoiler2
-	["Porsche 918 Spyder"] = { 0, 0.30, 0.50, 1 },                   -- spoiler
-	["Porsche Carrera GT"] = { 0, 0.30, 0.55, 1 },                   -- spoiler
+	["Audi R8 Plus"] = { 0, 0.30, 0.45, 0.70 }, -- Spoiler (down again past 0.8)
+	["Audi R8 V10"] = { 0, 0.40, 0.75, 1 }, -- Spoiler1, Spoiler2
+	["Bugatti Veyron 16.4"] = { 0, 0.35, 0.65, 1 }, -- Spoiler01-03
+	["Bugatti Veyron SS"] = { 0, 0.30, 0.55, 1 }, -- Spoiler1, Spoiler2
+	["Ferrari Enzo"] = { 0, 0.40, 0.50, 1 }, -- spoiler
+	["Ferrari F12 Berlinetta"] = { 0.30, 0.30, 0.20, 0 }, -- spoiler1, spoiler2 (flaps open at the bottom of the range)
+	["Ferrari LaFerrari"] = { 0, 0.35, 0.45, 0.70 }, -- spoiler, lower_spoiler (down again past 0.75)
+	["Jaguar F-Type"] = { 0, 0.35, 0.45, 1 }, -- spoiler
+	["Lamborghini Murcielago LP670-4 SV"] = { 0, 0.45, 0.55, 1 }, -- ventl, ventr
+	["McLaren F1"] = { 0, 0.30, 0.35, 1 }, -- spoiler
+	["Mercedes SLS AMG"] = { 0, 0.30, 0.60, 1 }, -- spoiler1, spoiler2
+	["Mini Coupe"] = { 0, 0.35, 0.55, 1 }, -- spoiler1, spoiler2
+	["Porsche 918 Spyder"] = { 0, 0.30, 0.50, 1 }, -- spoiler
+	["Porsche Carrera GT"] = { 0, 0.30, 0.55, 1 }, -- spoiler
 }
 
 --[[
@@ -451,19 +529,26 @@ E.GAUGE_PARTS = {
 E.WING_BRAKE_HOLD = 0.5
 E.WING_BRAKE_MPH = 15
 E.WING_MAIN_RATE = 0.8 -- share of the travel per second (~1.3 s)
-E.WING_FLAP_RATE = 2   -- brake flap up per second (~0.5 s); folds at half this
+E.WING_FLAP_RATE = 2 -- brake flap up per second (~0.5 s); folds at half this
 E.BRAKE_WINGS = {
-	["McLaren P1"] = { flapPose = "spoilerbrake", tuck = {   -- placed with the bone editor (audio_engine_bonedump)
-		{ bone = "spoiler_main", pos = { 0, 9, -13 } },
-		{ bone = "spoiler", pos = { -0.34, 1.88, 0.04 }, ang = { -0.16, -24.58, 0 } },
-	} },
+	["McLaren P1"] = {
+		flapPose = "spoilerbrake",
+		tuck = { -- placed with the bone editor (audio_engine_bonedump)
+			{ bone = "spoiler_main", pos = { 0, 9, -13 } },
+			{ bone = "spoiler", pos = { -0.34, 1.88, 0.04 }, ang = { -0.16, -24.58, 0 } },
+		},
+	},
 	["Mercedes McLaren SLR"] = { flapBone = "spoiler", flapAng = { 0, 22.5, 0 } },
 }
 
 -- speed rule shared by all wings: up from WING_UP of the top speed, down under WING_DOWN_MPH
 function E.WingSpeedUp(veh, kmh, top)
 	local f = kmh / math.max(top or 250, 40)
-	if f >= E.WING_UP then veh.audioWingUp = true elseif kmh < E.WING_DOWN_MPH * 1.609344 then veh.audioWingUp = false end
+	if f >= E.WING_UP then
+		veh.audioWingUp = true
+	elseif kmh < E.WING_DOWN_MPH * 1.609344 then
+		veh.audioWingUp = false
+	end
 	return veh.audioWingUp or false, f
 end
 
@@ -472,9 +557,7 @@ end
 -- parts take ~1-1.5 s)
 function E.WingPose(veh, gp, kmh, top)
 	local up, f = E.WingSpeedUp(veh, kmh, top)
-	if up then
-		return gp[3] + (gp[4] - gp[3]) * math.Clamp((f - E.WING_UP) / (1 - E.WING_UP), 0, 1)
-	end
+	if up then return gp[3] + (gp[4] - gp[3]) * math.Clamp((f - E.WING_UP) / (1 - E.WING_UP), 0, 1) end
 	return gp[1] + (gp[2] - gp[1]) * math.Clamp(f / E.WING_UP, 0, 1)
 end
 
@@ -508,7 +591,9 @@ function E.RegisterCarNamed(model, carName, extra)
 	if E.ECONOMY[carName] then
 		local eco = E.ECONOMY_SOUND
 		local stock = {}
-		for k, v in pairs(e.stock or {}) do stock[k] = v end
+		for k, v in pairs(e.stock or {}) do
+			stock[k] = v
+		end
 		if not (preset and preset.economyTuned) then
 			stock.tone = (stock.tone or (preset and preset.tone) or 0.4) * eco.toneScale
 			stock.gurgle = eco.gurgle
@@ -518,7 +603,9 @@ function E.RegisterCarNamed(model, carName, extra)
 	end
 	-- a preset's own silencer (part of the sound: re-bake)
 	if preset and preset.muffle then cfg.muffle = preset.muffle end
-	for k, v in pairs(extra or {}) do cfg[k] = v end
+	for k, v in pairs(extra or {}) do
+		cfg[k] = v
+	end
 	return E.RegisterCar(model, cfg)
 end
 
@@ -533,13 +620,25 @@ end
 	{ model, base vehicle script, wheel radius (m, from the script) }. Built by dev/perp_carmodels.py.
 ]]
 E.CAR_MODELS = {
-	["Alfa Romeo 33 Stradale (1967)"] = { "models/tdmcars/alfa_stradale.mdl", "scripts/vehicles/tdmcars/alfa_stradale.txt", 0.368 },
-	["Alfa Romeo Giulietta"] = { "models/tdmcars/alfa_giulietta.mdl", "scripts/vehicles/tdmcars/alfa_giulietta.txt", 0.376 },
+	["Alfa Romeo 33 Stradale (1967)"] = {
+		"models/tdmcars/alfa_stradale.mdl",
+		"scripts/vehicles/tdmcars/alfa_stradale.txt",
+		0.368,
+	},
+	["Alfa Romeo Giulietta"] = {
+		"models/tdmcars/alfa_giulietta.mdl",
+		"scripts/vehicles/tdmcars/alfa_giulietta.txt",
+		0.376,
+	},
 	["Ambulance"] = { "models/sickness/meatwagon.mdl", "scripts/vehicles/perp2/ambulance.txt", 0.368 },
 	["Aston Martin DB5"] = { "models/tdmcars/ast_db5.mdl", "scripts/vehicles/tdmcars/ast_db5.txt", 0.427 },
 	["Aston Martin DBS"] = { "models/tdmcars/dbs.mdl", "scripts/vehicles/tdmcars/dbs.txt", 0.406 },
 	["Aston Martin Rapide"] = { "models/tdmcars/ast_rapide.mdl", "scripts/vehicles/tdmcars/ast_rapide.txt", 0.411 },
-	["Aston Martin V12 Vantage"] = { "models/tdmcars/aston_v12vantage.mdl", "scripts/vehicles/tdmcars/v12vantage.txt", 0.401 },
+	["Aston Martin V12 Vantage"] = {
+		"models/tdmcars/aston_v12vantage.mdl",
+		"scripts/vehicles/tdmcars/v12vantage.txt",
+		0.401,
+	},
 	["Audi R8 Plus"] = { "models/tdmcars/audi_r8_plus.mdl", "scripts/vehicles/tdmcars/audir8plus.txt", 0.386 },
 	["Audi R8 Spyder"] = { "models/tdmcars/audi_r8_spyder.mdl", "scripts/vehicles/tdmcars/audir8spyd.txt", 0.386 },
 	["Audi R8 V10"] = { "models/tdmcars/audir8.mdl", "scripts/vehicles/tdmcars/audir8.txt", 0.368 },
@@ -564,8 +663,16 @@ E.CAR_MODELS = {
 	["Chevrolet Camaro SS 69"] = { "models/tdmcars/69camaro.mdl", "scripts/vehicles/tdmcars/69camaro.txt", 0.404 },
 	["Chevrolet Camaro ZL1"] = { "models/tdmcars/chev_camzl1.mdl", "scripts/vehicles/tdmcars/camarozl1.txt", 0.432 },
 	["Chevrolet Chevelle SS"] = { "models/tdmcars/chevelless.mdl", "scripts/vehicles/tdmcars/chevelless.txt", 0.406 },
-	["Chevrolet Corvette GSC"] = { "models/tdmcars/chev_corv_gsc.mdl", "scripts/vehicles/tdmcars/chev_corv_gsc.txt", 0.406 },
-	["Chevrolet Corvette Stingray 427"] = { "models/tdmcars/chev_stingray427.mdl", "scripts/vehicles/tdmcars/chevstingray427.txt", 0.438 },
+	["Chevrolet Corvette GSC"] = {
+		"models/tdmcars/chev_corv_gsc.mdl",
+		"scripts/vehicles/tdmcars/chev_corv_gsc.txt",
+		0.406,
+	},
+	["Chevrolet Corvette Stingray 427"] = {
+		"models/tdmcars/chev_stingray427.mdl",
+		"scripts/vehicles/tdmcars/chevstingray427.txt",
+		0.438,
+	},
 	["Chevrolet Impala SS 96"] = { "models/tdmcars/chev_impala96.mdl", "scripts/vehicles/tdmcars/impala96.txt", 0.368 },
 	["Chevrolet Spark"] = { "models/tdmcars/spark.mdl", "scripts/vehicles/tdmcars/spark.txt", 0.356 },
 	["Chrysler 300C"] = { "models/tdmcars/chr_300c.mdl", "scripts/vehicles/tdmcars/300c.txt", 0.432 },
@@ -574,8 +681,16 @@ E.CAR_MODELS = {
 	["Citroen C4"] = { "models/tdmcars/cit_c4.mdl", "scripts/vehicles/tdmcars/c4.txt", 0.356 },
 	["Courier Truck"] = { "models/tdmcars/courier_truck.mdl", "scripts/vehicles/tdmcars/courier_truck.txt", 0.495 },
 	["DeLorean DMC-12"] = { "models/tdmcars/del_dmc.mdl", "scripts/vehicles/tdmcars/delorean.txt", 0.356 },
-	["Dodge Challenger 1970"] = { "models/tdmcars/dod_challenger70.mdl", "scripts/vehicles/tdmcars/challenger70.txt", 0.399 },
-	["Dodge Challenger 2015"] = { "models/tdmcars/dod_challenger15.mdl", "scripts/vehicles/tdmcars/dod_challenger15.txt", 0.457 },
+	["Dodge Challenger 1970"] = {
+		"models/tdmcars/dod_challenger70.mdl",
+		"scripts/vehicles/tdmcars/challenger70.txt",
+		0.399,
+	},
+	["Dodge Challenger 2015"] = {
+		"models/tdmcars/dod_challenger15.mdl",
+		"scripts/vehicles/tdmcars/dod_challenger15.txt",
+		0.457,
+	},
 	["Dodge Charger 2012"] = { "models/tdmcars/dod_charger12.mdl", "scripts/vehicles/tdmcars/charger2012.txt", 0.432 },
 	["Dodge Charger SRT-8"] = { "models/tdmcars/chargersrt8.mdl", "scripts/vehicles/tdmcars/chargersrt8.txt", 0.406 },
 	["Dodge RAM SRT10"] = { "models/tdmcars/dodgeram.mdl", "scripts/vehicles/tdmcars/dodgeram.txt", 0.432 },
@@ -595,7 +710,11 @@ E.CAR_MODELS = {
 	["Ford Deluxe Coupe 1940"] = { "models/tdmcars/ford_coupe_40.mdl", "scripts/vehicles/tdmcars/coupe40.txt", 0.406 },
 	["Ford F100"] = { "models/tdmcars/for_f100.mdl", "scripts/vehicles/tdmcars/f100.txt", 0.363 },
 	["Ford F350"] = { "models/tdmcars/for_f350.mdl", "scripts/vehicles/tdmcars/f350.txt", 0.526 },
-	["Ford F350 Fire Rescue"] = { "models/tdmcars/for_f350_fru.mdl", "scripts/vehicles/perp2/f350_firetruck.txt", 0.526 },
+	["Ford F350 Fire Rescue"] = {
+		"models/tdmcars/for_f350_fru.mdl",
+		"scripts/vehicles/perp2/f350_firetruck.txt",
+		0.526,
+	},
 	["Ford F350 Tow Truck"] = { "models/tdmcars/for_f350_tow.mdl", "scripts/vehicles/perp2/f350_towtruck.txt", 0.485 },
 	["Ford F450 Ambulance"] = { "models/forest/f450_ambo.mdl", "scripts/vehicles/perp2/f450_ambulance.txt", 0.480 },
 	["Ford Focus RS"] = { "models/tdmcars/focusrs.mdl", "scripts/vehicles/tdmcars/focusrs.txt", 0.381 },
@@ -605,8 +724,16 @@ E.CAR_MODELS = {
 	["Ford Raptor SVT"] = { "models/tdmcars/for_raptor.mdl", "scripts/vehicles/tdmcars/raptorsvt.txt", 0.526 },
 	["Ford Shelby GT500"] = { "models/tdmcars/gt500.mdl", "scripts/vehicles/tdmcars/gt500.txt", 0.439 },
 	["Ford Transit"] = { "models/tdmcars/ford_transit.mdl", "scripts/vehicles/tdmcars/transit.txt", 0.432 },
-	["Ford Transit 2016 (Police)"] = { "models/ezza/plpd_2016transit.mdl", "scripts/vehicles/jarheads/transit2016.txt", 0.483 },
-	["Ford Transit 2016 (Prisoner Transport)"] = { "models/tdmcars/2016transit.mdl", "scripts/vehicles/tdmcars/2016transit.txt", 0.406 },
+	["Ford Transit 2016 (Police)"] = {
+		"models/ezza/plpd_2016transit.mdl",
+		"scripts/vehicles/jarheads/transit2016.txt",
+		0.483,
+	},
+	["Ford Transit 2016 (Prisoner Transport)"] = {
+		"models/tdmcars/2016transit.mdl",
+		"scripts/vehicles/tdmcars/2016transit.txt",
+		0.406,
+	},
 	["GMC Sierra"] = { "models/tdmcars/gmc_sierralow.mdl", "scripts/vehicles/tdmcars/sierralow.txt", 0.406 },
 	["GMC Syclone"] = { "models/tdmcars/gmc_syclone.mdl", "scripts/vehicles/tdmcars/syclone.txt", 0.381 },
 	["GMC Vandura"] = { "models/tdmcars/gmcvan.mdl", "scripts/vehicles/tdmcars/gmcvan.txt", 0.381 },
@@ -626,19 +753,43 @@ E.CAR_MODELS = {
 	["Kia Forte Koup"] = { "models/tdmcars/kia_fortekoup.mdl", "scripts/vehicles/tdmcars/kiafortekoup.txt", 0.368 },
 	["Lamborghini Diablo"] = { "models/tdmcars/lambo_diablo.mdl", "scripts/vehicles/tdmcars/diablo.txt", 0.406 },
 	["Lamborghini Gallardo"] = { "models/tdmcars/gallardo.mdl", "scripts/vehicles/tdmcars/gallardo.txt", 0.381 },
-	["Lamborghini Gallardo LP570-4 Spyder Performante"] = { "models/tdmcars/lam_gallardospyd.mdl", "scripts/vehicles/tdmcars/gallardospyd.txt", 0.406 },
+	["Lamborghini Gallardo LP570-4 Spyder Performante"] = {
+		"models/tdmcars/lam_gallardospyd.mdl",
+		"scripts/vehicles/tdmcars/gallardospyd.txt",
+		0.406,
+	},
 	["Lamborghini Miura"] = { "models/tdmcars/lambo_miuracon.mdl", "scripts/vehicles/tdmcars/miuracon.txt", 0.406 },
 	["Lamborghini Murcielago"] = { "models/tdmcars/murcielago.mdl", "scripts/vehicles/tdmcars/murcielago.txt", 0.368 },
-	["Lamborghini Murcielago LP670-4 SV"] = { "models/tdmcars/lambo_murcielagosv.mdl", "scripts/vehicles/tdmcars/murcielagosv.txt", 0.394 },
-	["Lamborghini Reventon Roadster"] = { "models/tdmcars/reventon_roadster.mdl", "scripts/vehicles/tdmcars/reventonr.txt", 0.394 },
-	["Land Rover Defender"] = { "models/tdmcars/landrover_defender.mdl", "scripts/vehicles/tdmcars/lrdefender.txt", 0.711 },
+	["Lamborghini Murcielago LP670-4 SV"] = {
+		"models/tdmcars/lambo_murcielagosv.mdl",
+		"scripts/vehicles/tdmcars/murcielagosv.txt",
+		0.394,
+	},
+	["Lamborghini Reventon Roadster"] = {
+		"models/tdmcars/reventon_roadster.mdl",
+		"scripts/vehicles/tdmcars/reventonr.txt",
+		0.394,
+	},
+	["Land Rover Defender"] = {
+		"models/tdmcars/landrover_defender.mdl",
+		"scripts/vehicles/tdmcars/lrdefender.txt",
+		0.711,
+	},
 	["Land Rover Range Rover 08"] = { "models/tdmcars/landrover.mdl", "scripts/vehicles/tdmcars/landrover.txt", 0.432 },
-	["Land Rover Range Rover 2012"] = { "models/tdmcars/landrover12.mdl", "scripts/vehicles/tdmcars/landrover12.txt", 0.452 },
+	["Land Rover Range Rover 2012"] = {
+		"models/tdmcars/landrover12.mdl",
+		"scripts/vehicles/tdmcars/landrover12.txt",
+		0.452,
+	},
 	["Lenco BearCat"] = { "models/tdmcars/plpd_bearcat.mdl", "scripts/vehicles/jarheads/bearcat.txt", 0.622 },
 	["Lexus IS 300"] = { "models/tdmcars/lex_is300.mdl", "scripts/vehicles/tdmcars/lex_is300.txt", 0.389 },
 	["Lexus IS F"] = { "models/tdmcars/lex_isf.mdl", "scripts/vehicles/tdmcars/lex_isf.txt", 0.381 },
 	["Maserati Ghibli S"] = { "models/tdmcars/mas_ghibli.mdl", "scripts/vehicles/tdmcars/mas_ghibli.txt", 0.445 },
-	["Maserati Quattroporte Sport GT S"] = { "models/tdmcars/mas_quattroporte.mdl", "scripts/vehicles/tdmcars/mas_quattroporte.txt", 0.445 },
+	["Maserati Quattroporte Sport GT S"] = {
+		"models/tdmcars/mas_quattroporte.mdl",
+		"scripts/vehicles/tdmcars/mas_quattroporte.txt",
+		0.445,
+	},
 	["Mazda Furai"] = { "models/tdmcars/maz_furai.mdl", "scripts/vehicles/tdmcars/furai.txt", 0.394 },
 	["Mazda MX-5 2007"] = { "models/tdmcars/mx5.mdl", "scripts/vehicles/tdmcars/mx5.txt", 0.356 },
 	["Mazda RX-8"] = { "models/tdmcars/rx8.mdl", "scripts/vehicles/tdmcars/rx8.txt", 0.394 },
@@ -647,7 +798,11 @@ E.CAR_MODELS = {
 	["McLaren F1"] = { "models/tdmcars/mclaren_f1.mdl", "scripts/vehicles/tdmcars/mclarenf1.txt", 0.389 },
 	["McLaren P1"] = { "models/tdmcars/mclaren_p1.mdl", "scripts/vehicles/tdmcars/mclarenp1.txt", 0.394 },
 	["Mercedes 300 SEL"] = { "models/tdmcars/mer_300sel.mdl", "scripts/vehicles/tdmcars/mer300sel.txt", 0.394 },
-	["Mercedes 300SL Gullwing Coupe"] = { "models/tdmcars/mer_300slgull.mdl", "scripts/vehicles/tdmcars/mer300slgull.txt", 0.394 },
+	["Mercedes 300SL Gullwing Coupe"] = {
+		"models/tdmcars/mer_300slgull.mdl",
+		"scripts/vehicles/tdmcars/mer300slgull.txt",
+		0.394,
+	},
 	["Mercedes C32 AMG"] = { "models/tdmcars/mercedes_c32.mdl", "scripts/vehicles/tdmcars/c32.txt", 0.381 },
 	["Mercedes E63 AMG"] = { "models/tdmcars/mer_e63.mdl", "scripts/vehicles/tdmcars/mere63.txt", 0.394 },
 	["Mercedes G-Class"] = { "models/tdmcars/gwagon.mdl", "scripts/vehicles/jarheads/gwagon.txt", 0.483 },
@@ -657,12 +812,28 @@ E.CAR_MODELS = {
 	["Mercedes SLS AMG"] = { "models/tdmcars/mer_slsamg.mdl", "scripts/vehicles/tdmcars/slsamg.txt", 0.432 },
 	["Mini Clubman"] = { "models/tdmcars/mini_clubman.mdl", "scripts/vehicles/tdmcars/miniclubman.txt", 0.348 },
 	["Mini Cooper 1965"] = { "models/tdmcars/cooper65.mdl", "scripts/vehicles/tdmcars/cooper65.txt", 0.330 },
-	["Mini Cooper S 2011"] = { "models/tdmcars/mini_coopers11.mdl", "scripts/vehicles/tdmcars/minicoopers11.txt", 0.356 },
+	["Mini Cooper S 2011"] = {
+		"models/tdmcars/mini_coopers11.mdl",
+		"scripts/vehicles/tdmcars/minicoopers11.txt",
+		0.356,
+	},
 	["Mini Coupe"] = { "models/tdmcars/mini_coupe.mdl", "scripts/vehicles/tdmcars/minicoupe.txt", 0.356 },
 	["Mitsubishi Colt Ralliart"] = { "models/tdmcars/coltralliart.mdl", "scripts/vehicles/tdmcars/colt.txt", 0.381 },
-	["Mitsubishi Eclipse GSX"] = { "models/tdmcars/mit_eclipsegsx.mdl", "scripts/vehicles/tdmcars/mit_eclipsegsx.txt", 0.406 },
-	["Mitsubishi Eclipse GT"] = { "models/tdmcars/mitsu_eclipgt.mdl", "scripts/vehicles/tdmcars/mitsu_eclipgt.txt", 0.381 },
-	["Mitsubishi Lancer Evo VIII"] = { "models/tdmcars/mitsu_evo8.mdl", "scripts/vehicles/tdmcars/mitsu_evo8.txt", 0.368 },
+	["Mitsubishi Eclipse GSX"] = {
+		"models/tdmcars/mit_eclipsegsx.mdl",
+		"scripts/vehicles/tdmcars/mit_eclipsegsx.txt",
+		0.406,
+	},
+	["Mitsubishi Eclipse GT"] = {
+		"models/tdmcars/mitsu_eclipgt.mdl",
+		"scripts/vehicles/tdmcars/mitsu_eclipgt.txt",
+		0.381,
+	},
+	["Mitsubishi Lancer Evo VIII"] = {
+		"models/tdmcars/mitsu_evo8.mdl",
+		"scripts/vehicles/tdmcars/mitsu_evo8.txt",
+		0.368,
+	},
 	["Mitsubishi Lancer Evo X"] = { "models/tdmcars/mitsu_evox.mdl", "scripts/vehicles/tdmcars/mitsu_evox.txt", 0.394 },
 	["Morgan Aero SS"] = { "models/tdmcars/morg_aeross.mdl", "scripts/vehicles/tdmcars/morg_aeross.txt", 0.394 },
 	["Nissan 350z"] = { "models/tdmcars/350z.mdl", "scripts/vehicles/tdmcars/350z.txt", 0.406 },
@@ -674,20 +845,40 @@ E.CAR_MODELS = {
 	["Noble M600"] = { "models/tdmcars/noblem600.mdl", "scripts/vehicles/tdmcars/noblem600.txt", 0.368 },
 	["Pagani Zonda C12"] = { "models/tdmcars/zondac12.mdl", "scripts/vehicles/tdmcars/c12.txt", 0.381 },
 	["Pontiac Fiero GT"] = { "models/tdmcars/pon_fierogt.mdl", "scripts/vehicles/tdmcars/pon_fierogt.txt", 0.368 },
-	["Pontiac Firebird Trans Am"] = { "models/tdmcars/pon_firetransam.mdl", "scripts/vehicles/tdmcars/pon_firetransam.txt", 0.419 },
+	["Pontiac Firebird Trans Am"] = {
+		"models/tdmcars/pon_firetransam.mdl",
+		"scripts/vehicles/tdmcars/pon_firetransam.txt",
+		0.419,
+	},
 	["Porsche 911 GT3"] = { "models/tdmcars/gt3rs.mdl", "scripts/vehicles/jarheads/gt3rs.txt", 0.424 },
 	["Porsche 918 Spyder"] = { "models/tdmcars/por_918.mdl", "scripts/vehicles/tdmcars/918spyd.txt", 0.437 },
 	["Porsche 997 GT3"] = { "models/tdmcars/997gt3.mdl", "scripts/vehicles/tdmcars/997gt3.txt", 0.381 },
 	["Porsche Carrera GT"] = { "models/tdmcars/por_carreragt.mdl", "scripts/vehicles/tdmcars/carreragt.txt", 0.386 },
-	["Porsche Cayenne Turbo 2012"] = { "models/tdmcars/por_cayenne12.mdl", "scripts/vehicles/tdmcars/cayenne12.txt", 0.457 },
+	["Porsche Cayenne Turbo 2012"] = {
+		"models/tdmcars/por_cayenne12.mdl",
+		"scripts/vehicles/tdmcars/cayenne12.txt",
+		0.457,
+	},
 	["Porsche Cayenne Turbo S"] = { "models/tdmcars/cayenne.mdl", "scripts/vehicles/tdmcars/cayenne.txt", 0.457 },
 	["Scion FR-S"] = { "models/tdmcars/scion_frs.mdl", "scripts/vehicles/tdmcars/scionfrs.txt", 0.381 },
 	["Scion tC"] = { "models/tdmcars/scion_tc.mdl", "scripts/vehicles/tdmcars/sciontc.txt", 0.368 },
 	["Scion xD"] = { "models/tdmcars/scion_xd.mdl", "scripts/vehicles/tdmcars/scionxd.txt", 0.361 },
 	["Shelby 1000"] = { "models/tdmcars/she_1000.mdl", "scripts/vehicles/tdmcars/she1000.txt", 0.460 },
-	["Subaru Impreza WRX STI"] = { "models/tdmcars/sub_wrxsti08.mdl", "scripts/vehicles/tdmcars/subimpreza08.txt", 0.381 },
-	["Subaru Legacy GT 2010"] = { "models/tdmcars/sub_legacygt10.mdl", "scripts/vehicles/tdmcars/subleggt10.txt", 0.386 },
-	["Subaru Legacy RS 1990"] = { "models/tdmcars/sub_legacyrs90.mdl", "scripts/vehicles/tdmcars/sublegrs90.txt", 0.381 },
+	["Subaru Impreza WRX STI"] = {
+		"models/tdmcars/sub_wrxsti08.mdl",
+		"scripts/vehicles/tdmcars/subimpreza08.txt",
+		0.381,
+	},
+	["Subaru Legacy GT 2010"] = {
+		"models/tdmcars/sub_legacygt10.mdl",
+		"scripts/vehicles/tdmcars/subleggt10.txt",
+		0.386,
+	},
+	["Subaru Legacy RS 1990"] = {
+		"models/tdmcars/sub_legacyrs90.mdl",
+		"scripts/vehicles/tdmcars/sublegrs90.txt",
+		0.381,
+	},
 	["SWAT Stockade"] = { "models/perp2.5/swat_van.mdl", "scripts/vehicles/perp2/swatvan.txt", 0.495 },
 	["Tesla Model S"] = { "models/tdmcars/tesla_models.mdl", "scripts/vehicles/tdmcars/teslamodels.txt", 0.432 },
 	["Toyota FJ Cruiser"] = { "models/tdmcars/toy_fj.mdl", "scripts/vehicles/tdmcars/toyfj.txt", 0.470 },
@@ -700,10 +891,18 @@ E.CAR_MODELS = {
 	["Vauxhall Insignia"] = { "models/tdmcars/vaux_insignia.mdl", "scripts/vehicles/tdmcars/vaux_insignia.txt", 0.399 },
 	["Volkswagen Beetle 1967"] = { "models/tdmcars/beetle.mdl", "scripts/vehicles/tdmcars/beetle67.txt", 0.406 },
 	["Volkswagen Camper 1965"] = { "models/tdmcars/vw_camper65.mdl", "scripts/vehicles/tdmcars/vwcamper.txt", 0.406 },
-	["Volkswagen Golf GTI 2014"] = { "models/tdmcars/vw_golfgti_14.mdl", "scripts/vehicles/tdmcars/vw_golfgti_14.txt", 0.396 },
+	["Volkswagen Golf GTI 2014"] = {
+		"models/tdmcars/vw_golfgti_14.mdl",
+		"scripts/vehicles/tdmcars/vw_golfgti_14.txt",
+		0.396,
+	},
 	["Volkswagen Golf MKII"] = { "models/tdmcars/golf_mk2.mdl", "scripts/vehicles/tdmcars/golfmk2.txt", 0.381 },
 	["Volkswagen Golf MKIII"] = { "models/tdmcars/golf3.mdl", "scripts/vehicles/tdmcars/golf3.txt", 0.318 },
-	["Volkswagen New Beetle"] = { "models/tdmcars/vw_beetleconv.mdl", "scripts/vehicles/tdmcars/vwbeetleconv.txt", 0.381 },
+	["Volkswagen New Beetle"] = {
+		"models/tdmcars/vw_beetleconv.mdl",
+		"scripts/vehicles/tdmcars/vwbeetleconv.txt",
+		0.381,
+	},
 	["Volkswagen Scirocco GT"] = { "models/tdmcars/scirocco.mdl", "scripts/vehicles/tdmcars/scirocco.txt", 0.356 },
 	["Volvo 242 Turbo"] = { "models/tdmcars/242turbo.mdl", "scripts/vehicles/tdmcars/242turbo.txt", 0.356 },
 	["Volvo 850R"] = { "models/tdmcars/vol_850r.mdl", "scripts/vehicles/tdmcars/850r.txt", 0.373 },
@@ -735,9 +934,19 @@ E.JOB_VEHICLES = {
 	{ "Ford F350 Tow Truck", "Ford F350 Tow Truck", "scripts/vehicles/perp2/f350_towtruck.txt", 0 },
 	{ "Ford F450 Ambulance", "Ford F450 Ambulance", "scripts/vehicles/perp2/f450_ambulance.txt", 0 },
 	{ "Ford Transit 2016 (Police)", "Ford Transit 2016 (Police)", "scripts/vehicles/jarheads/transit2016.txt", 0 },
-	{ "Ford Transit 2016 (Prisoner Transport)", "Ford Transit 2016 (Prisoner Transport)", "scripts/vehicles/tdmcars/2016transit.txt", 11 },
+	{
+		"Ford Transit 2016 (Prisoner Transport)",
+		"Ford Transit 2016 (Prisoner Transport)",
+		"scripts/vehicles/tdmcars/2016transit.txt",
+		11,
+	},
 	{ "Land Rover Defender Fire", "Land Rover Defender", "scripts/vehicles/tdmcars/lrdefender_fire.txt", 11 },
-	{ "Land Rover Range Rover 2012 Police", "Land Rover Range Rover 2012", "scripts/vehicles/tdmcars/landrover12_cop.txt", 11 },
+	{
+		"Land Rover Range Rover 2012 Police",
+		"Land Rover Range Rover 2012",
+		"scripts/vehicles/tdmcars/landrover12_cop.txt",
+		11,
+	},
 	{ "Lenco BearCat", "Lenco BearCat", "scripts/vehicles/jarheads/bearcat.txt", 0 },
 	{ "Mercedes SL65 AMG Police", "Mercedes SL65 AMG", "scripts/vehicles/tdmcars/sl65amg_cop.txt", 11 },
 	{ "Porsche Cayenne Turbo S Police", "Porsche Cayenne Turbo S", "scripts/vehicles/tdmcars/cayenne_cop.txt", 11 },

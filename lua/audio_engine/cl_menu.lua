@@ -10,7 +10,7 @@
 	context menu (C) -> "Engine tuning".
 ]]
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 
 local C = {
 	bg = Color(15, 18, 22, 250),
@@ -21,6 +21,8 @@ local C = {
 	muted = Color(141, 147, 156, 255),
 	amber = Color(255, 165, 61, 255),
 	amberDim = Color(107, 71, 25, 255),
+	amberHover = Color(255, 185, 100, 255),
+	ink = Color(27, 18, 6, 255),
 	red = Color(255, 75, 58, 255),
 	green = Color(95, 211, 138, 255),
 }
@@ -30,7 +32,10 @@ local floor = math.floor
 
 local function makeFonts(s)
 	local function f(name, size, weight)
-		surface.CreateFont(name, { font = "Roboto", size = math.max(9, floor(size * s)), weight = weight, extended = true })
+		surface.CreateFont(
+			name,
+			{ font = "Roboto", size = math.max(9, floor(size * s)), weight = weight, extended = true }
+		)
 	end
 	f("AudioMenu_Title", 30, 800)
 	f("AudioMenu_H", 14, 700)
@@ -68,7 +73,9 @@ end
 local function styleCombo(cb)
 	cb:SetFont("AudioMenu_Body")
 	cb:SetTextColor(C.fg)
-	cb.Paint = function(self, w, h) roundBox(6, 0, 0, w, h, C.face) end
+	cb.Paint = function(self, w, h)
+		roundBox(6, 0, 0, w, h, C.face)
+	end
 end
 
 local function styleEntry(te)
@@ -93,7 +100,9 @@ local function slider(parent, s, text, minV, maxV, decimals, value, onChange, fm
 		draw.RoundedBox(3, 0, h / 2 - 3, w * self:GetSlideX(), 6, C.amberDim)
 	end
 	sl.Knob:SetSize(floor(14 * s), floor(14 * s))
-	sl.Knob.Paint = function(self, w, h) draw.RoundedBox(w / 2, 0, 0, w, h, C.amber) end
+	sl.Knob.Paint = function(self, w, h)
+		draw.RoundedBox(w / 2, 0, 0, w, h, C.amber)
+	end
 	local function show(v)
 		out:SetText(fmtFn and fmtFn(v) or string.format("%." .. decimals .. "f", v))
 		out:SizeToContents()
@@ -128,7 +137,9 @@ local function checkbox(parent, text, value, onChange)
 	cb:SetFont("AudioMenu_Body")
 	cb:SetTextColor(C.fg)
 	cb:SetValue(value and 1 or 0)
-	cb.OnChange = function(_, v) onChange(v) end
+	cb.OnChange = function(_, v)
+		onChange(v)
+	end
 	return cb
 end
 
@@ -136,10 +147,10 @@ local function button(parent, text, primary, onClick)
 	local b = vgui.Create("DButton", parent)
 	b:SetText(text)
 	b:SetFont("AudioMenu_H")
-	b:SetTextColor(primary and Color(27, 18, 6) or C.fg)
+	b:SetTextColor(primary and C.ink or C.fg)
 	b.Paint = function(self, w, h)
 		local fill = primary and C.amber or C.face
-		if self:IsHovered() then fill = primary and Color(255, 185, 100) or C.line end
+		if self:IsHovered() then fill = primary and C.amberHover or C.line end
 		roundBox(8, 0, 0, w, h, fill, primary and C.amber or C.line)
 	end
 	b.DoClick = onClick
@@ -163,6 +174,330 @@ local function toneName(t)
 	return t < 0.3 and "Stock" or t < 0.7 and "Sport" or "Straight pipe"
 end
 
+local function buildSoundCard(ctx, body, colW)
+	local s = ctx.s
+	local snd = card(body, "Sound", s)
+	snd:Dock(LEFT)
+	snd:SetWide(colW)
+	local l = label(snd, "Engine layout")
+	l:Dock(TOP)
+	local lay = vgui.Create("DComboBox", snd)
+	styleCombo(lay)
+	lay:Dock(TOP)
+	lay:SetTall(floor(30 * s))
+	lay:DockMargin(0, 4 * s, 0, 10 * s)
+	for _, o in ipairs(E.LAYOUT_ORDER) do
+		lay:AddChoice(o[2], o[1], o[1] == ctx.prof.layout)
+	end
+	lay.OnSelect = function(_, _, _, key)
+		ctx.prof.layout = key
+		ctx.changed()
+		timer.Simple(0, ctx.rebuild)
+	end
+	local function add(p)
+		p:Dock(TOP)
+		p:DockMargin(0, 0, 0, 6 * s)
+	end
+	add(slider(snd, s, "Pitch", 0.5, 2, 2, ctx.prof.pitch, function(v)
+		ctx.prof.pitch = v
+		ctx.changed()
+	end, function(v)
+		return string.format("×%.2f", v)
+	end))
+	add(slider(snd, s, "Exhaust tone", 0, 1, 2, ctx.prof.tone, function(v)
+		ctx.prof.tone = v
+		ctx.changed()
+	end, toneName))
+	add(slider(snd, s, "Volume", 0, 1.5, 2, ctx.prof.volume, function(v)
+		ctx.prof.volume = v
+		ctx.changed()
+	end, function(v)
+		return floor(v * 100 + 0.5) .. "%"
+	end))
+	add(slider(snd, s, "Realism", 0, 1, 1, ctx.prof.realism, function(v)
+		ctx.prof.realism = v
+		ctx.changed()
+	end, function(v)
+		return v == 0 and "Rev Bench" or v < 1 and string.format("%d%%", v * 100) or "Full"
+	end))
+	add(slider(snd, s, "Gurgle (off-throttle burble)", 0, 1, 2, ctx.prof.gurgle, function(v)
+		ctx.prof.gurgle = v
+		ctx.changed()
+	end, function(v)
+		return v <= 0 and "Off" or v < 0.3 and "Light" or v < 0.65 and "Burbly" or "Heavy"
+	end))
+	add(slider(snd, s, "Pops & bangs (how often)", 0, 1, 2, ctx.prof.pops, function(v)
+		ctx.prof.pops = v
+		ctx.changed()
+	end, function(v)
+		return v <= 0 and "Off"
+			or v < 0.25 and "Rare"
+			or v < 0.5 and "Occasional"
+			or v < 0.8 and "Frequent"
+			or "Constant"
+	end))
+	add(slider(snd, s, "Pops & bangs volume", 0, 2, 2, ctx.prof.popVol, function(v)
+		ctx.prof.popVol = v
+		ctx.changed()
+	end, function(v)
+		return floor(v * 100 + 0.5) .. "%"
+	end))
+	add(slider(snd, s, "Pops & bangs tone", 0, 1, 2, ctx.prof.popTone, function(v)
+		ctx.prof.popTone = v
+		ctx.changed()
+	end, function(v)
+		return v < 0.25 and "Muffled" or v < 0.6 and "Sport" or v < 0.85 and "Loud pipe" or "Straight pipe"
+	end))
+	local tb = checkbox(snd, "Turbocharged (whistle)", ctx.prof.turbo, function(v)
+		ctx.prof.turbo = v
+		ctx.changed()
+		timer.Simple(0, ctx.rebuild)
+	end)
+	tb:Dock(TOP)
+	tb:DockMargin(0, 6 * s, 0, 0)
+	if ctx.prof.turbo then
+		local pct = function(v)
+			return floor(v * 100 + 0.5) .. "%"
+		end
+		local tv = slider(snd, s, "Turbo whistle volume", 0, 2, 2, ctx.prof.turboVol or 1, function(v)
+			ctx.prof.turboVol = v
+			ctx.changed()
+		end, pct)
+		tv:Dock(TOP)
+		tv:DockMargin(0, 6 * s, 0, 0)
+		local bv = checkbox(snd, "Blow-off valve (pssh when you lift)", ctx.prof.bov, function(v)
+			ctx.prof.bov = v
+			ctx.changed()
+			timer.Simple(0, ctx.rebuild)
+		end)
+		bv:Dock(TOP)
+		bv:DockMargin(0, 6 * s, 0, 0)
+		if ctx.prof.bov then
+			local bvv = slider(snd, s, "Blow-off valve volume", 0, 2, 2, ctx.prof.bovVol or 1, function(v)
+				ctx.prof.bovVol = v
+				ctx.changed()
+			end, pct)
+			bvv:Dock(TOP)
+			bvv:DockMargin(0, 6 * s, 0, 0)
+		end
+	end
+end
+
+local function buildRpmCard(ctx, body, colW)
+	local s, veh, car = ctx.s, ctx.veh, ctx.car
+	local rpm = card(body, "RPM & performance", s)
+	rpm:Dock(LEFT)
+	rpm:SetWide(colW)
+	rpm:DockMargin(14 * s, 0, 0, 0)
+	local add2 = function(p)
+		p:Dock(TOP)
+		p:DockMargin(0, 0, 0, 6 * s)
+	end
+	add2(slider(rpm, s, "Idle", 500, 1500, 0, ctx.prof.idle, function(v)
+		ctx.prof.idle = floor(v / 25 + 0.5) * 25
+		ctx.changed()
+	end, function(v)
+		return fmtThousands(floor(v / 25 + 0.5) * 25)
+	end))
+	add2(
+		slider(
+			rpm,
+			s,
+			"Redline",
+			3500,
+			ctx.prof.layout == "electric" and 16000 or 12000,
+			0,
+			ctx.prof.redline,
+			function(v)
+				ctx.prof.redline = floor(v / 100 + 0.5) * 100
+				ctx.changed()
+			end,
+			function(v)
+				return fmtThousands(floor(v / 100 + 0.5) * 100)
+			end
+		)
+	)
+	-- real performance: changes how the car actually drives; the revs and gears follow
+	add2(slider(rpm, s, "Acceleration", 0.5, 2.5, 2, ctx.prof.accel, function(v)
+		ctx.prof.accel = floor(v * 20 + 0.5) / 20
+		ctx.changed()
+	end, function(v)
+		return string.format("×%.2f", floor(v * 20 + 0.5) / 20)
+	end))
+	-- shown in mph (the profile keeps km/h): steps of 5 mph, snapping to the car's stock speed
+	local KMH_PER_MPH = 1.609344
+	local stockMph = floor(E.CarTopSpeed(veh, car) / KMH_PER_MPH + 0.5)
+	local function snapMph(v)
+		v = floor(v + 0.5)
+		if math.abs(v - stockMph) < 3 then return stockMph, true end
+		return floor(v / 5 + 0.5) * 5, false
+	end
+	add2(
+		slider(
+			rpm,
+			s,
+			"Top speed",
+			25,
+			280,
+			0,
+			ctx.prof.vmax > 0 and ctx.prof.vmax / KMH_PER_MPH or stockMph,
+			function(v)
+				local mph, stock = snapMph(v)
+				ctx.prof.vmax = stock and 0 or floor(mph * KMH_PER_MPH + 0.5)
+				ctx.changed()
+			end,
+			function(v)
+				local mph, stock = snapMph(v)
+				return stock and (mph .. " mph (stock)") or (mph .. " mph")
+			end
+		)
+	)
+	ctx.stats.engine = label(rpm, "", "AudioMenu_Small", C.muted)
+	ctx.stats.engine:Dock(TOP)
+	ctx.stats.engine:DockMargin(0, 8 * s, 0, 0)
+	ctx.stats.engine:SetWrap(true)
+	ctx.stats.engine:SetAutoStretchVertical(true)
+	local note = label(
+		rpm,
+		"Acceleration and top speed change the car's real physics; the revs, gears and sound follow.",
+		"AudioMenu_Small",
+		C.muted
+	)
+	note:Dock(BOTTOM)
+	note:SetWrap(true)
+	note:SetAutoStretchVertical(true)
+
+	-- generation quality: a setting of this client only (audio_engine_samplerate)
+	local ql = label(rpm, "Sound quality (your PC only)")
+	ql:Dock(TOP)
+	ql:DockMargin(0, 14 * s, 0, 0)
+	local q = vgui.Create("DComboBox", rpm)
+	styleCombo(q)
+	q:Dock(TOP)
+	q:SetTall(floor(30 * s))
+	q:DockMargin(0, 4 * s, 0, 0)
+	local rate = GetConVar("audio_engine_samplerate")
+	local cur = rate and rate:GetInt() or 44100
+	q:AddChoice("44.1 kHz (best, ~2 s per engine)", 44100, cur ~= 22050)
+	q:AddChoice("22.05 kHz (twice as fast, half the memory)", 22050, cur == 22050)
+	q.OnSelect = function(_, _, _, v)
+		-- changing it regenerates every engine sound at the new rate
+		RunConsoleCommand("audio_engine_samplerate", tostring(v))
+	end
+end
+
+local function buildGearCard(ctx, body, colW)
+	local s = ctx.s
+	local gb = card(body, "Gear ratios", s)
+	gb:Dock(FILL)
+	gb:DockMargin(14 * s, 0, 0, 0)
+	local top = vgui.Create("DPanel", gb)
+	top:Dock(TOP)
+	top:SetTall(floor(30 * s))
+	top.Paint = nil
+	local gp = vgui.Create("DComboBox", top)
+	styleCombo(gp)
+	gp:Dock(FILL)
+	gp:SetValue("Gearbox preset…")
+	for _, g in ipairs(E.GEAR_PRESETS) do
+		gp:AddChoice(g.name, g.id)
+	end
+	gp.OnSelect = function(_, _, _, id)
+		local g = E.GearPreset(id)
+		ctx.prof.gears = {}
+		for i, r in ipairs(g.gears) do
+			ctx.prof.gears[i] = r
+		end
+		ctx.prof.final = g.final
+		ctx.prof.preset = "custom"
+		ctx.rebuild()
+	end
+	local ng = vgui.Create("DNumberWang", top)
+	ng:Dock(RIGHT)
+	ng:SetWide(floor(56 * s))
+	ng:DockMargin(8 * s, 0, 0, 0)
+	ng:SetMinMax(1, 8)
+	ng:SetDecimals(0)
+	ng:SetValue(#ctx.prof.gears)
+	styleEntry(ng)
+	ng.OnValueChanged = function(_, v)
+		v = math.Clamp(floor(tonumber(v) or 6), 1, 8)
+		if v == #ctx.prof.gears then return end
+		while #ctx.prof.gears < v do
+			ctx.prof.gears[#ctx.prof.gears + 1] = floor(ctx.prof.gears[#ctx.prof.gears] * 84 + 0.5) / 100
+		end
+		while #ctx.prof.gears > v do
+			ctx.prof.gears[#ctx.prof.gears] = nil
+		end
+		ctx.prof.preset = "custom"
+		timer.Simple(0, ctx.rebuild)
+	end
+
+	local grid = vgui.Create("DIconLayout", gb)
+	grid:Dock(TOP)
+	grid:DockMargin(0, 10 * s, 0, 0)
+	grid:SetSpaceX(8 * s)
+	grid:SetSpaceY(6 * s)
+	local cellW = floor((colW - 32 * s - 8 * s) / 2)
+	for i = 1, #ctx.prof.gears do
+		local cell = grid:Add("DPanel")
+		cell:SetSize(cellW, floor(28 * s))
+		cell.Paint = nil
+		local gl = label(cell, ord(i), "AudioMenu_Small", C.muted)
+		gl:SetPos(0, 6 * s)
+		local te = vgui.Create("DTextEntry", cell)
+		styleEntry(te)
+		te:SetNumeric(true)
+		te:SetPos(floor(40 * s), 0)
+		te:SetSize(cellW - floor(40 * s), floor(28 * s))
+		te:SetValue(string.format("%.2f", ctx.prof.gears[i]))
+		te:SetUpdateOnType(true)
+		te.OnValueChange = function(_, v)
+			local n = tonumber(v)
+			if n and n >= 0.3 and n <= 8 then
+				ctx.prof.gears[i] = n
+				ctx.changed()
+			end
+		end
+	end
+
+	local finRow = vgui.Create("DPanel", gb)
+	finRow:Dock(TOP)
+	finRow:SetTall(floor(28 * s))
+	finRow:DockMargin(0, 10 * s, 0, 0)
+	finRow.Paint = nil
+	ctx.stats.final = label(finRow, "Final drive", "AudioMenu_Small", C.muted)
+	ctx.stats.final:SetPos(0, 6 * s)
+	local fin = vgui.Create("DTextEntry", finRow)
+	styleEntry(fin)
+	fin:SetNumeric(true)
+	fin:Dock(RIGHT)
+	fin:SetWide(cellW - floor(40 * s))
+	fin:SetValue(string.format("%.2f", ctx.prof.final))
+	fin:SetUpdateOnType(true)
+	fin:SetEnabled(ctx.prof.fit == 0)
+	fin.OnValueChange = function(_, v)
+		local n = tonumber(v)
+		if n and n >= 2 and n <= 6 then
+			ctx.prof.final = n
+			ctx.changed()
+		end
+	end
+
+	local fitCb = checkbox(gb, "Fit gearing to the top speed (uses every gear)", ctx.prof.fit > 0, function(v)
+		ctx.prof.fit = v and 1 or 0
+		ctx.changed()
+		timer.Simple(0, ctx.rebuild)
+	end)
+	fitCb:Dock(TOP)
+	fitCb:DockMargin(0, 10 * s, 0, 4 * s)
+	ctx.stats.gears = label(gb, "", "AudioMenu_Small", C.muted)
+	ctx.stats.gears:Dock(TOP)
+	ctx.stats.gears:DockMargin(0, 8 * s, 0, 0)
+	ctx.stats.gears:SetWrap(true)
+	ctx.stats.gears:SetAutoStretchVertical(true)
+end
+
 function E.OpenMenu(veh)
 	local ply = LocalPlayer()
 	if not IsValid(veh) then
@@ -174,7 +509,12 @@ function E.OpenMenu(veh)
 		end
 	end
 	if not (IsValid(veh) and E.GetCarConfig(veh)) then
-		chat.AddText(C.amber, "[Audio Engine] ", C.fg, "Sit in or look at a car with the procedural engine to tune its engine.")
+		chat.AddText(
+			C.amber,
+			"[Audio Engine] ",
+			C.fg,
+			"Sit in or look at a car with the procedural engine to tune its engine."
+		)
 		return
 	end
 	if IsValid(frame) then frame:Remove() end
@@ -182,14 +522,20 @@ function E.OpenMenu(veh)
 	local car = E.GetCarConfig(veh)
 	local cur = E.GetEngineConfig(veh).profile
 	-- an editable copy
-	local prof = {}
-	for k, v in pairs(cur) do prof[k] = v end
-	prof.gears = {}
-	for i, r in ipairs(cur.gears) do prof.gears[i] = r end
+	local ctx = { veh = veh, car = car, stats = {} }
+	ctx.prof = {}
+	for k, v in pairs(cur) do
+		ctx.prof[k] = v
+	end
+	ctx.prof.gears = {}
+	for i, r in ipairs(cur.gears) do
+		ctx.prof.gears[i] = r
+	end
 
 	local s = math.Clamp(ScrH() / 1080, 0.7, 1.6)
-	if 870 * s > ScrH() - 40 then s = (ScrH() - 40) / 870 end   -- always fits on screen
+	if 870 * s > ScrH() - 40 then s = (ScrH() - 40) / 870 end -- always fits on screen
 	makeFonts(s)
+	ctx.s = s
 	local W, H = floor(1000 * s), floor(870 * s)
 	frame = vgui.Create("DFrame")
 	frame:SetSize(W, H)
@@ -216,9 +562,13 @@ function E.OpenMenu(veh)
 		draw.SimpleText("BENCH", "AudioMenu_Title", tw + dw + 4 * s, 0, C.fg)
 		draw.SimpleText(car.name .. " · engine generated live on every client", "AudioMenu_Small", 0, 34 * s, C.muted)
 	end
-	local close = button(head, "✕", false, function() frame:Remove() end)
+	local close = button(head, "✕", false, function()
+		frame:Remove()
+	end)
 	close:SetSize(floor(34 * s), floor(34 * s))
-	head.PerformLayout = function(self, w) close:SetPos(w - close:GetWide(), 0) end
+	head.PerformLayout = function(self, w)
+		close:SetPos(w - close:GetWide(), 0)
+	end
 
 	-- preset row
 	local row = vgui.Create("DPanel", frame)
@@ -247,298 +597,125 @@ function E.OpenMenu(veh)
 	footer:DockMargin(0, 10 * s, 0, 0)
 	footer:SetTall(floor(18 * s))
 
-	local stats = {}  -- labels refreshed on every change
-	local rebuild
-
 	-- the car with its real (stock) top speed filled in
 	local carEff = {}
-	for k, v in pairs(car) do carEff[k] = v end
+	for k, v in pairs(car) do
+		carEff[k] = v
+	end
 	carEff.topSpeed = E.CarTopSpeed(veh, car)
 
 	local function refreshStats()
-		local cfg = E.ResolveProfile(carEff, E.SanitizeProfile(prof))
-		local cyl = E.LAYOUT_CYL[prof.layout] or 4
-		local fIdle = prof.idle / 60 * cyl / 2 * prof.pitch
-		local fRed = prof.redline / 60 * cyl / 2 * prof.pitch
-		if stats.engine then
+		local cfg = E.ResolveProfile(carEff, E.SanitizeProfile(ctx.prof))
+		local cyl = E.LAYOUT_CYL[ctx.prof.layout] or 4
+		local fIdle = ctx.prof.idle / 60 * cyl / 2 * ctx.prof.pitch
+		local fRed = ctx.prof.redline / 60 * cyl / 2 * ctx.prof.pitch
+		if ctx.stats.engine then
 			local what
-			if prof.layout == "electric" then
-				what = string.format("Electric motor · up to %s rpm", fmtThousands(prof.redline))
-			elseif prof.layout == "rotary2" or prof.layout == "rotary3" then
-				what = string.format("%d rotors · fires %d Hz at idle, %d Hz at redline", prof.layout == "rotary2" and 2 or 3, fIdle, fRed)
+			if ctx.prof.layout == "electric" then
+				what = string.format("Electric motor · up to %s rpm", fmtThousands(ctx.prof.redline))
+			elseif ctx.prof.layout == "rotary2" or ctx.prof.layout == "rotary3" then
+				what = string.format(
+					"%d rotors · fires %d Hz at idle, %d Hz at redline",
+					ctx.prof.layout == "rotary2" and 2 or 3,
+					fIdle,
+					fRed
+				)
 			else
 				what = string.format("%d cylinders · fires %d Hz at idle, %d Hz at redline", cyl, fIdle, fRed)
 			end
-			stats.engine:SetText(string.format("%s\n%d loops to generate (~%.1f s of CPU per player)",
-				what, #cfg.bands * 2 + 6, 0.13 * #cfg.bands + 0.4))
+			ctx.stats.engine:SetText(
+				string.format(
+					"%s\n%d loops to generate (~%.1f s of CPU per player)",
+					what,
+					#cfg.bands * 2 + 6,
+					0.13 * #cfg.bands + 0.4
+				)
+			)
 		end
-		if stats.gears then
+		if ctx.stats.gears then
 			local K = 60 / (2 * math.pi * car.wheelRadius)
 			local parts = {}
-			for i, r in ipairs(cfg.gears) do   -- the gears the box uses (a slow car drops its top ones)
-				parts[#parts + 1] = string.format("%s %d", ord(i), prof.redline / (K * r * cfg.final) * 2.23694)
+			for i, r in ipairs(cfg.gears) do -- the gears the box uses (a slow car drops its top ones)
+				parts[#parts + 1] = string.format("%s %d", ord(i), ctx.prof.redline / (K * r * cfg.final) * 2.23694)
 			end
-			stats.gears:SetText("Top speed per gear (mph): " .. table.concat(parts, " · "))
+			ctx.stats.gears:SetText("Top speed per gear (mph): " .. table.concat(parts, " · "))
 		end
-		if stats.final then
-			stats.final:SetText(prof.fit > 0 and string.format("Final drive %.2f (fitted)", cfg.final) or "Final drive")
-			stats.final:SizeToContents()
+		if ctx.stats.final then
+			ctx.stats.final:SetText(
+				ctx.prof.fit > 0 and string.format("Final drive %.2f (fitted)", cfg.final) or "Final drive"
+			)
+			ctx.stats.final:SizeToContents()
 		end
-		local p = E.EnginePreset(prof.preset)
+		local p = E.EnginePreset(ctx.prof.preset)
 		presetBox:SetText(p and p.name or "Custom engine")
 	end
 
 	local function changed()
-		prof.preset = "custom"
+		ctx.prof.preset = "custom"
 		refreshStats()
 	end
+	ctx.changed = changed
 
-	rebuild = function()
+	ctx.rebuild = function()
 		body:Clear()
-		stats = {}
+		ctx.stats = {}
 		local colW = floor((W - 40 * s - 2 * 14 * s) / 3)
 
-		-------------------------------------------------- Sound
-		local snd = card(body, "Sound", s)
-		snd:Dock(LEFT)
-		snd:SetWide(colW)
-		local l = label(snd, "Engine layout")
-		l:Dock(TOP)
-		local lay = vgui.Create("DComboBox", snd)
-		styleCombo(lay)
-		lay:Dock(TOP)
-		lay:SetTall(floor(30 * s))
-		lay:DockMargin(0, 4 * s, 0, 10 * s)
-		for _, o in ipairs(E.LAYOUT_ORDER) do lay:AddChoice(o[2], o[1], o[1] == prof.layout) end
-		lay.OnSelect = function(_, _, _, key) prof.layout = key; changed(); timer.Simple(0, rebuild) end
-		local function add(p) p:Dock(TOP); p:DockMargin(0, 0, 0, 6 * s) end
-		add(slider(snd, s, "Pitch", 0.5, 2, 2, prof.pitch, function(v) prof.pitch = v; changed() end, function(v) return string.format("×%.2f", v) end))
-		add(slider(snd, s, "Exhaust tone", 0, 1, 2, prof.tone, function(v) prof.tone = v; changed() end, toneName))
-		add(slider(snd, s, "Volume", 0, 1.5, 2, prof.volume, function(v) prof.volume = v; changed() end, function(v) return floor(v * 100 + 0.5) .. "%" end))
-		add(slider(snd, s, "Realism", 0, 1, 1, prof.realism, function(v) prof.realism = v; changed() end,
-			function(v) return v == 0 and "Rev Bench" or v < 1 and string.format("%d%%", v * 100) or "Full" end))
-		add(slider(snd, s, "Gurgle (off-throttle burble)", 0, 1, 2, prof.gurgle, function(v) prof.gurgle = v; changed() end,
-			function(v) return v <= 0 and "Off" or v < 0.3 and "Light" or v < 0.65 and "Burbly" or "Heavy" end))
-		add(slider(snd, s, "Pops & bangs (how often)", 0, 1, 2, prof.pops, function(v) prof.pops = v; changed() end,
-			function(v) return v <= 0 and "Off" or v < 0.25 and "Rare" or v < 0.5 and "Occasional" or v < 0.8 and "Frequent" or "Constant" end))
-		add(slider(snd, s, "Pops & bangs volume", 0, 2, 2, prof.popVol, function(v) prof.popVol = v; changed() end,
-			function(v) return floor(v * 100 + 0.5) .. "%" end))
-		add(slider(snd, s, "Pops & bangs tone", 0, 1, 2, prof.popTone, function(v) prof.popTone = v; changed() end,
-			function(v) return v < 0.25 and "Muffled" or v < 0.6 and "Sport" or v < 0.85 and "Loud pipe" or "Straight pipe" end))
-		local tb = checkbox(snd, "Turbocharged (whistle)", prof.turbo, function(v) prof.turbo = v; changed(); timer.Simple(0, rebuild) end)
-		tb:Dock(TOP)
-		tb:DockMargin(0, 6 * s, 0, 0)
-		if prof.turbo then
-			local pct = function(v) return floor(v * 100 + 0.5) .. "%" end
-			local tv = slider(snd, s, "Turbo whistle volume", 0, 2, 2, prof.turboVol or 1, function(v) prof.turboVol = v; changed() end, pct)
-			tv:Dock(TOP)
-			tv:DockMargin(0, 6 * s, 0, 0)
-			local bv = checkbox(snd, "Blow-off valve (pssh when you lift)", prof.bov, function(v) prof.bov = v; changed(); timer.Simple(0, rebuild) end)
-			bv:Dock(TOP)
-			bv:DockMargin(0, 6 * s, 0, 0)
-			if prof.bov then
-				local bvv = slider(snd, s, "Blow-off valve volume", 0, 2, 2, prof.bovVol or 1, function(v) prof.bovVol = v; changed() end, pct)
-				bvv:Dock(TOP)
-				bvv:DockMargin(0, 6 * s, 0, 0)
-			end
-		end
-
-		-------------------------------------------------- RPM
-		local rpm = card(body, "RPM & performance", s)
-		rpm:Dock(LEFT)
-		rpm:SetWide(colW)
-		rpm:DockMargin(14 * s, 0, 0, 0)
-		local add2 = function(p) p:Dock(TOP); p:DockMargin(0, 0, 0, 6 * s) end
-		add2(slider(rpm, s, "Idle", 500, 1500, 0, prof.idle, function(v) prof.idle = floor(v / 25 + 0.5) * 25; changed() end,
-			function(v) return fmtThousands(floor(v / 25 + 0.5) * 25) end))
-		add2(slider(rpm, s, "Redline", 3500, prof.layout == "electric" and 16000 or 12000, 0, prof.redline, function(v) prof.redline = floor(v / 100 + 0.5) * 100; changed() end,
-			function(v) return fmtThousands(floor(v / 100 + 0.5) * 100) end))
-		-- real performance: changes how the car actually drives; the revs and gears follow
-		add2(slider(rpm, s, "Acceleration", 0.5, 2.5, 2, prof.accel, function(v) prof.accel = floor(v * 20 + 0.5) / 20; changed() end,
-			function(v) return string.format("×%.2f", floor(v * 20 + 0.5) / 20) end))
-		-- shown in mph (the profile keeps km/h): steps of 5 mph, snapping to the car's stock speed
-		local KMH_PER_MPH = 1.609344
-		local stockMph = floor(E.CarTopSpeed(veh, car) / KMH_PER_MPH + 0.5)
-		local function snapMph(v)
-			v = floor(v + 0.5)
-			if math.abs(v - stockMph) < 3 then return stockMph, true end
-			return floor(v / 5 + 0.5) * 5, false
-		end
-		add2(slider(rpm, s, "Top speed", 25, 280, 0, prof.vmax > 0 and prof.vmax / KMH_PER_MPH or stockMph, function(v)
-			local mph, stock = snapMph(v)
-			prof.vmax = stock and 0 or floor(mph * KMH_PER_MPH + 0.5)
-			changed()
-		end, function(v)
-			local mph, stock = snapMph(v)
-			return stock and (mph .. " mph (stock)") or (mph .. " mph")
-		end))
-		stats.engine = label(rpm, "", "AudioMenu_Small", C.muted)
-		stats.engine:Dock(TOP)
-		stats.engine:DockMargin(0, 8 * s, 0, 0)
-		stats.engine:SetWrap(true)
-		stats.engine:SetAutoStretchVertical(true)
-		local note = label(rpm, "Acceleration and top speed change the car's real physics; the revs, gears and sound follow.", "AudioMenu_Small", C.muted)
-		note:Dock(BOTTOM)
-		note:SetWrap(true)
-		note:SetAutoStretchVertical(true)
-
-		-- generation quality: a setting of this client only (audio_engine_samplerate)
-		local ql = label(rpm, "Sound quality (your PC only)")
-		ql:Dock(TOP)
-		ql:DockMargin(0, 14 * s, 0, 0)
-		local q = vgui.Create("DComboBox", rpm)
-		styleCombo(q)
-		q:Dock(TOP)
-		q:SetTall(floor(30 * s))
-		q:DockMargin(0, 4 * s, 0, 0)
-		local rate = GetConVar("audio_engine_samplerate")
-		local cur = rate and rate:GetInt() or 44100
-		q:AddChoice("44.1 kHz (best, ~2 s per engine)", 44100, cur ~= 22050)
-		q:AddChoice("22.05 kHz (twice as fast, half the memory)", 22050, cur == 22050)
-		q.OnSelect = function(_, _, _, v)
-			-- changing it regenerates every engine sound at the new rate
-			RunConsoleCommand("audio_engine_samplerate", tostring(v))
-		end
-
-		-------------------------------------------------- Gearbox
-		local gb = card(body, "Gear ratios", s)
-		gb:Dock(FILL)
-		gb:DockMargin(14 * s, 0, 0, 0)
-		local top = vgui.Create("DPanel", gb)
-		top:Dock(TOP)
-		top:SetTall(floor(30 * s))
-		top.Paint = nil
-		local gp = vgui.Create("DComboBox", top)
-		styleCombo(gp)
-		gp:Dock(FILL)
-		gp:SetValue("Gearbox preset…")
-		for _, g in ipairs(E.GEAR_PRESETS) do gp:AddChoice(g.name, g.id) end
-		gp.OnSelect = function(_, _, _, id)
-			local g = E.GearPreset(id)
-			prof.gears = {}
-			for i, r in ipairs(g.gears) do prof.gears[i] = r end
-			prof.final = g.final
-			prof.preset = "custom"
-			rebuild()
-		end
-		local ng = vgui.Create("DNumberWang", top)
-		ng:Dock(RIGHT)
-		ng:SetWide(floor(56 * s))
-		ng:DockMargin(8 * s, 0, 0, 0)
-		ng:SetMinMax(1, 8)
-		ng:SetDecimals(0)
-		ng:SetValue(#prof.gears)
-		styleEntry(ng)
-		ng.OnValueChanged = function(_, v)
-			v = math.Clamp(floor(tonumber(v) or 6), 1, 8)
-			if v == #prof.gears then return end
-			while #prof.gears < v do prof.gears[#prof.gears + 1] = floor(prof.gears[#prof.gears] * 84 + 0.5) / 100 end
-			while #prof.gears > v do prof.gears[#prof.gears] = nil end
-			prof.preset = "custom"
-			timer.Simple(0, rebuild)
-		end
-
-		local grid = vgui.Create("DIconLayout", gb)
-		grid:Dock(TOP)
-		grid:DockMargin(0, 10 * s, 0, 0)
-		grid:SetSpaceX(8 * s)
-		grid:SetSpaceY(6 * s)
-		local cellW = floor((colW - 32 * s - 8 * s) / 2)
-		for i = 1, #prof.gears do
-			local cell = grid:Add("DPanel")
-			cell:SetSize(cellW, floor(28 * s))
-			cell.Paint = nil
-			local gl = label(cell, ord(i), "AudioMenu_Small", C.muted)
-			gl:SetPos(0, 6 * s)
-			local te = vgui.Create("DTextEntry", cell)
-			styleEntry(te)
-			te:SetNumeric(true)
-			te:SetPos(floor(40 * s), 0)
-			te:SetSize(cellW - floor(40 * s), floor(28 * s))
-			te:SetValue(string.format("%.2f", prof.gears[i]))
-			te:SetUpdateOnType(true)
-			te.OnValueChange = function(_, v)
-				local n = tonumber(v)
-				if n and n >= 0.3 and n <= 8 then prof.gears[i] = n; changed() end
-			end
-		end
-
-		local finRow = vgui.Create("DPanel", gb)
-		finRow:Dock(TOP)
-		finRow:SetTall(floor(28 * s))
-		finRow:DockMargin(0, 10 * s, 0, 0)
-		finRow.Paint = nil
-		stats.final = label(finRow, "Final drive", "AudioMenu_Small", C.muted)
-		stats.final:SetPos(0, 6 * s)
-		local fin = vgui.Create("DTextEntry", finRow)
-		styleEntry(fin)
-		fin:SetNumeric(true)
-		fin:Dock(RIGHT)
-		fin:SetWide(cellW - floor(40 * s))
-		fin:SetValue(string.format("%.2f", prof.final))
-		fin:SetUpdateOnType(true)
-		fin:SetEnabled(prof.fit == 0)
-		fin.OnValueChange = function(_, v)
-			local n = tonumber(v)
-			if n and n >= 2 and n <= 6 then prof.final = n; changed() end
-		end
-
-		local fitCb = checkbox(gb, "Fit gearing to the top speed (uses every gear)", prof.fit > 0, function(v)
-			prof.fit = v and 1 or 0
-			changed()
-			timer.Simple(0, rebuild)
-		end)
-		fitCb:Dock(TOP)
-		fitCb:DockMargin(0, 10 * s, 0, 4 * s)
-		stats.gears = label(gb, "", "AudioMenu_Small", C.muted)
-		stats.gears:Dock(TOP)
-		stats.gears:DockMargin(0, 8 * s, 0, 0)
-		stats.gears:SetWrap(true)
-		stats.gears:SetAutoStretchVertical(true)
+		buildSoundCard(ctx, body, colW)
+		buildRpmCard(ctx, body, colW)
+		buildGearCard(ctx, body, colW)
 
 		refreshStats()
 	end
 
-	for _, p in ipairs(E.ENGINE_PRESETS) do presetBox:AddChoice(p.name, p.id) end
+	for _, p in ipairs(E.ENGINE_PRESETS) do
+		presetBox:AddChoice(p.name, p.id)
+	end
 	presetBox:AddChoice("Custom engine", "custom")
 	presetBox.OnSelect = function(_, _, _, id)
 		if id == "custom" then return end
 		-- switching engines keeps the performance settings
-		local accel, vmax = prof.accel, prof.vmax
-		prof = E.ProfileFromPreset(id)
-		prof.accel, prof.vmax = accel, vmax
-		rebuild()
+		local accel, vmax = ctx.prof.accel, ctx.prof.vmax
+		ctx.prof = E.ProfileFromPreset(id)
+		ctx.prof.accel, ctx.prof.vmax = accel, vmax
+		ctx.rebuild()
 	end
 
 	local function send(str)
 		if not IsValid(veh) then return end
-		net.Start("audio_engine_set")
+		net.Start("perpheads/audio-engine/set-profile")
 		net.WriteEntity(veh)
 		net.WriteString(str)
 		net.SendToServer()
 	end
 	applyBtn.DoClick = function()
-		send(E.EncodeProfile(prof))
+		send(E.EncodeProfile(ctx.prof))
 		surface.PlaySound("buttons/button14.wav")
 	end
 	stockBtn.DoClick = function()
 		send("")
-		prof = E.CarStockProfile(car)
-		rebuild()
+		ctx.prof = E.CarStockProfile(car)
+		ctx.rebuild()
 	end
 
 	local access = GetConVar("audio_engine_tuneaccess")
 	local a = access and access:GetInt() or 1
 	local allowed = a == 0 or (a == 1 and ply:IsAdmin()) or (a >= 2 and ply:IsSuperAdmin())
-	footer:SetText(allowed
-		and "Applies to this car for everyone. A new engine takes a few seconds to generate; the old sound keeps playing until it's ready."
-		or "Only " .. (a >= 2 and "superadmins" or "admins") .. " can apply engine changes on this server. You can still try settings here.")
+	footer:SetText(
+		allowed
+				and "Applies to this car for everyone. A new engine takes a few seconds to generate; the old sound keeps playing."
+			or "Only "
+				.. (a >= 2 and "superadmins" or "admins")
+				.. " can apply engine changes on this server. You can still try settings here."
+	)
 	footer:SetTextColor(allowed and C.muted or C.red)
 
-	rebuild()
+	ctx.rebuild()
 end
 
-concommand.Add("audio_engine_menu", function() E.OpenMenu() end, nil, "Open the engine tuning menu")
+concommand.Add("audio_engine_menu", function()
+	E.OpenMenu()
+end, nil, "Open the engine tuning menu")
 
 -- right-click the car in the context menu (sandbox-based gamemodes)
 if properties and properties.Add then
@@ -546,7 +723,11 @@ if properties and properties.Add then
 		MenuLabel = "Engine tuning",
 		Order = 2000,
 		MenuIcon = "icon16/car.png",
-		Filter = function(self, ent, ply) return IsValid(ent) and E.GetCarConfig(ent) ~= nil end,
-		Action = function(self, ent) E.OpenMenu(ent) end,
+		Filter = function(self, ent, ply)
+			return IsValid(ent) and E.GetCarConfig(ent) ~= nil
+		end,
+		Action = function(self, ent)
+			E.OpenMenu(ent)
+		end,
 	})
 end

@@ -28,14 +28,26 @@
 	on their own scripts and livery skins, for testing outside the PERP gamemode.
 ]]
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 
-local cvMute = CreateConVar("audio_engine_mutestock", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
-	"1 = silence the TDM engine recordings of cars that use the procedural engine")
-local cvSkid = CreateConVar("audio_engine_muteskid", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
-	"1 = silence the TDM tyre screech when braking (shared by all TDM cars)")
-local cvScrape = CreateConVar("audio_engine_mutetyrescrape", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
-	"1 = silence the scrape of sliding tyres (glass bottle / dirt surface sounds; global)")
+local cvMute = CreateConVar(
+	"audio_engine_mutestock",
+	"1",
+	FCVAR_ARCHIVE + FCVAR_REPLICATED,
+	"1 = silence the TDM engine recordings of cars that use the procedural engine"
+)
+local cvSkid = CreateConVar(
+	"audio_engine_muteskid",
+	"1",
+	FCVAR_ARCHIVE + FCVAR_REPLICATED,
+	"1 = silence the TDM tyre screech when braking (shared by all TDM cars)"
+)
+local cvScrape = CreateConVar(
+	"audio_engine_mutetyrescrape",
+	"1",
+	FCVAR_ARCHIVE + FCVAR_REPLICATED,
+	"1 = silence the scrape of sliding tyres (glass bottle / dirt surface sounds; global)"
+)
 
 -- the scrape sounds of the surface materials PERP's wheels slide and brake on
 -- (glassbottle; slidingrubbertire / brakingrubbertire / snow, which all scrape as dirt)
@@ -52,11 +64,12 @@ E.PERP_SCRIPT_ALIASES = E.PERP_SCRIPT_ALIASES or {
 -- scripts with no model in PERP's content packs: nothing spawns on them, so the soundscripts
 -- they share don't keep a registered car's recording playing (the GTA IV tow truck's "bus_*"
 -- would keep the fire truck's)
-E.PERP_SCRIPT_UNUSED = E.PERP_SCRIPT_UNUSED or {
-	["perp2/towtruck"] = true,
-	["tdmcars/lee"] = true,
-	["tdmcars/subimpreza"] = true,
-}
+E.PERP_SCRIPT_UNUSED = E.PERP_SCRIPT_UNUSED
+	or {
+		["perp2/towtruck"] = true,
+		["tdmcars/lee"] = true,
+		["tdmcars/subimpreza"] = true,
+	}
 
 -- only soundscripts can be redefined; a raw path ("vehicles\...\x.wav") can't be. Door sounds
 -- (the GTA IV vehicles start up with "tdm_door_open") aren't the engine and may play elsewhere
@@ -66,16 +79,22 @@ local function add(set, snd)
 	end
 end
 
+local QUOTED_VALUE = table.concat({ "%s*", "\"([^\"]*)\"" })
+local STATE_BLOCK_PATTERN = table.concat({ "\"[Ss][Tt][Aa][Tt][Ee]\"", "%s*", "(%b{})" })
+local SOUND_KEY_PATTERN = table.concat({ "\"[Ss][Oo][Uu][Nn][Dd]\"", QUOTED_VALUE })
+local SKID_KEY_PATTERN = table.concat({ "\"[Ss][Kk][Ii][Dd]_%a+\"", QUOTED_VALUE })
+
 -- soundscript names of a vehicle script's engine states, into set[lower] = original spelling,
 -- and of its Skid_* sounds into skids
 local function stateSounds(path, set, skids)
 	local txt = file.Read(path, "GAME")
 	if not txt then return end
-	for block in txt:gmatch('"[Ss][Tt][Aa][Tt][Ee]"%s*(%b{})') do
-		add(set, block:match('"[Ss][Oo][Uu][Nn][Dd]"%s*"([^"]*)"'))
+	for block in txt:gmatch(STATE_BLOCK_PATTERN) do
+		add(set, block:match(SOUND_KEY_PATTERN))
 	end
-	if skids then
-		for snd in txt:gmatch('"[Ss][Kk][Ii][Dd]_%a+"%s*"([^"]*)"') do add(skids, snd) end
+	if not skids then return end
+	for snd in txt:gmatch(SKID_KEY_PATTERN) do
+		add(skids, snd)
 	end
 end
 
@@ -85,9 +104,13 @@ local function collect()
 		local pk, base = (script or ""):lower():match("^scripts/vehicles/([^/]+)/([^/]+)%.txt$")
 		if pk then claimed[pk .. "/" .. base] = { pk = pk, base = base } end
 	end
-	for _, car in pairs(E.Cars) do claim(car.script) end
+	for _, car in pairs(E.Cars) do
+		claim(car.script)
+	end
 	-- job variants not named <base>_something (dodgeramff)
-	for _, job in ipairs(E.JOB_VEHICLES or {}) do claim(job[3]) end
+	for _, job in ipairs(E.JOB_VEHICLES or {}) do
+		claim(job[3])
+	end
 	-- is this script one of a registered car's (its own name, or "<base>_something")?
 	local function ours(pk, name)
 		if E.PERP_SCRIPT_ALIASES[pk .. "/" .. name] or claimed[pk .. "/" .. name] then return true end
@@ -98,17 +121,20 @@ local function collect()
 	end
 
 	local mine, others, skids = {}, {}, {}
+	local function scanFolder(pk, tier)
+		local dir = "scripts/vehicles/" .. pk .. "/" .. tier
+		for _, f in ipairs((file.Find(dir .. "*.txt", "GAME"))) do
+			local name = f:lower():gsub("%.txt$", "")
+			if not E.PERP_SCRIPT_UNUSED[pk .. "/" .. name] then
+				local own = ours(pk, name)
+				-- spiked scripts scrape on the rims: that one stays
+				stateSounds(dir .. f, own and mine or others, own and tier ~= "spiked/" and skids or nil)
+			end
+		end
+	end
 	for _, pk in ipairs(PACKS) do
 		for _, tier in ipairs(TIERS) do
-			local dir = "scripts/vehicles/" .. pk .. "/" .. tier
-			for _, f in ipairs((file.Find(dir .. "*.txt", "GAME"))) do
-				local name = f:lower():gsub("%.txt$", "")
-				if not E.PERP_SCRIPT_UNUSED[pk .. "/" .. name] then
-					local own = ours(pk, name)
-					-- spiked scripts scrape on the rims: that one stays
-					stateSounds(dir .. f, own and mine or others, own and tier ~= "spiked/" and skids or nil)
-				end
-			end
+			scanFolder(pk, tier)
 		end
 	end
 	-- registered cars whose script lives somewhere else (e.g. the example police car in scripts/vehicles/plpd/)
@@ -118,7 +144,11 @@ local function collect()
 
 	local muted, kept = {}, 0
 	for low, name in pairs(mine) do
-		if others[low] then kept = kept + 1 else muted[low] = name end
+		if others[low] then
+			kept = kept + 1
+		else
+			muted[low] = name
+		end
 	end
 	return muted, kept, skids
 end
@@ -141,34 +171,55 @@ local function mute(name, on)
 	end
 end
 
+-- collect() reads every PERP vehicle script from disk, some 900 files: it runs once, on the
+-- server and on every joining client, and the later passes reuse the names it found
+local collected
+
 function E.ApplyStockMute()
-	local muted, kept, skids = collect()
+	collected = collected or { collect() }
+	local muted, kept, skids = collected[1], collected[2], collected[3]
 	E.PERP_MUTED, E.PERP_SKIDS = muted, skids
 	local on, skidOn = cvMute:GetBool(), cvSkid:GetBool()
 	local n, ns = 0, 0
-	for _, name in pairs(muted) do mute(name, on) n = n + 1 end
+	for _, name in pairs(muted) do
+		mute(name, on)
+		n = n + 1
+	end
 	for low, name in pairs(skids) do
-		if not muted[low] then mute(name, skidOn) ns = ns + 1 end
+		if not muted[low] then
+			mute(name, skidOn)
+			ns = ns + 1
+		end
 	end
 	if on then
-		MsgN(string.format("[Audio Engine] muted %d TDM engine sounds of PERP cars (%d shared with other vehicles kept)", n, kept))
+		MsgN(
+			string.format(
+				"[Audio Engine] muted %d TDM engine sounds of PERP cars (%d shared with other vehicles kept)",
+				n,
+				kept
+			)
+		)
 	end
-	if skidOn and ns > 0 then
-		MsgN(string.format("[Audio Engine] muted %d TDM tyre screech sounds", ns))
-	end
+	if skidOn and ns > 0 then MsgN(string.format("[Audio Engine] muted %d TDM tyre screech sounds", ns)) end
 	local scrapeOn = cvScrape:GetBool()
-	for _, name in ipairs(E.TYRE_SCRAPE_SOUNDS) do mute(name, scrapeOn) end
+	for _, name in ipairs(E.TYRE_SCRAPE_SOUNDS) do
+		mute(name, scrapeOn)
+	end
 end
 
 -- TDM / PERP define their soundscripts in their own autorun files, which may load after this
 -- one: (re)apply once everything is loaded, and once more a little later
-hook.Add("InitPostEntity", "audio_engine_perp", function()
+hook.Add("InitPostEntity", "perpheads/audio-engine/mute-stock", function()
 	E.ApplyStockMute()
 	timer.Simple(3, E.ApplyStockMute)
 end)
-cvars.AddChangeCallback("audio_engine_mutestock", function() E.ApplyStockMute() end, "audio_engine_perp")
-cvars.AddChangeCallback("audio_engine_muteskid", function() E.ApplyStockMute() end, "audio_engine_perp")
-cvars.AddChangeCallback("audio_engine_mutetyrescrape", function() E.ApplyStockMute() end, "audio_engine_perp")
+
+local function reapplyMute()
+	E.ApplyStockMute()
+end
+cvars.AddChangeCallback("audio_engine_mutestock", reapplyMute, "perpheads/audio-engine/mute-stock")
+cvars.AddChangeCallback("audio_engine_muteskid", reapplyMute, "perpheads/audio-engine/mute-stock")
+cvars.AddChangeCallback("audio_engine_mutetyrescrape", reapplyMute, "perpheads/audio-engine/mute-stock")
 if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then E.ApplyStockMute() end -- lua refresh
 
 -- spawn menu entries (sandbox and derived gamemodes; PERP's own dealer ignores them).
@@ -182,7 +233,9 @@ if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then
 local TEST_SCRIPT = "scripts/vehicles/audio_engine/test_car.txt"
 local fallback = 0
 local byName, jobOnly = {}, {}
-for _, car in pairs(E.Cars) do byName[car.name] = car end
+for _, car in pairs(E.Cars) do
+	byName[car.name] = car
+end
 for _, job in ipairs(E.JOB_VEHICLES or {}) do
 	local car = byName[job[2]]
 	if car and car.script == job[3] then jobOnly[car.name] = true end
@@ -216,17 +269,41 @@ end
 for _, job in ipairs(E.JOB_VEHICLES or {}) do
 	local car = byName[job[2]]
 	if car then
-		addSpawn("perp_job_" .. string.lower((job[1]:gsub("[^%w]+", "_"))), job[1], car, job[3],
-			"PERP job vehicles (Audio Engine)", job[4])
+		addSpawn(
+			"perp_job_" .. string.lower((job[1]:gsub("[^%w]+", "_"))),
+			job[1],
+			car,
+			job[3],
+			"PERP job vehicles (Audio Engine)",
+			job[4]
+		)
 	end
 end
 if fallback > 0 then
-	MsgN(string.format("[Audio Engine] %d PERP spawn entries use the generic test handling: their PERP vehicle scripts aren't mounted", fallback))
+	MsgN(
+		string.format(
+			"[Audio Engine] %d PERP spawn entries use the generic test handling: their PERP vehicle scripts aren't mounted",
+			fallback
+		)
+	)
 end
 
-if SERVER then
-	hook.Add("PlayerSpawnedVehicle", "audio_engine_jobskin", function(ply, veh)
-		local vt = veh.VehicleTable
-		if istable(vt) and vt.AudioSkin and vt.AudioSkin > 0 then veh:SetSkin(vt.AudioSkin) end
-	end)
+-- spawn-menu entries (Vehicles > Police) for the RTU SL65 AMG, one per livery
+local function addPoliceEntry(class, name, skin)
+	list.Set("Vehicles", class, {
+		Name = name,
+		Class = "prop_vehicle_jeep",
+		Category = "Police",
+		Author = "Tilin",
+		Information = "Mercedes SL65 AMG, police RTU. Procedural V12 engine sound with speed/rpm HUD.",
+		Model = "models/plpd/sl65amg_rtu.mdl",
+		KeyValues = {
+			vehiclescript = "scripts/vehicles/plpd/sl65amg_rtu.txt",
+			skin = tostring(skin),
+		},
+	})
 end
+
+addPoliceEntry("rtu_sl65amg", "SL65 AMG (Police)", 0)
+addPoliceEntry("rtu_sl65amg_blue", "SL65 AMG (RTU Blue)", 1)
+addPoliceEntry("rtu_sl65amg_yellow", "SL65 AMG (RTU Yellow)", 2)

@@ -98,7 +98,7 @@ function ply:GetVehicle() return car end
 function ply:KeyDown(k) return self.keys[k] or false end
 bit = require("bit")
 
-AUDIO_ENGINE = {}
+PerpAudioEngine = {}
 dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "audio_engine/sh_presets.lua"); dofile(A .. "audio_engine/sh_drivetrain.lua")
 dofile(A .. "audio_engine/cl_synth.lua"); dofile(A .. "audio_engine/cl_soundbank.lua")
 util = util or {}; util.TraceLine = function() return { Hit = false, Fraction = 1 } end
@@ -107,8 +107,8 @@ cookie = { GetNumber = function(_, d) return d end, Set = function() end }
 dofile(A .. "audio_engine/cl_engine.lua")
 run("InitPostEntity")
 local t0 = os.clock()
-local stockKey = AUDIO_ENGINE.ResolveProfile(AUDIO_ENGINE.Cars["models/plpd/sl65amg_rtu.mdl"]).id
-for i = 1, 100000 do run("Think") if AUDIO_ENGINE.Bank.list[stockKey].ready then break end end
+local stockKey = PerpAudioEngine.ResolveProfile(PerpAudioEngine.Cars["models/plpd/sl65amg_rtu.mdl"]).id
+for i = 1, 100000 do run("Think") if PerpAudioEngine.Bank.list[stockKey].ready then break end end
 print("bank ready", stockKey, "cpu", os.clock() - t0)
 local sdump = 0 for k, v in pairs(generated) do sdump = sdump + #v.buf end print("generated samples", sdump)
 
@@ -117,8 +117,8 @@ local v = 0
 local out = {}
 local log = io.open("/home/claude/tools/out/drive_log3.csv", "w") log:write("t,v_kmh,rpm,gear,thr,soundThr,phase\n")
 local function keys(f, b, h) ply.keys[IN_FORWARD] = f ply.keys[IN_BACK] = b ply.keys[IN_JUMP] = h end
-do local pp = AUDIO_ENGINE.ProfileFromPreset(os.getenv("PRESET") or "sl65") if os.getenv("POPS") then pp.pops = 1 pp.popVol = 2 end car.nw.audio_prof = AUDIO_ENGINE.EncodeProfile(pp) end
-for i = 1, 100000 do run("Think") local c = AUDIO_ENGINE.ClientCars[car] if c and c.bank and c.bank.ready and c.bank.key == AUDIO_ENGINE.GetEngineConfig(car).id then break end end
+do local pp = PerpAudioEngine.ProfileFromPreset(os.getenv("PRESET") or "sl65") if os.getenv("POPS") then pp.pops = 1 pp.popVol = 2 end car.nw.audio_prof = PerpAudioEngine.EncodeProfile(pp) end
+for i = 1, 100000 do run("Think") local c = PerpAudioEngine.ClientCars[car] if c and c.bank and c.bank.ready and c.bank.key == PerpAudioEngine.GetEngineConfig(car).id then break end end
 local script = {
   { 0, function() keys(false, false, true) car.nw.audio_on = true car.nw.audio_on_t = now - 10 end },
   { 1.5, function() keys(true, false, true) end },  { 1.8, function() keys(false, false, true) end },   -- blip
@@ -139,7 +139,7 @@ while true do
   car.pos.y = car.pos.y + v / 0.0254 * dt
   now = now + dt
   run("Think")
-  local c = AUDIO_ENGINE.ClientCars[car]
+  local c = PerpAudioEngine.ClientCars[car]
   local st = c.st
   log:write(string.format("%.3f,%.1f,%.0f,%d,%.2f,%.2f,%s\n", now, c.v * 3.6, st.rpm, st.gear, st.thr, st.soundThr, st.phase))
   local n = SR / FPS

@@ -57,6 +57,7 @@ function findAll(pat) {
     player = { GetAll = function() return {} end }
     LISTED, FALLBACK, NOSCRIPT, IDS = 0, 0, {}, {}
     list = { Set = function(kind, id, t)
+      if t.Category == "Police" then return end -- the SL65 test car's own entries
       if IDS[id] then NOSCRIPT[#NOSCRIPT + 1] = "duplicate:" .. id end
       IDS[id] = t
       LISTED = LISTED + 1
@@ -77,7 +78,7 @@ function findAll(pat) {
       end,
     }
     table.Count = function(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
-    AUDIO_ENGINE = {}`)
+    PerpAudioEngine = {}`)
   for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'sh_perp.lua',
     'cl_baked.lua', 'cl_synth.lua', 'cl_soundbank.lua']) await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
 
@@ -86,7 +87,7 @@ function findAll(pat) {
 
   // 1. stock mute
   await L.doString(`
-    E = AUDIO_ENGINE
+    E = PerpAudioEngine
     E.ApplyStockMute()
     local names, n = {}, 0
     for low, name in pairs(E.PERP_MUTED) do n = n + 1 names[#names + 1] = name end

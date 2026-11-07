@@ -3,7 +3,7 @@
 	turbo bank) through the addon's own cl_soundbank build, and describes each bank for
 	lua/audio_engine/cl_baked.lua. bake.js writes the WAVs as sound.Generate hands them over.
 ]]
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 local Bank = E.Bank
 BAKE = {}
 
@@ -163,7 +163,7 @@ function BAKE.header(version)
 		"\tSynth version: " .. version,
 		"]]",
 		"",
-		"local E = AUDIO_ENGINE",
+		"local E = PerpAudioEngine",
 		"E.BAKED_VERSION = " .. string.format("%q", version),
 	}
 	return table.concat(L, "\n") .. "\n"

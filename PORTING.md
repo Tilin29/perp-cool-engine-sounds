@@ -67,13 +67,13 @@ Don't copy these files. They hold the extras:
 | `sv_cruise.lua` | speed limiter (middle mouse) |
 | `cl_menu.lua` | tuning menu |
 | `cl_hud.lua` | rpm/speed HUD |
-| `lua/autorun/sl65amg_rtu_vehicle.lua`, `models/`, `materials/`, `scripts/` | this addon's test police car |
+| `models/`, `materials/`, `scripts/` | this addon's test police car |
 
 Loader (`lua/autorun/audio_engine_init.lua`):
 
 ```lua
 -- Audio Engine: engine sounds for PERP's cars (sound only)
-AUDIO_ENGINE = AUDIO_ENGINE or {}
+PerpAudioEngine = PerpAudioEngine or {}
 
 local base = "audio_engine/"
 local shared = { "sh_config.lua", "sh_presets.lua", "sh_drivetrain.lua", "sh_carlist.lua", "sh_perp.lua" }
@@ -111,8 +111,11 @@ the driver's keys and the car's top speed, which is all the sound needs. It neve
 	drives: PERP's vehicle scripts stay in charge.
 ]]
 
-local E = AUDIO_ENGINE
+local E = PerpAudioEngine
 local tracked = {}
+-- the cars with a driver: the Think hook below runs every tick on a full server, and must not
+-- grow with the cars parked around the map
+local driven = {}
 
 local function track(veh)
 	if not IsValid(veh) or not veh:IsVehicle() or not E.GetCarConfig(veh) then return end
@@ -125,54 +128,64 @@ local function track(veh)
 	end
 end
 
-hook.Add("OnEntityCreated", "audio_engine", function(ent)
-	timer.Simple(0, function() track(ent) end)
+hook.Add("OnEntityCreated", "perpheads/audio-engine/track-cars", function(ent)
+	if not ent:IsVehicle() then return end
+	timer.Simple(0, function()
+		track(ent)
+	end)
 end)
 
 -- on = start-up sound (or the stop sound when off); instant = straight to idle, no start-up
 function E.SetEngine(veh, on, instant)
-	veh:SetNW2Bool("audio_on", on)
 	if on then
 		local car = E.GetCarConfig(veh)
 		veh:SetNW2Float("audio_on_t", instant and 0 or CurTime())
 		veh:SetNW2Bool("audio_emo", car ~= nil and car.emotionStart == true)
 	end
+	-- last: a client that sees it should find the rest already there
+	veh:SetNW2Bool("audio_on", on)
 end
 
 -- like TDM's stock sounds: the engine starts as the driver gets in and stops as they get out
-hook.Add("PlayerEnteredVehicle", "audio_engine", function(ply, veh)
+hook.Add("PlayerEnteredVehicle", "perpheads/audio-engine/ignition", function(_, veh)
 	if not tracked[veh] then track(veh) end
-	if tracked[veh] and not veh:GetNW2Bool("audio_on", false) then E.SetEngine(veh, true) end
+	if not tracked[veh] then return end
+	driven[veh] = true
+	if not veh:GetNW2Bool("audio_on", false) then E.SetEngine(veh, true) end
 end)
 
-hook.Add("PlayerLeaveVehicle", "audio_engine", function(ply, veh)
+hook.Add("PlayerLeaveVehicle", "perpheads/audio-engine/ignition", function(_, veh)
 	if tracked[veh] then E.SetEngine(veh, false) end
 end)
 
+local function keyBits(drv)
+	local bits = 0
+	if drv:KeyDown(IN_FORWARD) then bits = bits + 1 end
+	if drv:KeyDown(IN_BACK) then bits = bits + 2 end
+	if drv:KeyDown(IN_JUMP) then bits = bits + 4 end
+	if drv:KeyDown(IN_MOVELEFT) ~= drv:KeyDown(IN_MOVERIGHT) then bits = bits + 8 end
+
+	return bits
+end
+
 -- the driver's W / S / Space / steering, for the rpm model on every client
-hook.Add("Think", "audio_engine", function()
-	for veh in pairs(tracked) do
-		if not IsValid(veh) then
-			tracked[veh] = nil
-		else
-			local drv = veh:GetDriver()
-			local bits = 0
-			if IsValid(drv) then
-				if drv:KeyDown(IN_FORWARD) then bits = bits + 1 end
-				if drv:KeyDown(IN_BACK) then bits = bits + 2 end
-				if drv:KeyDown(IN_JUMP) then bits = bits + 4 end
-				if drv:KeyDown(IN_MOVELEFT) ~= drv:KeyDown(IN_MOVERIGHT) then bits = bits + 8 end
-			end
-			if bits ~= veh.audioInBits then
-				veh.audioInBits = bits
-				veh:SetNW2Int("audio_in", bits)
-			end
+hook.Add("Think", "perpheads/audio-engine/network-keys", function()
+	for veh in pairs(driven) do
+		local drv = IsValid(veh) and veh:GetDriver()
+		local bits = IsValid(drv) and keyBits(drv) or 0
+		if IsValid(veh) and bits ~= veh.audioInBits then
+			veh.audioInBits = bits
+			veh:SetNW2Int("audio_in", bits)
 		end
+		if not IsValid(drv) then driven[veh] = nil end
 	end
 end)
 
 -- lua refresh
-for _, ent in ipairs(ents.GetAll()) do track(ent) end
+for _, ent in ipairs(ents.GetAll()) do
+	track(ent)
+	if tracked[ent] and IsValid(ent:GetDriver()) then driven[ent] = true end
+end
 ```
 
 The start-up sound takes about a second, as TDM's did. The car can already drive during it, and
@@ -180,7 +193,7 @@ the revs pick up once it ends. Each client runs the rpm and gear model from thes
 so the server sends only a few bits per car whenever a key changes.
 
 **If PERP has its own ignition** (keys, fuel, engine toggle), delete the two `PlayerEnteredVehicle` /
-`PlayerLeaveVehicle` hooks. Then call `AUDIO_ENGINE.SetEngine(veh, true/false)` wherever PERP turns
+`PlayerLeaveVehicle` hooks. Then call `PerpAudioEngine.SetEngine(veh, true/false)` wherever PERP turns
 an engine on or off. Use `instant = true` for a car that should already be running, with no start-up sound.
 
 ## 4. Stock TDM sounds
@@ -207,7 +220,7 @@ The new tyre roar and wind sound play either way.
 
 ## 5. What players can change
 
-Client convars, all optional: `audio_engine_volume` (0-2), `audio_engine_roadnoise`,
+Client convars, all optional: `audio_engine_volume` (0-2), `audio_engine_maxcars` (other cars in full detail, default 8; twice as many more play one loop, the rest are silent), `audio_engine_range` (metres past which other cars are not played, default 200), `audio_engine_roadnoise`,
 `audio_engine_windnoise`, `audio_engine_doppler`, `audio_engine_passby`. `cl_engine.lua` also creates
 `audio_engine_startkey`, which does nothing in this port.
 
