@@ -29,7 +29,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   spread lone pops over every coast: popcorn).
   `CAR_SUPERCHARGER[name]` = "sport" | "regular" | "heavy" (11 cars; heavy: trucks, none stock): the blower whine, locked to the revs
   (cl_engine pitches the env loop `sc_<v>` by rpm / `Synth.SC_REF_RPM` 2800, level x `SC_VARIANTS[v].level` x (rpm/redline)^0.9,
-  off throttle the bypass loop `sc_<v>_off` at half). A supercharged car's preset turbo/BOV is off (CarStockProfile). Runtime only.
+  off throttle the bypass loop `sc_<v>_off` at half). The bypass follows the throttle, not the limiter's fuel cuts (`car.scThr`,
+  shuts 0.15 s / opens 0.1 s), and on the limiter the whine holds at 0.985 x redline (`scRpm`): following the cuts it warbled.
+  A supercharged car's preset turbo/BOV is off (CarStockProfile). Runtime only.
   `CAR_EMOTION[name]`: high-powered cars that rev-flare on start-up (`cfg.emotionStart`, picked by sv_engine; runtime only); others get the gentle start.
   `ECONOMY[name]` + `ECONOMY_SOUND`: economy cars get tone x0.5 and gurgle 0 (in the sound key: re-bake), volume 0.8, soundLevel 80.
 - `sh_perp.lua`: mutes the TDM engine soundscripts named in registered cars' PERP scripts (base + used/upgrade_1/upgrade_2/spiked
