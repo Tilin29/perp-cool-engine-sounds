@@ -361,6 +361,51 @@ function E.FitGearCount(gears, topKmh, count, redline, wkg)
 	return g
 end
 
+--[[
+	A car's own gearing (sh_carlist.lua E.CAR_GEARING, made with the debug module's gearing editor),
+	set by shift speeds instead of ratios. One entry per gear, the last is the top gear:
+	  { mph = 24, rpm = 5500 }             changes up at 24 mph, where it turns 5,500 rpm (W held:
+	                                       gentler pulling changes up a little earlier)
+	  { mph = 42, rpm = 5600, down = 15 }  ... and changes down under 15 mph coasting or braking
+	                                       (no `down`: the default shift points)
+	  { down = 60 }                        the top gear: it turns topRpm at the car's top speed
+	  topRpm = 5200                        (default: E.TOP_GEAR_DROP under redline)
+	Each gear is at least GEAR_MIN_STEP taller than the one before, so every upshift drops the
+	revs far enough to hear it. Runtime only: no re-bake.
+]]
+E.GEAR_MIN_STEP = 1.1
+local MS_PER_MPH = 0.44704
+
+function E.ApplyGearing(cfg, spec)
+	local n = #spec
+	if n < 1 then return cfg end
+	local K = 60 / (2 * pi * cfg.wheelRadius)
+	local red, idle = cfg.redline, cfg.idle
+	local ratios, up, down = {}, {}, {}
+	for i = 1, n do
+		local g = spec[i]
+		local r
+		if i < n then
+			up[i] = math.Clamp(tonumber(g.rpm) or red * 0.92, idle * 1.5, red * 0.99)
+			r = up[i] / (max(1, tonumber(g.mph) or 10) * MS_PER_MPH * K)
+		else
+			local top = math.Clamp(tonumber(spec.topRpm) or red * E.TopGearShare(red), idle * 1.5, red * 0.985)
+			r = top / (cfg.topSpeed / 3.6 * K)
+		end
+		if i > 1 then r = min(r, ratios[i - 1] / E.GEAR_MIN_STEP) end
+		ratios[i] = r
+		local d = tonumber(g.down)
+		if i > 1 and d and d > 0 then
+			-- under the speed where the gear below changes up (or it would change straight back)
+			local belowUp = (up[i - 1] or red * 0.92) / (ratios[i - 1] * K)
+			down[i] = min(d * MS_PER_MPH, belowUp * 0.9)
+		end
+	end
+	cfg.gears, cfg.final, cfg.reverse = ratios, 1, ratios[1] * 0.9
+	cfg.shiftPlan = { up = up, down = down }
+	return cfg
+end
+
 local resolveCache = setmetatable({}, { __mode = "k" })
 
 --[[
@@ -413,6 +458,10 @@ function E.ResolveProfile(car, prof)
 	cfg.reverse = prof.gears[1] * 0.9
 	-- torque converter stall speed (an electric motor is direct drive)
 	cfg.stallRpm = cfg.electric and prof.idle or (prof.idle + 0.27 * prof.redline)
+	-- the car's own gearing (E.CAR_GEARING), unless the profile sets its ratios by hand (fit 0)
+	if type(car.gearing) == "table" and prof.fit > 0 then E.ApplyGearing(cfg, car.gearing) end
+	-- how fast it revs up and drops back in neutral (E.CAR_REV; sh_drivetrain.lua DT.REV)
+	if type(car.rev) == "table" then cfg.revRise, cfg.revFall = tonumber(car.rev.rise), tonumber(car.rev.fall) end
 	local p = E.EnginePreset(prof.preset)
 	cfg.engineName = p and p.name or "Custom"
 	-- the exhaust voice: the car's own, else its preset's (sh_presets character), else the layout's

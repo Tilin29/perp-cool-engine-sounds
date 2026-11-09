@@ -32,7 +32,7 @@
 local E = AUDIO_ENGINE
 
 local cvHandling = CreateConVar("audio_engine_handling", "1", FCVAR_ARCHIVE,
-	"1 = anti-spin setup on cars with the procedural engine (front brake bias, less power while steering at speed, lower centre of mass); applies to cars spawned after")
+	"1 = anti-spin setup on cars with the procedural engine (front brake bias, less power while steering at speed, lower centre of mass, wider lock at speed); 0 = the vehicle script's own handling. Applies at once")
 
 ---------------------------------------------------------------------------
 -- setting vehicle params
@@ -201,10 +201,13 @@ function E.PrepareHandling(veh)
 	local script = E.VehicleScriptOf(veh)
 	veh.audioScript = script
 	veh.audioSpiked = script ~= nil and script:find("/spiked/", 1, true) ~= nil
-	if veh.audioSpiked then return end
 
 	local ok, p = pcall(veh.GetVehicleParams, veh)
 	if not ok or not istable(p) or not istable(p.engine) then return end
+	if veh.audioSpiked then
+		veh.audioScriptParams = table.Copy(p)
+		return
+	end
 	local changed = false
 	-- the script the spawn entry asked for (a job variant's own), else the car's base script
 	local want = istable(veh.VehicleTable) and veh.VehicleTable.AudioPerpScript or car.script
@@ -214,6 +217,8 @@ function E.PrepareHandling(veh)
 		veh.audioPerpPhysics = true
 		changed = true
 	end
+	-- the car's handling before the anti-spin setup: E.RebaseHandling starts from it
+	veh.audioScriptParams = table.Copy(p)
 	if cvHandling:GetBool() then
 		antiSpin(p)
 		veh.audioAntiSpin = true
@@ -229,6 +234,37 @@ function E.PrepareHandling(veh)
 		end
 	end
 end
+
+--[[
+	Rebuild the car's base params (what sv_engine's E.ApplyPerformance starts from) from its script
+	handling (veh.audioScriptParams, or `scriptParams` to replace it, e.g. edited live by the debug
+	module), with the anti-spin setup only while audio_engine_handling is on. Switching that convar
+	runs this on every car, so it applies at once (it used to take effect on cars spawned after).
+]]
+function E.RebaseHandling(veh, scriptParams)
+	if scriptParams then veh.audioScriptParams = table.Copy(scriptParams) end
+	local sp = veh.audioScriptParams
+	if not sp then return false end
+	local p = table.Copy(sp)
+	if cvHandling:GetBool() and not veh.audioSpiked then
+		antiSpin(p)
+		veh.audioAntiSpin = true
+		veh.audioSteerFast = E.ANTI_SPIN.steerFast * (veh.audioSteerLock or 1)
+	else
+		-- the lock at speed (traction tick) goes with the anti-spin setup
+		veh.audioAntiSpin, veh.audioSteerFast, veh.audioSteerLock, veh.audioSteerSent = nil, nil, nil, nil
+	end
+	veh.audioBase = p
+	if E.RefreshCarStats then E.RefreshCarStats(veh, p) end
+	if E.ApplyPerformance then E.ApplyPerformance(veh, E.DecodeProfile(veh:GetNW2String("audio_prof", ""))) end
+	return true
+end
+
+cvars.AddChangeCallback("audio_engine_handling", function()
+	for veh in pairs(E.TrackedVehicles or {}) do
+		if IsValid(veh) then E.RebaseHandling(veh) end
+	end
+end, "audio_engine_rebase")
 
 ---------------------------------------------------------------------------
 -- 3. stability assist for the PERP cars, with their own steering angles

@@ -2,12 +2,13 @@
 	Audio Engine - in-game tuning menu (client)
 
 	The Rev Bench controls for the car you're in (or looking at): engine presets, layout,
-	pitch, exhaust tone, volume, realism, turbo, idle, redline, gear ratios and final drive.
+	pitch, exhaust tone, volume, realism, turbo, idle, redline, acceleration and top speed.
 	Apply sends the profile to the server, which shares it with everyone; each client then
-	generates the new engine sound in the background.
+	generates the new engine sound in the background. (Gearing is set per car by shift speeds in
+	the debug module's gearing editor: the old ratio editor here never reached the car.)
 
-	Open with: !engine in chat, `audio_engine_menu` in console, or right-click the car in the
-	context menu (C) -> "Engine tuning".
+	Off unless the server turns it on: audio_engine_editor 1. Then open with: !engine in chat,
+	`audio_engine_menu` in console, or right-click the car in the context menu (C) -> "Engine tuning".
 ]]
 
 local E = AUDIO_ENGINE
@@ -49,10 +50,6 @@ local function fmtThousands(n)
 	return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
 end
 
-local function ord(g)
-	return g == 1 and "1st" or g == 2 and "2nd" or g == 3 and "3rd" or (g .. "th")
-end
-
 ---------------------------------------------------------------------------
 -- styled controls
 ---------------------------------------------------------------------------
@@ -69,14 +66,6 @@ local function styleCombo(cb)
 	cb:SetFont("AudioMenu_Body")
 	cb:SetTextColor(C.fg)
 	cb.Paint = function(self, w, h) roundBox(6, 0, 0, w, h, C.face) end
-end
-
-local function styleEntry(te)
-	te:SetFont("AudioMenu_Num")
-	te.Paint = function(self, w, h)
-		roundBox(6, 0, 0, w, h, C.face, self:IsEditing() and C.amber or C.line)
-		self:DrawTextEntryText(C.fg, C.amber, C.fg)
-	end
 end
 
 local function slider(parent, s, text, minV, maxV, decimals, value, onChange, fmtFn)
@@ -165,6 +154,10 @@ end
 
 function E.OpenMenu(veh)
 	local ply = LocalPlayer()
+	if not E.EditorEnabled() then
+		chat.AddText(C.amber, "[Audio Engine] ", C.fg, "The engine editor is off on this server (audio_engine_editor 0).")
+		return
+	end
 	if not IsValid(veh) then
 		veh = ply:GetVehicle()
 		if not (IsValid(veh) and E.GetCarConfig(veh)) then
@@ -186,11 +179,12 @@ function E.OpenMenu(veh)
 	for k, v in pairs(cur) do prof[k] = v end
 	prof.gears = {}
 	for i, r in ipairs(cur.gears) do prof.gears[i] = r end
+	prof.fit = 1   -- (gearing comes from the car: fitted, or its own E.CAR_GEARING)
 
 	local s = math.Clamp(ScrH() / 1080, 0.7, 1.6)
 	if 870 * s > ScrH() - 40 then s = (ScrH() - 40) / 870 end   -- always fits on screen
 	makeFonts(s)
-	local W, H = floor(1000 * s), floor(870 * s)
+	local W, H = floor(720 * s), floor(870 * s)
 	frame = vgui.Create("DFrame")
 	frame:SetSize(W, H)
 	frame:Center()
@@ -273,18 +267,6 @@ function E.OpenMenu(veh)
 			stats.engine:SetText(string.format("%s\n%d loops to generate (~%.1f s of CPU per player)",
 				what, #cfg.bands * 2 + 6, 0.13 * #cfg.bands + 0.4))
 		end
-		if stats.gears then
-			local K = 60 / (2 * math.pi * car.wheelRadius)
-			local parts = {}
-			for i, r in ipairs(cfg.gears) do   -- the gears the box uses (a slow car drops its top ones)
-				parts[#parts + 1] = string.format("%s %d", ord(i), prof.redline / (K * r * cfg.final) * 2.23694)
-			end
-			stats.gears:SetText("Top speed per gear (mph): " .. table.concat(parts, " · "))
-		end
-		if stats.final then
-			stats.final:SetText(prof.fit > 0 and string.format("Final drive %.2f (fitted)", cfg.final) or "Final drive")
-			stats.final:SizeToContents()
-		end
 		local p = E.EnginePreset(prof.preset)
 		presetBox:SetText(p and p.name or "Custom engine")
 	end
@@ -297,7 +279,7 @@ function E.OpenMenu(veh)
 	rebuild = function()
 		body:Clear()
 		stats = {}
-		local colW = floor((W - 40 * s - 2 * 14 * s) / 3)
+		local colW = floor((W - 40 * s - 14 * s) / 2)
 
 		-------------------------------------------------- Sound
 		local snd = card(body, "Sound", s)
@@ -346,8 +328,7 @@ function E.OpenMenu(veh)
 
 		-------------------------------------------------- RPM
 		local rpm = card(body, "RPM & performance", s)
-		rpm:Dock(LEFT)
-		rpm:SetWide(colW)
+		rpm:Dock(FILL)
 		rpm:DockMargin(14 * s, 0, 0, 0)
 		local add2 = function(p) p:Dock(TOP); p:DockMargin(0, 0, 0, 6 * s) end
 		add2(slider(rpm, s, "Idle", 500, 1500, 0, prof.idle, function(v) prof.idle = floor(v / 25 + 0.5) * 25; changed() end,
@@ -401,102 +382,6 @@ function E.OpenMenu(veh)
 			RunConsoleCommand("audio_engine_samplerate", tostring(v))
 		end
 
-		-------------------------------------------------- Gearbox
-		local gb = card(body, "Gear ratios", s)
-		gb:Dock(FILL)
-		gb:DockMargin(14 * s, 0, 0, 0)
-		local top = vgui.Create("DPanel", gb)
-		top:Dock(TOP)
-		top:SetTall(floor(30 * s))
-		top.Paint = nil
-		local gp = vgui.Create("DComboBox", top)
-		styleCombo(gp)
-		gp:Dock(FILL)
-		gp:SetValue("Gearbox preset…")
-		for _, g in ipairs(E.GEAR_PRESETS) do gp:AddChoice(g.name, g.id) end
-		gp.OnSelect = function(_, _, _, id)
-			local g = E.GearPreset(id)
-			prof.gears = {}
-			for i, r in ipairs(g.gears) do prof.gears[i] = r end
-			prof.final = g.final
-			prof.preset = "custom"
-			rebuild()
-		end
-		local ng = vgui.Create("DNumberWang", top)
-		ng:Dock(RIGHT)
-		ng:SetWide(floor(56 * s))
-		ng:DockMargin(8 * s, 0, 0, 0)
-		ng:SetMinMax(1, 8)
-		ng:SetDecimals(0)
-		ng:SetValue(#prof.gears)
-		styleEntry(ng)
-		ng.OnValueChanged = function(_, v)
-			v = math.Clamp(floor(tonumber(v) or 6), 1, 8)
-			if v == #prof.gears then return end
-			while #prof.gears < v do prof.gears[#prof.gears + 1] = floor(prof.gears[#prof.gears] * 84 + 0.5) / 100 end
-			while #prof.gears > v do prof.gears[#prof.gears] = nil end
-			prof.preset = "custom"
-			timer.Simple(0, rebuild)
-		end
-
-		local grid = vgui.Create("DIconLayout", gb)
-		grid:Dock(TOP)
-		grid:DockMargin(0, 10 * s, 0, 0)
-		grid:SetSpaceX(8 * s)
-		grid:SetSpaceY(6 * s)
-		local cellW = floor((colW - 32 * s - 8 * s) / 2)
-		for i = 1, #prof.gears do
-			local cell = grid:Add("DPanel")
-			cell:SetSize(cellW, floor(28 * s))
-			cell.Paint = nil
-			local gl = label(cell, ord(i), "AudioMenu_Small", C.muted)
-			gl:SetPos(0, 6 * s)
-			local te = vgui.Create("DTextEntry", cell)
-			styleEntry(te)
-			te:SetNumeric(true)
-			te:SetPos(floor(40 * s), 0)
-			te:SetSize(cellW - floor(40 * s), floor(28 * s))
-			te:SetValue(string.format("%.2f", prof.gears[i]))
-			te:SetUpdateOnType(true)
-			te.OnValueChange = function(_, v)
-				local n = tonumber(v)
-				if n and n >= 0.3 and n <= 8 then prof.gears[i] = n; changed() end
-			end
-		end
-
-		local finRow = vgui.Create("DPanel", gb)
-		finRow:Dock(TOP)
-		finRow:SetTall(floor(28 * s))
-		finRow:DockMargin(0, 10 * s, 0, 0)
-		finRow.Paint = nil
-		stats.final = label(finRow, "Final drive", "AudioMenu_Small", C.muted)
-		stats.final:SetPos(0, 6 * s)
-		local fin = vgui.Create("DTextEntry", finRow)
-		styleEntry(fin)
-		fin:SetNumeric(true)
-		fin:Dock(RIGHT)
-		fin:SetWide(cellW - floor(40 * s))
-		fin:SetValue(string.format("%.2f", prof.final))
-		fin:SetUpdateOnType(true)
-		fin:SetEnabled(prof.fit == 0)
-		fin.OnValueChange = function(_, v)
-			local n = tonumber(v)
-			if n and n >= 2 and n <= 6 then prof.final = n; changed() end
-		end
-
-		local fitCb = checkbox(gb, "Fit gearing to the top speed (uses every gear)", prof.fit > 0, function(v)
-			prof.fit = v and 1 or 0
-			changed()
-			timer.Simple(0, rebuild)
-		end)
-		fitCb:Dock(TOP)
-		fitCb:DockMargin(0, 10 * s, 0, 4 * s)
-		stats.gears = label(gb, "", "AudioMenu_Small", C.muted)
-		stats.gears:Dock(TOP)
-		stats.gears:DockMargin(0, 8 * s, 0, 0)
-		stats.gears:SetWrap(true)
-		stats.gears:SetAutoStretchVertical(true)
-
 		refreshStats()
 	end
 
@@ -547,7 +432,7 @@ if properties and properties.Add then
 		MenuLabel = "Engine tuning",
 		Order = 2000,
 		MenuIcon = "icon16/car.png",
-		Filter = function(self, ent, ply) return IsValid(ent) and E.GetCarConfig(ent) ~= nil end,
+		Filter = function(self, ent, ply) return E.EditorEnabled() and IsValid(ent) and E.GetCarConfig(ent) ~= nil end,
 		Action = function(self, ent) E.OpenMenu(ent) end,
 	})
 end

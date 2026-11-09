@@ -8,7 +8,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu. Server: sv_engine, sv_stability.
-- `sh_config.lua`: `RegisterCar(model, cfg)`; the SL65 entry (shift points, stability, wheel radius).
+  `lua/autorun/audio_engine_init_debug.lua` loads the debug module (see "Debug module" below; not shipped).
+- `sh_config.lua`: `RegisterCar(model, cfg)`; the SL65 entry (shift points, stability, wheel radius). `audio_engine_editor`
+  (shared, default 0, `E.EditorEnabled()`): the Rev Bench menu (cl_menu: command, `!engine`, context menu; sv_engine rejects `audio_engine_set`) only when 1.
+  cl_menu has no gear card any more (its ratio editor never reached the car; it forces `fit = 1`).
 - `sh_presets.lua`: layouts, gearbox presets, 38 engine presets, profile Sanitize/Encode/Decode
   (21 pipe-separated fields, ending `...|popTone|turboVol|bovVol`), `ResolveProfile`, `CarStockProfile`.
   `cfg.soundKey` = what forces a new sound bank (layout, pitch, tone, idle, redline, realism, gurgle, popTone).
@@ -55,6 +58,12 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Upshift point follows the car's acceleration (`upRpm` pulling hard .. `lazyUpRpm` creeping), so power-limited cars reach top gear.
   Past `upRpm` it changes up even inside the post-shift hold (close-geared hard pullers like the M5 E60 hit the in-gear limiter).
   Neutral (Space+W rev) latches until W or S is pressed. The limiter loop (cl_engine) plays only while W is held near redline.
+  Free-revving uses `DT.REV` { rise, fall } 500/500 (`DT.FreeSpinRate`; per car `cfg.revRise/revFall` from `E.CAR_REV`), not
+  `DT.TMAX` 320, which stays for the synth's baked limiter loops and start tails (changing TMAX needs a re-bake). 500 falls from 90% to near idle in ~2.5 s (320: ~3.8 s).
+  A car's own gearing (`E.CAR_GEARING[name]` -> `car.gearing`, sh_presets `E.ApplyGearing`, only with `fit > 0`): per gear `{ mph, rpm }` where it
+  changes up flat out (lazy upshifts at the same lazyUpRpm/upRpm share of it), `down` mph to change down coasting/braking, last entry = top gear
+  (`topRpm` at `cfg.topSpeed`); sets `cfg.gears` as overall ratios, `final = 1`, `cfg.shiftPlan` { up = rpm[g], down = m/s[g] }. Each gear at least
+  `E.GEAR_MIN_STEP` 1.1 taller. Kickdown/corner landings also stay under the target gear's up rpm.
   Fitted gearing respaces the box by time (`E.FitGearEnds`, `E.GEAR_FIT`): each gear lasts a set share of the modelled
   full-throttle run, growing `grow` 1.18x per gear; as many gears as keep 1st at `minTime` 1.6 s or more, at most the box's count;
   steps `stepMin` 1.22 .. `stepMax` 1.8 (upshifts land at 51-76% of redline), 1st ends at `firstMin` 15 km/h or more. Median 6 gears.
@@ -155,14 +164,32 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   the lock at speed tightens to x0.9 between 45 and 90 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`; x1.3 x0.65 turned too little); the scripts'
   power cut while steering at speed (`turnThrottleReduceFast` 0.5-0.9) is capped at `E.ANTI_SPIN.throttleReduceFast` 0.2: fast turns kept their revs. `audio_engine_accel_log`
   logs Source's gear/rpm (GetOperatingParams), slip and trims while driving. Also spiked detection from the `vehiclescript` keyvalue, per-car ESC steering. `E.SetParams` = checked SetVehicleParams.
+  `veh.audioScriptParams` = params after PERP physics, before the anti-spin setup; `E.RebaseHandling(veh[, params])` rebuilds `veh.audioBase`
+  from it (anti-spin only while `audio_engine_handling` is on; off clears the lock-at-speed state), refreshes NW2 `audio_vmax`/`audio_pwr`
+  (`E.RefreshCarStats`, sv_engine) and re-applies performance. The `audio_engine_handling` change callback runs it on every car: it applies at once.
 - `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling. The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
+
+## Debug module (not part of the final addon)
+`lua/autorun/audio_engine_init_debug.lua` + `lua/audio_engine_debug/` (delete both to ship). Off until `audio_engine_debug 1` (shared);
+superadmins, listen host or single player (`DBG.Allowed`). `audio_engine_debug_menu`, `!enginedebug`, context menu. The core never refers to it:
+it wraps `E.GetEngineConfig` (`DBG.Install`, `DBG.BaseConfig` = the core's) and uses `E.ApplyGearing`, `E.RebaseHandling`, the E tables.
+- `sh_kv.lua`: Valve KeyValues parse into entries with value spans (`KV.Rebuild` keeps the file byte for byte), `KV.PARAMS` script key -> GetVehicleParams
+  field, `KV.ApplyValue` scales by new / file value (unit-free; a file 0 is taken as is, mph -> in/s for speeds). Unmapped keys (wheel radius, materials, sounds) = respawn.
+- `sh_debug.lua`: `DBG.SERVER_CVARS`, `DBG.TUNABLES` (E.TRACTION / STABILITY_DEFAULTS / ANTI_SPIN / HIGH_SPEED_STEER values set live), gearing text
+  (`DBG.EncodeGearing`), `DBG.GearingFromConfig`, rev "rise,fall". Live overrides: NW2 `audio_dbg_gear` / `audio_dbg_rev` per car, Global2 `audio_dbg_rev` -> DT.REV.
+- `sv_debug.lua`: net `audio_dbg_*`. Script = the car's `vehiclescript`, or on test_car the PERP script it stands for, synthesized as test_car.txt with
+  `E.PERP_PHYSICS` values; baseline (`veh.audioDbg`: file text, params, mass) taken on first request, edits always scaled from it. `audio_engine_debug 0` undoes everything.
+- `cl_debug.lua`: pages Handling script (edit, apply live, copy, save to data/audio_engine_debug/scripts/), Gearing (shift speeds, chart, audibility
+  check, copies an E.CAR_GEARING entry), Rev response (copies E.CAR_REV / DT.REV), Handling (PERP default handling = handling/traction/stability 0), Settings.
+- Power cut after a turn: releasing A/D with W held enters sv_stability's straight-line hold, which counts the turn's leftover yaw as `audioSlide`,
+  and traction control cuts to `slideFloor` 0.2 (then restores at 1.2/s). Not changed yet; the Handling page has the switches and values to test it.
 
 ## dev/ (not needed in game)
 - `dev/baker/` (Node + wasmoon@1.16.0, `npm install` there): `node bake.js` renders all stock engines (~6 min on 5 workers) into
   `sound/audio_engine/` + `lua/audio_engine/cl_baked.lua`. Re-bake after changing cl_synth, cl_soundbank, sh_presets or the car list.
   `node bake.js --electric` re-bakes only the electric motors + env bank (~15 s) and keeps every other entry and folder:
   only for changes that can't touch other engines (it fails if any other engine's sound key is missing from the manifest).
-  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
+  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle. `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - Offline harnesses run under LuaJIT (`luajit file.lua` from `dev/`). Fix the hard-coded paths at the top first: they point at /home/claude/....
   - `gmod_sim5.lua`: drive mix

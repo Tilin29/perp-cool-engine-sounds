@@ -383,6 +383,24 @@ E.CAR_GEARS = {
 }
 
 --[[
+	A car's own gearing, set by shift speed per gear (sh_presets.lua E.ApplyGearing): replaces the
+	fitted gearing. Made with the debug module's gearing editor (audio_engine_debug_menu), which
+	copies an entry for this table. Runtime only: no re-bake.
+	  ["BMW 1M"] = { topRpm = 6000, { mph = 30, rpm = 6500 }, { mph = 52, rpm = 6600, down = 18 }, ..., { down = 70 } },
+]]
+E.CAR_GEARING = {
+}
+
+--[[
+	How quickly a car's engine revs up and drops back to idle when revved standing still, as
+	sh_drivetrain.lua DT.REV (rise / fall, torque units; default 500 / 500). Made with the debug
+	module's rev response page. Runtime only.
+	  ["BMW 1M"] = { rise = 600, fall = 800 },
+]]
+E.CAR_REV = {
+}
+
+--[[
 	Rev flare on start-up (the "emotion start", audio_engine_emotionstart): only high-powered cars
 	blip their engine on start-up (sports cars, supercars, muscle cars, AMG/M/RS saloons, rally
 	homologation specials). Every other car starts with a short, gentle rise to just above idle.
@@ -547,6 +565,8 @@ function E.RegisterCarNamed(model, carName, extra)
 		gaugeParts = E.GAUGE_PARTS[carName],
 		brakeWing = E.BRAKE_WINGS[carName],
 		gearCount = E.CAR_GEARS[carName],
+		gearing = E.CAR_GEARING[carName],
+		rev = E.CAR_REV[carName],
 		topSpeed = "auto",
 		wheelRadius = 0.33,
 		soundLevel = E.CAR_EMOTION[carName] and E.EMOTION_SOUNDLEVEL or 85,

@@ -27,11 +27,8 @@ end
 ---------------------------------------------------------------------------
 local HU_PER_MPH = E.HU_PER_MPH   -- GetVehicleParams speeds are inches/s (sv_handling.lua: E.SetParams)
 
-local function captureBase(veh)
-	if veh.audioBase then return veh.audioBase end
-	local ok, params = pcall(veh.GetVehicleParams, veh)
-	if not ok or not istable(params) or not istable(params.engine) then return nil end
-	veh.audioBase = table.Copy(params)
+-- what the clients need of the car's physics (params as GetVehicleParams gives them)
+function E.RefreshCarStats(veh, params)
 	-- the car's own top speed, for "fit gearing" and the menu
 	if (params.engine.maxSpeed or 0) > 0 then
 		veh:SetNW2Float("audio_vmax", params.engine.maxSpeed / HU_PER_MPH * 1.609344)
@@ -42,6 +39,14 @@ local function captureBase(veh)
 	if (params.engine.horsepower or 0) > 0 and mass > 0 then
 		veh:SetNW2Float("audio_pwr", params.engine.horsepower * 745.7 / mass)
 	end
+end
+
+local function captureBase(veh)
+	if veh.audioBase then return veh.audioBase end
+	local ok, params = pcall(veh.GetVehicleParams, veh)
+	if not ok or not istable(params) or not istable(params.engine) then return nil end
+	veh.audioBase = table.Copy(params)
+	E.RefreshCarStats(veh, params)
 	return veh.audioBase
 end
 
@@ -226,6 +231,10 @@ net.Receive("audio_engine_set", function(_, ply)
 	local veh = net.ReadEntity()
 	local str = net.ReadString()
 	if not IsValid(veh) or not tracked[veh] then return end
+	if not E.EditorEnabled() then
+		ply:ChatPrint("[Audio Engine] The engine editor is off on this server (audio_engine_editor 0).")
+		return
+	end
 	if not E.CanTune(ply, veh) then
 		ply:ChatPrint("[Audio Engine] You're not allowed to retune engines.")
 		return
@@ -252,7 +261,7 @@ end)
 
 hook.Add("PlayerSay", "audio_engine", function(ply, text)
 	local t = string.lower(string.Trim(text))
-	if t == "!engine" or t == "/engine" then
+	if (t == "!engine" or t == "/engine") and E.EditorEnabled() then
 		ply:ConCommand("audio_engine_menu")
 		return ""
 	end

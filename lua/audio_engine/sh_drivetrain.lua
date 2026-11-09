@@ -16,7 +16,16 @@ local min, max, abs, cos, pi = math.min, math.max, math.abs, math.cos, math.pi
 local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
 DT.clamp = clamp
 
-DT.TMAX = 320 -- Rev Bench reference torque, only used for free-revving
+DT.TMAX = 320 -- Rev Bench reference torque (the baked limiter loops and start-ups: changing it needs a re-bake)
+
+--[[
+	Free-revving in neutral in game (the Space+W rev at a standstill), in the same torque units as
+	TMAX: `rise` pushes the revs up with the throttle, `fall` is the engine's drag that brings them
+	back down when you let go. At TMAX's 320 for both, a rev took ~4 s to fall back to idle, so a
+	second blip had to wait for it; 500 (the starting point suggested for tuning) falls in ~2.6 s.
+	Per car: cfg.revRise / cfg.revFall (sh_carlist.lua E.CAR_REV). Runtime only: no re-bake.
+]]
+DT.REV = { rise = 500, fall = 500 }
 
 -- Arcade gearbox shift points, as fractions of redline (cars can override with cfg.shift)
 DT.SHIFT = {
@@ -138,10 +147,14 @@ function DT.StartSequence(st, cfg, dt)
 	end
 end
 
--- Free-spinning engine (neutral), straight from Rev Bench
+-- Free-spinning engine (neutral), from Rev Bench, with the game's own rise and fall (DT.REV)
+function DT.FreeSpinRate(cfg, rpm, engThr)
+	local rise, fall = cfg.revRise or DT.REV.rise, cfg.revFall or DT.REV.fall
+	local Te = engThr * rise * DT.TorqueNorm(cfg, rpm) - fall * (0.05 + 0.12 * rpm / cfg.redline)
+	return Te * 42 * (cfg.redline / 7000)
+end
 local function freeSpin(st, cfg, dt, engThr)
-	local Te = engThr * DT.TMAX * DT.TorqueNorm(cfg, st.rpm) - DT.TMAX * (0.05 + 0.12 * st.rpm / cfg.redline)
-	st.rpm = st.rpm + Te * 42 * (cfg.redline / 7000) * dt
+	st.rpm = st.rpm + DT.FreeSpinRate(cfg, st.rpm, engThr) * dt
 end
 
 local function gearRatio(cfg, gear)
@@ -156,6 +169,11 @@ DT.GearRatio = gearRatio
 	inp.steer                   : A or D held (the gearbox holds its gear through corners)
 	inp.cruise                  : holding at the speed limiter (sv_cruise.lua): steady throttle, 80%
 	inp.v                       : speed along the car's nose, m/s (negative when rolling back)
+
+	cfg.shiftPlan (a car's own gearing, sh_presets.lua E.ApplyGearing) moves the shift points per gear:
+	  up[g]    rpm where gear g changes up with W held (gentler pulling changes up earlier, by
+	           the same lazyUpRpm / upRpm share as the default points)
+	  down[g]  m/s under which gear g changes down coasting or braking (nil: the default points)
 ]]
 function DT.Step(st, cfg, dt, inp)
 	local v = inp.v or 0
@@ -270,7 +288,17 @@ function DT.Step(st, cfg, dt, inp)
 			local SH = cfg.shift and DT.ShiftPoints(cfg.shift) or DT.SHIFT
 			local rpm = st.rpm  -- the engine's actual revs
 			local corner = st.steerAgo < SH.cornerHold
+			local plan = cfg.shiftPlan
 			local function rpmIn(g) return av * K * gearRatio(cfg, g) end
+			-- where this gear changes up flat out, and the share of it a lazy upshift comes at
+			local upFull = plan and plan.up[st.gear] or red * SH.upRpm
+			local lazyShare = SH.lazyUpRpm / SH.upRpm
+			-- may the box land in gear g? (under `frac` of redline, and under that gear's own upshift)
+			local function fits(g, frac)
+				local r = rpmIn(g)
+				return r < red * frac and not (plan and plan.up[g] and r > plan.up[g] * 0.97)
+			end
+			local planDown = plan and plan.down[st.gear]
 			-- soft: a braking / coasting downshift (a small blip and a slower rise, not a racing one)
 			local function shift(g, kind, hold, soft)
 				st.gear = g; st.shiftKind = kind; st.holdT = hold; st.stallT = 0; st.shiftSoft = soft or false
@@ -280,7 +308,7 @@ function DT.Step(st, cfg, dt, inp)
 			-- about to hit the limiter: change up now, even inside the hold or the shift before
 			-- (close gearing on a car that pulls hard reached redline before the hold ran out,
 			-- and the limiter kept cutting the sound)
-			if st.holdT > 0 and st.gear < n and wheelRpm > red * (pedal and SH.upRpm or 0.97) then
+			if st.holdT > 0 and st.gear < n and wheelRpm > (pedal and upFull or red * 0.97) then
 				shift(st.gear + 1, 1, 0.8)
 				wheelRpm = rpmIn(st.gear)
 			end
@@ -302,7 +330,7 @@ function DT.Step(st, cfg, dt, inp)
 					-- holds each gear to upRpm, a car that only creeps faster (heavy, or near its
 					-- top speed) changes up early, so it still climbs into its last gear
 					local pull = clamp(st.accel / SH.pullAccel, 0, 1)
-					local upAt = red * (SH.lazyUpRpm + (SH.upRpm - SH.lazyUpRpm) * pull)
+					local upAt = upFull * (lazyShare + (1 - lazyShare) * pull)
 					-- (not into the top gear: it changes up into that near the top speed, at upRpm
 					-- or once it stops gaining speed, then settles at lower revs)
 					-- (only while it still gains speed: slowing through a turn it changed up and stuck)
@@ -311,25 +339,32 @@ function DT.Step(st, cfg, dt, inp)
 						kick, cornerKick = wheelRpm < red * SH.sagRpm, false
 						lazy = st.gear < n and rpmIn(st.gear + 1) > red * SH.cruiseLand
 					end
-					if st.gear < n and (wheelRpm > red * SH.upRpm or lazy or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then
+					if st.gear < n and (wheelRpm > upFull or lazy or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then
 						shift(st.gear + 1, 1, 0.8)
 					elseif st.gear > 1 and (kick or cornerKick) then
 						-- the lowest gear that keeps the revs under kickLand (skips gears if needed;
 						-- under cruise just one, back above cruiseLand)
 						local land = inp.cruise and SH.cruiseLand / 0.8 or kick and SH.kickLand or SH.cornerLand
 						local g = st.gear
-						while g > 1 and rpmIn(g - 1) < red * land do g = g - 1 end
+						while g > 1 and fits(g - 1, land) do g = g - 1 end
 						if g < st.gear then shift(g, -1, 0.8) end
 					end
 				elseif braking then
 					-- down one gear once the revs fall below brakeRpm, as long as the lower gear
 					-- lands under brakeLand: the revs fall with the car, each downshift a small blip
-					if st.gear > 1 and rpm < red * SH.brakeRpm and rpmIn(st.gear - 1) < red * SH.brakeLand then
+					-- (a car's own gearing: under its downshift speed, as long as the lower gear doesn't over-rev)
+					if planDown then
+						if st.gear > 1 and av < planDown and rpmIn(st.gear - 1) < red * 0.97 then
+							shift(st.gear - 1, -1, 0.3, true)
+						end
+					elseif st.gear > 1 and rpm < red * SH.brakeRpm and rpmIn(st.gear - 1) < red * SH.brakeLand then
 						shift(st.gear - 1, -1, 0.3, true)
 					end
 				else
 					if st.gear < n and wheelRpm > red * 0.97 then
 						shift(st.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
+					elseif st.gear > 1 and not inp.cruise and planDown and not corner then
+						if av < planDown and rpmIn(st.gear - 1) < red * 0.97 then shift(st.gear - 1, -1, 0.6, true) end
 					elseif st.gear > 1 and not inp.cruise and rpm < red * (corner and SH.cornerRpm or SH.lugRpm)
 						and rpmIn(st.gear - 1) < red * (corner and SH.cornerLand or 0.75) then
 						shift(st.gear - 1, -1, 0.6, true)                -- don't let it lug (or drone through a corner)
