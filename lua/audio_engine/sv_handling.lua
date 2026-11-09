@@ -423,10 +423,39 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end end
 	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x")
 	local id = "audio_engine_accel_log_" .. veh:EntIndex()
-	timer.Create(id, 0.25, math.floor(secs * 4), function()
+	-- calibration for the gear spacing (sh_presets.lua E.GEAR_ACCEL): the time to each share of the
+	-- top speed, next to the model's. Start from a standstill and hold W on a straight road
+	local topKmh = E.CarTopSpeed(veh, E.GetCarConfig(veh))
+	local wkg = E.CarPower(veh, E.GetCarConfig(veh)) * ((E.DecodeProfile(veh:GetNW2String("audio_prof", "")) or {}).accel or 1)
+	local marks, reached, tGo = { 0.25, 0.5, 0.75, 0.9, 0.95 }, {}, nil
+	local function report()
+		local parts = {}
+		for _, m in ipairs(marks) do
+			parts[#parts + 1] = string.format("%d%% %s (model %.1f)", m * 100,
+				reached[m] and string.format("%.1fs", reached[m]) or "-", E.GearModelTime(topKmh, wkg, m))
+		end
+		out(string.format("[Audio Engine] top %.0f mph, %.0f W/kg: time to share of top speed: %s",
+			topKmh / 1.609344, wkg, table.concat(parts, ", ")))
+	end
+	local cfg = E.GetEngineConfig(veh)
+	if cfg and cfg.gears and cfg.final then
+		local ends, K = {}, 60 / (2 * math.pi * (cfg.wheelRadius or 0.33))
+		for i, g in ipairs(cfg.gears) do ends[i] = string.format("%.0f", cfg.redline / (K * g * cfg.final) * 2.23694) end
+		out("[Audio Engine] sound gears reach redline at " .. table.concat(ends, " / ") .. " mph")
+	end
+	local ticks = math.floor(secs * 4)
+	timer.Create(id, 0.25, ticks, function()
 		if not IsValid(veh) then timer.Remove(id) return end
 		local phys = veh:GetPhysicsObject()
 		local mph = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 * 2.23694 or 0
+		if not tGo and mph > 0.5 then tGo = CurTime() - 0.125 end   -- (it set off within the last sample)
+		if tGo then
+			for _, m in ipairs(marks) do
+				if not reached[m] and mph * 1.609344 >= topKmh * m then reached[m] = CurTime() - tGo end
+			end
+		end
+		ticks = ticks - 1
+		if ticks <= 0 or reached[0.95] then timer.Remove(id) report() end
 		local okp, op = pcall(veh.GetOperatingParams, veh)
 		op = okp and istable(op) and op or {}
 		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f", CurTime() - t0, mph,

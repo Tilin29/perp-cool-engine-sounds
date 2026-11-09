@@ -55,11 +55,14 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Upshift point follows the car's acceleration (`upRpm` pulling hard .. `lazyUpRpm` creeping), so power-limited cars reach top gear.
   Past `upRpm` it changes up even inside the post-shift hold (close-geared hard pullers like the M5 E60 hit the in-gear limiter).
   Neutral (Space+W rev) latches until W or S is pressed. The limiter loop (cl_engine) plays only while W is held near redline.
-  Fitted gearing respaces the box (`E.FitGearCount`): ~1 gear per `E.KMH_PER_GEAR` 40 km/h of top speed, enough that no step
-  exceeds `E.GEAR_STEP_MAX` 2.3, at most the box's count; 1st reaches `E.FIRST_GEAR_MIN` 25 km/h / 28% of top speed: PERP's 163 cars
-  share TDM's generic 5-speed, so only their top speed (30-145 mph) is per car. `CAR_GEARS[name]` overrides the count (Veyrons, Furai: 5 like their PERP scripts).
-  Gear end speeds are evenly spaced in speed^`E.GEAR_SPREAD` 2.2 (lowered if a step would pass the max): evenly spaced ratios
-  flew through low gears and pulled forever in the last. HUD speed defaults to mph (`audio_engine_units`).
+  Fitted gearing respaces the box by time (`E.FitGearEnds`, `E.GEAR_FIT`): each gear lasts a set share of the modelled
+  full-throttle run, growing `grow` 1.18x per gear; as many gears as keep 1st at `minTime` 1.6 s or more, at most the box's count;
+  steps `stepMin` 1.22 .. `stepMax` 1.8 (upshifts land at 51-76% of redline), 1st ends at `firstMin` 15 km/h or more. Median 6 gears.
+  The model (`E.GearAccel`, `E.GEAR_ACCEL`): pull `perWkg` 0.035 x power to weight (W/kg, server NW2 `audio_pwr` = stock hp / mass,
+  `E.CarPower`; x the tuned accel), at most `max` 5 m/s2, fading as (v/top)^`fade` 3. A guess: calibrate it with
+  `audio_engine_accel_log 30` from a standstill (prints the sound gears' redline speeds and the time to 25..95% of top speed next to the model's).
+  PERP's 163 cars share TDM's generic 5-speed, so only top speed (30-145 mph) and power are per car. `CAR_GEARS[name]` sets the count (Veyrons, Furai: 5).
+  Spacing by km/h (1 gear per 40 km/h, steps to 2.3x) gave most cars 3 gears landing at 40-50% of redline. HUD speed defaults to mph (`audio_engine_units`).
   The top gear never reaches redline: at top speed it turns `E.TOP_GEAR_DROP` 1000 rpm under redline (`E.TopGearShare`, at least
   `E.TOP_GEAR_MIN` 0.6 of it; FitFinal), the gears are spaced up to
   that gear's redline speed, and there's no lazy upshift into it: the car changes up near top speed and settles lower.

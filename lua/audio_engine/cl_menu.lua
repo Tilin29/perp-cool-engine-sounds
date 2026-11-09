@@ -254,6 +254,7 @@ function E.OpenMenu(veh)
 	local carEff = {}
 	for k, v in pairs(car) do carEff[k] = v end
 	carEff.topSpeed = E.CarTopSpeed(veh, car)
+	carEff.powerKg = E.CarPower(veh, car)
 
 	local function refreshStats()
 		local cfg = E.ResolveProfile(carEff, E.SanitizeProfile(prof))

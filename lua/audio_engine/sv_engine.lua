@@ -36,6 +36,12 @@ local function captureBase(veh)
 	if (params.engine.maxSpeed or 0) > 0 then
 		veh:SetNW2Float("audio_vmax", params.engine.maxSpeed / HU_PER_MPH * 1.609344)
 	end
+	-- its power to weight (W/kg), for the gear spacing (sh_presets.lua E.FitGearEnds)
+	local phys = veh:GetPhysicsObject()
+	local mass = IsValid(phys) and phys:GetMass() or 0
+	if (params.engine.horsepower or 0) > 0 and mass > 0 then
+		veh:SetNW2Float("audio_pwr", params.engine.horsepower * 745.7 / mass)
+	end
 	return veh.audioBase
 end
 
