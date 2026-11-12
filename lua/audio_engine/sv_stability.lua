@@ -34,7 +34,7 @@
 
 local E = AUDIO_ENGINE
 
-local cvOn = CreateConVar("audio_engine_stability", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY,
+local cvOn = CreateConVar("audio_engine_stability", "0", FCVAR_ARCHIVE + FCVAR_NOTIFY,
 	"1 = stability control on registered cars")
 
 local DEFAULTS = {

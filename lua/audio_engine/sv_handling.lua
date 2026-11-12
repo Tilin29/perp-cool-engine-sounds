@@ -31,7 +31,7 @@
 
 local E = AUDIO_ENGINE
 
-local cvHandling = CreateConVar("audio_engine_handling", "1", FCVAR_ARCHIVE,
+local cvHandling = CreateConVar("audio_engine_handling", "0", FCVAR_ARCHIVE,
 	"1 = anti-spin setup on cars with the procedural engine (front brake bias, less power while steering at speed, lower centre of mass, wider lock at speed); 0 = the vehicle script's own handling. Applies at once")
 
 ---------------------------------------------------------------------------

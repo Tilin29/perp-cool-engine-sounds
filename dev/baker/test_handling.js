@@ -117,9 +117,16 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   }
   const near = (a, b, tol = 0.01) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b))
 
-  // 1. SL65 on the test script: PERP numbers + anti-spin
+  // 0. by default the anti-spin setup is off: the car keeps its script's handling
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", E.TEST_SCRIPT, TESTCAR))`)
   let c = parse(res)
+  check(c.anti === 'false', 'anti-spin setup off by default (audio_engine_handling 0)')
+  // the rest checks the setup itself
+  await L.doString(`CV["audio_engine_handling"].v = "1"`)
+
+  // 1. SL65 on the test script: PERP numbers + anti-spin
+  await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", E.TEST_SCRIPT, TESTCAR))`)
+  c = parse(res)
   console.log('SL65 on the test script:', c)
   check(c.perp === 'true' && c.anti === 'true', 'expected PERP physics and anti-spin on the test script')
   check(near(c.hp, 260) && near(c.mph, 94), 'expected 260 hp / 94 mph from sl65amg.txt')
