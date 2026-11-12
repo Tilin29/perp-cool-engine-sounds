@@ -8,7 +8,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu. Server: sv_engine, sv_stability.
-  `lua/autorun/audio_engine_init_debug.lua` loads the debug module (see "Debug module" below; not shipped).
+  Then the debug module (`lua/audio_engine_debug/`, see "Debug module" below), if that folder exists: deleting it is all it takes to ship without it.
 - `sh_config.lua`: `RegisterCar(model, cfg)`; the SL65 entry (shift points, stability, wheel radius). `audio_engine_editor`
   (shared, default 0, `E.EditorEnabled()`): the Rev Bench menu (cl_menu: command, `!engine`, context menu; sv_engine rejects `audio_engine_set`) only when 1.
   cl_menu has no gear card any more (its ratio editor never reached the car; it forces `fit = 1`).
@@ -170,7 +170,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 - `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling. The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
 
 ## Debug module (not part of the final addon)
-`lua/autorun/audio_engine_init_debug.lua` + `lua/audio_engine_debug/` (delete both to ship). Off until `audio_engine_debug 1` (shared);
+`lua/audio_engine_debug/`, loaded by audio_engine_init.lua when the folder exists (delete it to ship). On by default (`audio_engine_debug` 1, shared; 0 = off);
 superadmins, listen host or single player (`DBG.Allowed`). `audio_engine_debug_menu`, `!enginedebug`, context menu. The core never refers to it:
 it wraps `E.GetEngineConfig` (`DBG.Install`, `DBG.BaseConfig` = the core's) and uses `E.ApplyGearing`, `E.RebaseHandling`, the E tables.
 - `sh_kv.lua`: Valve KeyValues parse into entries with value spans (`KV.Rebuild` keeps the file byte for byte), `KV.PARAMS` script key -> GetVehicleParams

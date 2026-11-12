@@ -2,7 +2,7 @@
 	Audio Engine debug module - the debug menu (client). Not part of the final addon (see sh_debug.lua).
 
 	audio_engine_debug_menu (or !enginedebug, or right-click a car in the context menu), on the car
-	you sit in or look at. Superadmins, once the server sets audio_engine_debug 1. Pages:
+	you sit in or look at. Superadmins, while audio_engine_debug is 1 (the default). Pages:
 
 	  Handling script  the car's vehicle script: edit its values, apply them to the car live, copy
 	                   the txt (or save it to data/audio_engine_debug/scripts/) for PERP's script pack
@@ -979,7 +979,7 @@ end
 -- (a Lua refresh of the core replaces E.GetEngineConfig: wrap it again)
 timer.Create("audio_engine_debug_install", 5, 0, DBG.Install)
 
-concommand.Add("audio_engine_debug_menu", function() DBG.OpenMenu() end, nil, "Audio Engine debug tools (superadmins, audio_engine_debug 1)")
+concommand.Add("audio_engine_debug_menu", function() DBG.OpenMenu() end, nil, "Audio Engine debug tools (superadmins)")
 
 if properties and properties.Add then
 	properties.Add("audio_engine_debug", {

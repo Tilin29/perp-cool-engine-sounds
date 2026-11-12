@@ -22,3 +22,16 @@ if SERVER then
 else
 	for _, f in ipairs(client) do include(base .. f) end
 end
+
+-- the debug tools (lua/audio_engine_debug/: script, gearing and rev editors, handling switches;
+-- superadmins, audio_engine_debug). Loaded whenever the folder is there: to ship the addon
+-- without them, delete the folder, nothing else
+local dbg = "audio_engine_debug/"
+if file.Exists(dbg .. "sh_debug.lua", "LUA") then
+	if SERVER then
+		for _, f in ipairs({ "sh_kv.lua", "sh_debug.lua", "cl_debug.lua" }) do AddCSLuaFile(dbg .. f) end
+	end
+	include(dbg .. "sh_kv.lua")
+	include(dbg .. "sh_debug.lua")
+	include(dbg .. (SERVER and "sv_debug.lua" or "cl_debug.lua"))
+end

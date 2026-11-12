@@ -43,7 +43,7 @@ Gearing isn't in this menu any more. The old ratio editor never reached the car.
 A new engine is generated in the background on every client near the car (about 1.5–2 s of CPU). The old sound keeps playing until it's ready. Cars with the same engine settings share one set of sounds.
 
 ## Debug tools (not for the final version)
-A separate module on top of the addon, for tuning on a test server: `lua/autorun/audio_engine_init_debug.lua` and `lua/audio_engine_debug/`. Delete both to ship without it. Nothing runs until the server sets `audio_engine_debug 1`, and only superadmins (or the host of a listen or single-player game) can use it. Open it with `audio_engine_debug_menu`, `!enginedebug`, or right-click a car → **Engine debug tools**. It works on the car you're in or looking at. Every change is a live test: copy what works back into the files. The pages are:
+A separate module on top of the addon, for tuning on a test server: `lua/audio_engine_debug/`. It loads automatically whenever that folder is there, so delete the folder to ship without it. It's on by default (`audio_engine_debug 0` switches it off), and only superadmins (or the host of a listen or single-player game) can use it. Open it with `audio_engine_debug_menu`, `!enginedebug`, or right-click a car → **Engine debug tools**. It works on the car you're in or looking at. Every change is a live test: copy what works back into the files. The pages are:
 - **Handling script:** loads the vehicle script the car is linked to and lets you edit every value. **Apply live** puts the changes on the car. Values marked `respawn` (wheel radius, materials, sounds) only take effect when the car spawns. **Copy txt** puts the whole edited file on the clipboard, and **Save to data/** writes it to `garrysmod/data/audio_engine_debug/scripts/`, so it can go into PERP's script pack. Without PERP's scripts mounted, it shows `test_car.txt` carrying PERP's physics values (what the car really drives on) and says so.
 - **Gearing:** the number of gears (1–8) and, per gear, the speed and rpm where it changes up and the speed it changes down under. The gears don't have to be evenly spaced, and each line shows how far the revs drop at the shift. A drop under 12% is flagged as barely audible, and every gear is kept at least 10% taller than the one below. A chart shows the full-throttle sawtooth. **Apply live** applies it for everyone. **Copy for sh_carlist** gives an `E.CAR_GEARING` entry.
 - **Rev response:** how fast the revs climb and drop back when you rev standing still (Space + W), for this car or every car, with the time to rev and fall back and a chart against the default. **Copy** gives an `E.CAR_REV` entry or the `DT.REV` line.
@@ -146,13 +146,13 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_handling` | server | 1 | anti-spin setup: front brake bias, less power while steering at speed, lower centre of mass, wider lock at speed (applies at once) |
 | `audio_engine_traction` | server | 1 | traction control: less power while the driven wheels spin |
 | `audio_engine_editor` | shared | 0 | 1 = the in-game engine tuning menu is available (`!engine`, `audio_engine_menu`, context menu) |
-| `audio_engine_debug` | shared | 0 | 1 = the debug tools for superadmins (debug module only) |
+| `audio_engine_debug` | shared | 1 | the debug tools for superadmins; 0 = off (debug module only) |
 | `audio_engine_tuneaccess` | server | 1 | who can retune engines: 0 = whoever drives the car, 1 = admins, 2 = superadmins |
 | `audio_engine_tunecooldown` | server | 5 | seconds between engine changes per player |
 
 Commands:
 - `audio_engine_menu` opens the tuning menu (also `!engine` in chat), when `audio_engine_editor` is 1.
-- `audio_engine_debug_menu` opens the debug tools (also `!enginedebug`), when `audio_engine_debug` is 1 (debug module).
+- `audio_engine_debug_menu` opens the debug tools (also `!enginedebug`; superadmins, debug module).
 - `audio_engine_handling_info` (admins) prints the handling setup of the car you're in or looking at.
 - `audio_engine_accel_log [seconds]` (admins) logs speed, gear, rpm, wheel slip and power trims of the car you drive to the console (default 12 s, max 60).
 - `audio_engine_toggle` (bindable) switches the engine of the car you're driving on or off, like the start key.

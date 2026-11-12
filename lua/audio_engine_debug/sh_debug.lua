@@ -1,10 +1,10 @@
 --[[
 	Audio Engine debug module (shared)
 
-	Tuning tools on top of the core addon, for testing on a dev server. NOT part of the final
-	addon: delete lua/autorun/audio_engine_init_debug.lua and lua/audio_engine_debug/ to ship
-	without it. Nothing here runs until the server sets audio_engine_debug 1, and only superadmins
-	(or the host of a listen / single-player game) may use it.
+	Tuning tools on top of the core addon, for testing on a dev server. Loaded by
+	autorun/audio_engine_init.lua whenever this folder is there; to ship the addon without them,
+	delete lua/audio_engine_debug/. On by default (audio_engine_debug 1; 0 switches them off), and
+	only superadmins (or the host of a listen / single-player game) may use them.
 
 	What it changes live goes through the core's own data paths, so a result can be pasted back:
 	  gearing         NW2 audio_dbg_gear on the car  -> sh_carlist.lua E.CAR_GEARING (E.ApplyGearing)
@@ -18,8 +18,8 @@ local E = AUDIO_ENGINE
 local DBG = E.Debug or {}
 E.Debug = DBG
 
-DBG.cvDebug = CreateConVar("audio_engine_debug", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED,
-	"1 = the Audio Engine debug tools (audio_engine_debug_menu, !enginedebug) for superadmins; 0 = off")
+DBG.cvDebug = CreateConVar("audio_engine_debug", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+	"1 = the Audio Engine debug tools (audio_engine_debug_menu, !enginedebug) for superadmins (default); 0 = off")
 
 function DBG.Enabled() return DBG.cvDebug:GetBool() end
 
