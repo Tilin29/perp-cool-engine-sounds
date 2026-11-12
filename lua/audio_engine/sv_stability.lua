@@ -102,6 +102,7 @@ local function geometry(veh)
 	geoCache[mdl] = { fwd = f, wheelbase = wb }
 	return geoCache[mdl]
 end
+E.CarGeometry = geometry
 
 -- is the car on the ground? (a short trace down from its floor)
 local function onGround(veh)

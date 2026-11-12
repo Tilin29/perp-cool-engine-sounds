@@ -76,6 +76,8 @@ DBG.TUNABLES = {
 	{ "ANTI_SPIN", "steerFast", 1, 2.5, 2, "Steering lock at speed x" },
 	{ "ANTI_SPIN", "frontBrake", 0.4, 0.8, 2, "Least front brake share" },
 	{ "HIGH_SPEED_STEER", "scale", 0.5, 1.2, 2, "Lock tightens to x this by 90 mph" },
+	{ "STEER_GRIP", "g", 0.5, 4, 2, "Lock cap: turn it allows (g)" },
+	{ "STEER_GRIP", "slip", 0, 20, 1, "Lock cap: tyre slip angle on top (deg)" },
 }
 
 ---------------------------------------------------------------------------

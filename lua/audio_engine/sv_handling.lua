@@ -331,13 +331,30 @@ end
 ]]
 E.STEER_CURVE = { toMph = 90, power = 1.5, blendMph = 35 }
 
+--[[
+	...and never wider than the tyres can use: on a keyboard every turn is full lock, and past the
+	angle that gives the most cornering the front tyres only scrub. At 60 mph the curve still had
+	~20 deg: with W held turns slowed the cars at ~1 g. The lock is capped at the angle a turn of
+	`g` needs at this speed and wheelbase, plus the tyres' `slip` angle (deg)
+]]
+E.STEER_GRIP = { g = 1.5, slip = 6 }
+
+local function gripLock(veh, mph)
+	local geo = E.CarGeometry and E.CarGeometry(veh)
+	local wheelbase = geo and geo.wheelbase or 2.6
+	local v = math.max(mph / 2.23694, 1)
+	local turn = math.deg(math.atan(wheelbase * E.STEER_GRIP.g * 9.81 / (v * v)))
+
+	return turn + E.STEER_GRIP.slip
+end
+
 local function lockScale(veh, mph)
 	local st = veh.audioBase and veh.audioBase.steering
 	local S, F = st and st.degreesSlow, st and st.degreesFast
 	if not (S and F and F > 0) then return steerScale(mph) end
 	local C = E.STEER_CURVE
 	local k = (1 - math.Clamp(mph / C.toMph, 0, 1)) ^ C.power
-	local want = (F + (S - F) * k) * steerScale(mph)
+	local want = math.min((F + (S - F) * k) * steerScale(mph), gripLock(veh, mph))
 	local frac = mph / C.blendMph
 	local fast = frac >= 1 and want or (frac > 0.05 and S + (want - S) / frac or F)
 	return math.Clamp(fast / F, 0.3, 4)

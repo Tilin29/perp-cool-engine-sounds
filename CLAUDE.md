@@ -175,7 +175,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   not in a handbrake drift) it cuts at `slideCut` down to `slideFloor` 0.2 at any speed (no hard speed cut-off: that held cars at 1/4 power, then gave it all back),
   only to `slideTurnFloor` 0.6 when it isn't over-rotating (`veh.audioSpin` false: tail out in a fast corner, `slideFrom` 8 .. `slideFull` 16 deg),
   for at most `slideMaxTime` 1 s of unbroken slide, then restores (`veh.audioSlideSince`; it only ever recovered on releasing W, so a stuck slide reading held a car at 0.2);
-  the lock at speed tightens to x0.9 between 45 and 90 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`; x1.3 x0.65 turned too little); the scripts'
+  the lock at speed tightens to x0.9 between 45 and 90 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`; x1.3 x0.65 turned too little), and is
+  capped by `E.STEER_GRIP` (angle a `g` 1.5 turn needs at that speed and wheelbase, `E.CarGeometry`, + `slip` 6 deg): keyboard steering is
+  always full lock, and the curve's ~20 deg at 60 mph scrubbed ~1 g off turns once the turn-in help was off; the scripts'
   power cut while steering at speed (`turnThrottleReduceFast` 0.5-0.9) is capped at `E.ANTI_SPIN.throttleReduceFast` 0.2: fast turns kept their revs. `audio_engine_accel_log`
   logs Source's gear/rpm (GetOperatingParams), slip and trims while driving. Also spiked detection from the `vehiclescript` keyvalue, per-car ESC steering. `E.SetParams` = checked SetVehicleParams.
   `veh.audioScriptParams` = params after PERP physics, before the anti-spin setup; `E.RebaseHandling(veh[, params])` rebuilds `veh.audioBase`
