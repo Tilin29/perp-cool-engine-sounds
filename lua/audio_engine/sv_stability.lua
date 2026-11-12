@@ -66,8 +66,10 @@ local DEFAULTS = {
 	straightDamp = 20,     -- how firmly it stops rotation (per second)
 	straightHold = 3,      -- deg/s of turn back per degree off the held heading
 	straightMax = 45,      -- further off than this (a crash) and it holds the new heading instead
-	-- taken over from a turn (still rotating): for this long the rotation it takes out isn't a slide
-	holdGrace = 0.6,       -- s
+	-- taken over from a turn (still rotating): it only damps the rotation, following the car's
+	-- heading, until the rotation is under holdSettled (at most holdGrace), then holds that line
+	holdGrace = 1,         -- s
+	holdSettled = 3,       -- deg/s
 }
 E.STABILITY_DEFAULTS = DEFAULTS
 
@@ -155,15 +157,21 @@ local function assist(veh, cfg, dt)
 		local yaw = phys:GetAngleVelocity().z
 		if not veh.audioHeading or abs(err) > P("straightMax") then
 			veh.audioHeading, err = heading, 0           -- (re)captured: after a crash or a spin it holds the new line
-			veh.audioHoldGrace = abs(yaw) > 4 and CurTime() + P("holdGrace") or nil
+			veh.audioHoldGrace = abs(yaw) > P("holdSettled") and CurTime() + P("holdGrace") or nil
+		end
+		-- still rotating out of a turn: holding the line it had when the keys were let go turned it
+		-- back against its tyres for seconds (read as a slide, power cut). Follow it until it settles
+		local settling = veh.audioHoldGrace and CurTime() < veh.audioHoldGrace and abs(yaw) > P("holdSettled")
+		if settling then
+			veh.audioHeading, err = heading, 0
+		else
+			veh.audioHoldGrace = nil
 		end
 		local target = clamp(err * P("straightHold"), -30, 30)
 		phys:AddAngleVelocity(Vector(0, 0, (target - yaw) * min(1, P("straightDamp") * dt)))
 		local beta = v > 2 and abs(deg(atan2(vr, vf))) or 0
 		lateralGrip(phys, right, vr, P("gripAssist") * clamp((kmh - minSpeed) / 12, 0, 1), dt)
-		-- the turn the keys were let go in isn't a spin: its rotation doesn't count for a moment
-		local turning = veh.audioHoldGrace and CurTime() < veh.audioHoldGrace
-		local yawSlide = turning and 0 or (abs(yaw - target) - 4) / 15
+		local yawSlide = settling and 0 or (abs(yaw - target) - 4) / 15
 		veh.audioSlide = clamp(max(yawSlide, (beta - 3) / 10), 0, 1)
 		veh.audioLogYaw, veh.audioLogBeta = yaw - target, beta
 		return

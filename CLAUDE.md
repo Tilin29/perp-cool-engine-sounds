@@ -154,8 +154,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   steady part throttle, `inp.cruise`) / 2 over (throttle shut). `audio_engine_cruise`.
 - `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `veh.audioSpiked`.
   Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
-  and reports any rotation as `veh.audioSlide`, so traction control cuts the power. Taken over from a turn (still rotating), the
-  rotation it takes out doesn't count for `holdGrace` 0.6 s. `audio_engine_accel_log` prints the yaw off what's asked (hold or steering) and the slip angle.
+  and reports any rotation as `veh.audioSlide`, so traction control cuts the power. Taken over from a turn (still rotating), it only damps
+  the rotation and follows the car's heading until under `holdSettled` 3 deg/s (at most `holdGrace` 1 s), then holds that line: holding
+  the line from the moment the keys were let go turned the car back against its tyres for seconds (yaw off 10-20 deg/s), read as a slide. `audio_engine_accel_log` prints the yaw off what's asked (hold or steering) and the slip angle.
   Slip limit (no handbrake): past `slipMax` 4 deg tail-out the nose rotates no faster than the path (yaw - dBeta/dt); the turn-in help
   stops while the tail is out, so fast corners turn instead of drifting.
   Lateral grip (no handbrake, also in the straight-line hold): `gripAssist` 1 g of extra side grip removes sideways speed at any slip
