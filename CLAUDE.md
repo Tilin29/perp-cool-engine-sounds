@@ -212,7 +212,7 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   picked in), else `lightTones[mode]`. `sv_siren.lua`: `police_siren_tone` (next in the cycle, then off), driver only, lights on.
 - `cl_siren.lua`: builds every tone twice (outside / inside) in a coroutine (5 ms/frame) once a siren car is near; `sound.Generate`
   names carry `PS.Serial` (lua refresh); one CSoundPatch per car (fade-in a frame after PlayEx), swapped in 0.15 s on getting in/out
-  (driver or a seat parented to the car). Doppler from its own speed sampling (positions >= 0.05 s apart, gaps > 0.3 s and teleports
+  (driver or a seat parented to the car, and the view on the player: watching through a camera = outside, as the engine). Doppler from its own speed sampling (positions >= 0.05 s apart, gaps > 0.3 s and teleports
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on
   the near-pure tone 1 % Doppler steps were audible; so the pitch stays within 150..255 (-5..+4 semitones). Key `police_siren_tonekey` (q; alt/shift/ctrl = left one),

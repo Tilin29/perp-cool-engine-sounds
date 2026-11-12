@@ -68,10 +68,13 @@ local function stepBuilder()
 	until coroutine.status(builder) == "dead" or SysTime() - t0 > BUILD_BUDGET
 end
 
--- is the local player sitting in this car (driver, or a passenger seat parented to it)?
+-- does the local player hear this car from inside: sitting in it (driver, or a passenger seat
+-- parented to it) and looking from their own eyes? Watching through a camera (the view on
+-- another entity) they hear it from outside like anyone else, Doppler included, as the engine does
 local function insideOf(veh)
-	local seat = LocalPlayer():GetVehicle()
-	if not IsValid(seat) then return false end
+	local ply = LocalPlayer()
+	local seat = ply:GetVehicle()
+	if not IsValid(seat) or GetViewEntity() ~= ply then return false end
 
 	return seat == veh or seat:GetParent() == veh
 end
