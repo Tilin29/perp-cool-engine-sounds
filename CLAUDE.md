@@ -154,7 +154,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   steady part throttle, `inp.cruise`) / 2 over (throttle shut). `audio_engine_cruise`.
 - `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `veh.audioSpiked`.
   Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
-  and reports any rotation as `veh.audioSlide`, so traction control cuts the power.
+  and reports any rotation as `veh.audioSlide`, so traction control cuts the power. Taken over from a turn (still rotating), the
+  rotation it takes out doesn't count for `holdGrace` 0.6 s. `audio_engine_accel_log` prints the hold's yaw error and slip angle.
   Slip limit (no handbrake): past `slipMax` 4 deg tail-out the nose rotates no faster than the path (yaw - dBeta/dt); the turn-in help
   stops while the tail is out, so fast corners turn instead of drifting.
   Lateral grip (no handbrake, also in the straight-line hold): `gripAssist` 1 g of extra side grip removes sideways speed at any slip
@@ -169,7 +170,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   launch traction control `E.TRACTION` (`audio_engine_traction`): driven-wheel slip from `GetWheel` angular speed trims
   horsepower via `veh.audioTC` in `ApplyPerformance` (strong light cars like the Veyron spun their tyres off the line); it may cut to
   `floor` 0.25 at launch, rising to `floorFast` 0.6 by 16 m/s; while sliding (`veh.audioSlide` from sv_stability: tail out / over-rotating,
-  not in a handbrake drift) it cuts at `slideCut` down to `slideFloor` 0.2 at any speed (no hard speed cut-off: that held cars at 1/4 power, then gave it all back);
+  not in a handbrake drift) it cuts at `slideCut` down to `slideFloor` 0.2 at any speed (no hard speed cut-off: that held cars at 1/4 power, then gave it all back),
+  for at most `slideMaxTime` 1 s of unbroken slide, then restores (`veh.audioSlideSince`; it only ever recovered on releasing W, so a stuck slide reading held a car at 0.2);
   the lock at speed tightens to x0.9 between 45 and 90 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`; x1.3 x0.65 turned too little); the scripts'
   power cut while steering at speed (`turnThrottleReduceFast` 0.5-0.9) is capped at `E.ANTI_SPIN.throttleReduceFast` 0.2: fast turns kept their revs. `audio_engine_accel_log`
   logs Source's gear/rpm (GetOperatingParams), slip and trims while driving. Also spiked detection from the `vehiclescript` keyvalue, per-car ESC steering. `E.SetParams` = checked SetVehicleParams.
@@ -190,8 +192,9 @@ it wraps `E.GetEngineConfig` (`DBG.Install`, `DBG.BaseConfig` = the core's) and 
   `E.PERP_PHYSICS` values; baseline (`veh.audioDbg`: file text, params, mass) taken on first request, edits always scaled from it. `audio_engine_debug 0` undoes everything.
 - `cl_debug.lua`: pages Handling script (edit, apply live, copy, save to data/audio_engine_debug/scripts/), Gearing (shift speeds, chart, audibility
   check, copies an E.CAR_GEARING entry), Rev response (copies E.CAR_REV / DT.REV), Handling (PERP default handling = handling/traction/stability 0), Settings.
-- Power cut after a turn: releasing A/D with W held enters sv_stability's straight-line hold, which counts the turn's leftover yaw as `audioSlide`,
-  and traction control cuts to `slideFloor` 0.2 (then restores at 1.2/s). Not changed yet; the Handling page has the switches and values to test it.
+- Power cut after a turn: releasing A/D with W held enters sv_stability's straight-line hold, which counted the turn's leftover yaw as `audioSlide`,
+  and traction control cut to `slideFloor` 0.2. In game the reading stayed 0.4-1.0 for 3-6 s (wheel slip 0) until W was pressed again: now
+  `holdGrace` and `slideMaxTime` (both on the Handling page). Why the hold's reading persisted isn't known yet: the log's last two columns show it.
 
 ## dev/ (not needed in game)
 - `dev/baker/` (Node + wasmoon@1.16.0, `npm install` there): `node bake.js` renders all stock engines (~6 min on 5 workers) into

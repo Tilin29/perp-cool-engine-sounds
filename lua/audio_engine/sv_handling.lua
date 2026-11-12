@@ -298,6 +298,10 @@ E.TRACTION = {
 	-- the wheel speeds can't show it, but cutting the power is what stops it
 	slideCut = 4,     -- per second at full slide
 	slideFloor = 0.2, -- it may take the power down to this while sliding, at any speed
+	-- a slide that lasts longer than this stops holding the power down (it comes back at `restore`)
+	-- until the slide reading clears: the straight-line hold out of a turn read as sliding for
+	-- seconds and kept a car at slideFloor until W was pressed again
+	slideMaxTime = 1,
 	cut = 2.5,        -- how fast it takes power away while spinning (per second)
 	restore = 1.2,    -- ... and gives it back while gripping
 	floor = 0.25,     -- never below this share of the power (at a standstill)
@@ -399,6 +403,12 @@ hook.Add("Tick", "audio_engine_traction", function()
 				local slip = ws and (ws - v) / math.max(v, T.minSpeed) or 0
 				veh.audioSlip = slip
 				if slide > 0.05 then
+					veh.audioSlideSince = veh.audioSlideSince or CurTime()
+				else
+					veh.audioSlideSince = nil
+				end
+				local slideCuts = slide > 0.05 and CurTime() - veh.audioSlideSince < T.slideMaxTime
+				if slideCuts then
 					want = tc - T.slideCut * slide * dt
 					floor = math.min(floor, T.slideFloor)
 				elseif slip > T.slip then want = tc - T.cut * dt
@@ -406,6 +416,7 @@ hook.Add("Tick", "audio_engine_traction", function()
 				want = math.Clamp(want, math.min(floor, tc), 1)
 			else
 				want = 1
+				veh.audioSlideSince = nil
 			end
 			-- speed limiter (sv_cruise.lua): W held near the limit, the power trimmed to hold it;
 			-- over it, off (it brakes there too)
@@ -457,7 +468,8 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 	local secs = math.Clamp(tonumber(args[1]) or 12, 1, 60)
 	local t0 = CurTime()
 	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end end
-	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x")
+	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x"
+		.. " | straight-line hold: yaw off deg/s, slip angle deg")
 	local id = "audio_engine_accel_log_" .. veh:EntIndex()
 	-- calibration for the gear spacing (sh_presets.lua E.GEAR_ACCEL): the time to each share of the
 	-- top speed, next to the model's. Start from a standstill and hold W on a straight road
@@ -494,8 +506,10 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 		if ticks <= 0 or reached[0.95] then timer.Remove(id) report() end
 		local okp, op = pcall(veh.GetOperatingParams, veh)
 		op = okp and istable(op) and op or {}
-		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f", CurTime() - t0, mph,
-			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioSlide or 0, veh.audioTC or 1, veh.audioSteerLock or 1))
+		local hold = veh.audioHoldYaw and string.format(" | %5.1f %4.1f", veh.audioHoldYaw, veh.audioHoldBeta) or ""
+		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f%s", CurTime() - t0, mph,
+			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioSlide or 0, veh.audioTC or 1,
+			veh.audioSteerLock or 1, hold))
 	end)
 end, nil, "Log speed, Source gear/rpm, wheel slip and traction trim of the car you drive (admins)")
 

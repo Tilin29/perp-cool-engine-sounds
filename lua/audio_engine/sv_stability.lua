@@ -65,6 +65,8 @@ local DEFAULTS = {
 	straightDamp = 20,     -- how firmly it stops rotation (per second)
 	straightHold = 3,      -- deg/s of turn back per degree off the held heading
 	straightMax = 45,      -- further off than this (a crash) and it holds the new heading instead
+	-- taken over from a turn (still rotating): for this long the rotation it takes out isn't a slide
+	holdGrace = 0.6,       -- s
 }
 E.STABILITY_DEFAULTS = DEFAULTS
 
@@ -149,18 +151,23 @@ local function assist(veh, cfg, dt)
 		and not veh.audioDrift and vf > -40 then
 		local heading = deg(atan2(fwd.y, fwd.x))         -- left = +, like the yaw rate
 		local err = veh.audioHeading and math.NormalizeAngle(veh.audioHeading - heading) or 0
+		local yaw = phys:GetAngleVelocity().z
 		if not veh.audioHeading or abs(err) > P("straightMax") then
 			veh.audioHeading, err = heading, 0           -- (re)captured: after a crash or a spin it holds the new line
+			veh.audioHoldGrace = abs(yaw) > 4 and CurTime() + P("holdGrace") or nil
 		end
-		local yaw = phys:GetAngleVelocity().z
 		local target = clamp(err * P("straightHold"), -30, 30)
 		phys:AddAngleVelocity(Vector(0, 0, (target - yaw) * min(1, P("straightDamp") * dt)))
 		local beta = v > 2 and abs(deg(atan2(vr, vf))) or 0
 		lateralGrip(phys, right, vr, P("gripAssist") * clamp((kmh - minSpeed) / 12, 0, 1), dt)
-		veh.audioSlide = clamp(max((abs(yaw - target) - 4) / 15, (beta - 3) / 10), 0, 1)
+		-- the turn the keys were let go in isn't a spin: its rotation doesn't count for a moment
+		local turning = veh.audioHoldGrace and CurTime() < veh.audioHoldGrace
+		local yawSlide = turning and 0 or (abs(yaw - target) - 4) / 15
+		veh.audioSlide = clamp(max(yawSlide, (beta - 3) / 10), 0, 1)
+		veh.audioHoldYaw, veh.audioHoldBeta = yaw - target, beta
 		return
 	end
-	veh.audioHeading = nil
+	veh.audioHeading, veh.audioHoldYaw, veh.audioHoldBeta = nil, nil, nil
 
 	if kmh < minSpeed or vf <= 0 then return end
 	local fade = clamp((kmh - minSpeed) / 12, 0, 1)

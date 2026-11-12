@@ -59,6 +59,8 @@ DBG.HANDLING_CVARS = { "audio_engine_handling", "audio_engine_traction", "audio_
 DBG.TUNABLES = {
 	{ "TRACTION", "slideFloor", 0, 1, 2, "Slide: least power left while sliding" },
 	{ "TRACTION", "slideCut", 0, 10, 1, "Slide: how fast the power goes (per s)" },
+	{ "TRACTION", "slideMaxTime", 0, 5, 1, "Slide: longest power cut (s)" },
+	{ "STABILITY_DEFAULTS", "holdGrace", 0, 2, 1, "Straight-line hold: leftover turn ignored (s)" },
 	{ "TRACTION", "floor", 0, 1, 2, "Launch: least power at a standstill" },
 	{ "TRACTION", "floorFast", 0, 1, 2, "Launch: least power from ~36 mph" },
 	{ "TRACTION", "slip", 0.05, 1, 2, "Wheel slip that counts as spinning" },
