@@ -60,6 +60,8 @@ DBG.TUNABLES = {
 	{ "TRACTION", "slideFloor", 0, 1, 2, "Slide: least power left while sliding" },
 	{ "TRACTION", "slideCut", 0, 10, 1, "Slide: how fast the power goes (per s)" },
 	{ "TRACTION", "slideMaxTime", 0, 5, 1, "Slide: longest power cut (s)" },
+	{ "TRACTION", "slideTurnFloor", 0, 1, 2, "Slide: least power in a corner (not spinning)" },
+	{ "STABILITY_DEFAULTS", "slideFrom", 0, 30, 0, "Slide counts from (degrees tail out)" },
 	{ "STABILITY_DEFAULTS", "holdGrace", 0, 2, 1, "Straight-line hold: leftover turn ignored (s)" },
 	{ "TRACTION", "floor", 0, 1, 2, "Launch: least power at a standstill" },
 	{ "TRACTION", "floorFast", 0, 1, 2, "Launch: least power from ~36 mph" },

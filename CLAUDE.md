@@ -155,7 +155,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 - `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `veh.audioSpiked`.
   Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
   and reports any rotation as `veh.audioSlide`, so traction control cuts the power. Taken over from a turn (still rotating), the
-  rotation it takes out doesn't count for `holdGrace` 0.6 s. `audio_engine_accel_log` prints the hold's yaw error and slip angle.
+  rotation it takes out doesn't count for `holdGrace` 0.6 s. `audio_engine_accel_log` prints the yaw off what's asked (hold or steering) and the slip angle.
   Slip limit (no handbrake): past `slipMax` 4 deg tail-out the nose rotates no faster than the path (yaw - dBeta/dt); the turn-in help
   stops while the tail is out, so fast corners turn instead of drifting.
   Lateral grip (no handbrake, also in the straight-line hold): `gripAssist` 1 g of extra side grip removes sideways speed at any slip
@@ -171,6 +171,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   horsepower via `veh.audioTC` in `ApplyPerformance` (strong light cars like the Veyron spun their tyres off the line); it may cut to
   `floor` 0.25 at launch, rising to `floorFast` 0.6 by 16 m/s; while sliding (`veh.audioSlide` from sv_stability: tail out / over-rotating,
   not in a handbrake drift) it cuts at `slideCut` down to `slideFloor` 0.2 at any speed (no hard speed cut-off: that held cars at 1/4 power, then gave it all back),
+  only to `slideTurnFloor` 0.6 when it isn't over-rotating (`veh.audioSpin` false: tail out in a fast corner, `slideFrom` 8 .. `slideFull` 16 deg),
   for at most `slideMaxTime` 1 s of unbroken slide, then restores (`veh.audioSlideSince`; it only ever recovered on releasing W, so a stuck slide reading held a car at 0.2);
   the lock at speed tightens to x0.9 between 45 and 90 mph (`E.HIGH_SPEED_STEER`, `veh.audioSteerLock`; x1.3 x0.65 turned too little); the scripts'
   power cut while steering at speed (`turnThrottleReduceFast` 0.5-0.9) is capped at `E.ANTI_SPIN.throttleReduceFast` 0.2: fast turns kept their revs. `audio_engine_accel_log`

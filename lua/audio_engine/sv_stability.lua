@@ -53,8 +53,9 @@ local DEFAULTS = {
 	driftAngle = 20,       -- last-resort guard: tail-out slide angle (degrees)
 	handbrakeAngle = 70,   -- ... while drifting
 	driftHold = 8,         -- a drift lasts while the car slides at least this many degrees
-	slideFrom = 4,         -- tail-out slide angle (degrees) where it starts to count as sliding...
-	slideFull = 12,        -- ...fully sliding here (power cut hardest)
+	-- (normal fast cornering has a few degrees of tail out: below slideFrom it keeps its power)
+	slideFrom = 8,         -- tail-out slide angle (degrees) where it starts to count as sliding...
+	slideFull = 16,        -- ...fully sliding here (power cut hardest)
 	minSpeed = 8,          -- km/h
 	-- slip limit (steering without the handbrake): no drifting out of fast corners
 	slipMax = 4,           -- tail-out slip angle (degrees) it lets the car reach
@@ -142,7 +143,7 @@ local function assist(veh, cfg, dt)
 	s = s + clamp(want - s, -dt * 4, dt * 4)
 	veh.audioSteer = s
 
-	veh.audioSlide, veh.audioSlideT = 0, CurTime()
+	veh.audioSlide, veh.audioSlideT, veh.audioSpin = 0, CurTime(), true
 
 	-- straight-line hold: throttle, no steering, no handbrake or drift -> the car keeps the
 	-- heading it had when the keys were let go, from a standstill up (launch spins start below
@@ -164,10 +165,10 @@ local function assist(veh, cfg, dt)
 		local turning = veh.audioHoldGrace and CurTime() < veh.audioHoldGrace
 		local yawSlide = turning and 0 or (abs(yaw - target) - 4) / 15
 		veh.audioSlide = clamp(max(yawSlide, (beta - 3) / 10), 0, 1)
-		veh.audioHoldYaw, veh.audioHoldBeta = yaw - target, beta
+		veh.audioLogYaw, veh.audioLogBeta = yaw - target, beta
 		return
 	end
-	veh.audioHeading, veh.audioHoldYaw, veh.audioHoldBeta = nil, nil, nil
+	veh.audioHeading, veh.audioLogYaw, veh.audioLogBeta = nil, nil, nil
 
 	if kmh < minSpeed or vf <= 0 then return end
 	local fade = clamp((kmh - minSpeed) / 12, 0, 1)
@@ -245,12 +246,16 @@ local function assist(veh, cfg, dt)
 	end
 
 	-- how much it's sliding, for the power cut: the tail out past slideFrom, or rotating well
-	-- beyond what the steering asks. Not in a drift: there the driver wants the power
+	-- beyond what the steering asks. Not in a drift: there the driver wants the power.
+	-- audioSpin: over-rotating, cut hard; only the tail out (the car still turns as asked) is a
+	-- corner taken fast, and it keeps enough power to pull through it (sv_handling slideTurnFloor)
 	if not handbrake then
 		local over = yaw * wRef >= 0 and (abs(yaw) - abs(wRef) - allow) / 20 or (abs(yaw) - allow * 0.5) / 20
 		local tail = beta * yaw > 0 and (a - P("slideFrom")) / (P("slideFull") - P("slideFrom")) or 0
 		veh.audioSlide = clamp(max(over, tail), 0, 1) * fade
+		veh.audioSpin = over > 0
 	end
+	veh.audioLogYaw, veh.audioLogBeta = yaw - wRef, beta
 
 	if add ~= 0 then
 		phys:AddAngleVelocity(Vector(0, 0, add * fade))

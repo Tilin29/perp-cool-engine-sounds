@@ -297,7 +297,8 @@ E.TRACTION = {
 	-- sliding (sv_stability.lua's veh.audioSlide: tail out or over-rotating, not in a drift):
 	-- the wheel speeds can't show it, but cutting the power is what stops it
 	slideCut = 4,     -- per second at full slide
-	slideFloor = 0.2, -- it may take the power down to this while sliding, at any speed
+	slideFloor = 0.2, -- it may take the power down to this while sliding, at any speed...
+	slideTurnFloor = 0.6, -- ...but only to this when the car still turns as steered (tail out in a fast corner)
 	-- a slide that lasts longer than this stops holding the power down (it comes back at `restore`)
 	-- until the slide reading clears: the straight-line hold out of a turn read as sliding for
 	-- seconds and kept a car at slideFloor until W was pressed again
@@ -410,7 +411,7 @@ hook.Add("Tick", "audio_engine_traction", function()
 				local slideCuts = slide > 0.05 and CurTime() - veh.audioSlideSince < T.slideMaxTime
 				if slideCuts then
 					want = tc - T.slideCut * slide * dt
-					floor = math.min(floor, T.slideFloor)
+					floor = math.min(floor, veh.audioSpin == false and T.slideTurnFloor or T.slideFloor)
 				elseif slip > T.slip then want = tc - T.cut * dt
 				else want = tc + T.restore * dt end
 				want = math.Clamp(want, math.min(floor, tc), 1)
@@ -469,7 +470,7 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 	local t0 = CurTime()
 	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end end
 	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x"
-		.. " | straight-line hold: yaw off deg/s, slip angle deg")
+		.. " | yaw off what's asked deg/s, slip angle deg")
 	local id = "audio_engine_accel_log_" .. veh:EntIndex()
 	-- calibration for the gear spacing (sh_presets.lua E.GEAR_ACCEL): the time to each share of the
 	-- top speed, next to the model's. Start from a standstill and hold W on a straight road
@@ -506,7 +507,7 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 		if ticks <= 0 or reached[0.95] then timer.Remove(id) report() end
 		local okp, op = pcall(veh.GetOperatingParams, veh)
 		op = okp and istable(op) and op or {}
-		local hold = veh.audioHoldYaw and string.format(" | %5.1f %4.1f", veh.audioHoldYaw, veh.audioHoldBeta) or ""
+		local hold = veh.audioLogYaw and string.format(" | %5.1f %5.1f", veh.audioLogYaw, veh.audioLogBeta) or ""
 		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f%s", CurTime() - t0, mph,
 			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioSlide or 0, veh.audioTC or 1,
 			veh.audioSteerLock or 1, hold))
