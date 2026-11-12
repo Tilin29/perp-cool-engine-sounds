@@ -34,7 +34,7 @@ POLICE_SIREN = POLICE_SIREN or {}
 
 POLICE_SIREN.CONFIG = {
 	volume = 0.75,
-	soundLevel = 94,
+	soundLevel = 86,
 	doppler = 1,
 	attack = 0.05,
 	release = 0.5,
