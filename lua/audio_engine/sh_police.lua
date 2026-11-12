@@ -4,14 +4,14 @@
 	livery. The model's LEDs are plain textures, so the flashing is drawn by cl_police.lua
 	(glows on the lenses plus a dynamic light); sv_police.lua attaches the bar and switches it.
 
-	Lightbar model space: long axis Y (-29.7..29.7), the message board side +X (the rear),
-	base at z 0, lenses z 3.3..5.0. Mounted turned so its -X faces the car's nose (+Y on the
-	TDM models); its -Y end is then on the driver's side.
+	Lightbar model space: long axis X (-29.7..29.7), front +Y, the message board at the rear,
+	base at z 0, lenses z 3.3..5.0: the same way round as the TDM cars (nose +Y, -X the
+	driver's side), so it mounts unturned.
 ]]
 local E = AUDIO_ENGINE
 
 E.LIGHTBAR_MODEL = "models/perpheads/props/police_lightbar.mdl"
-E.LIGHTBAR_ANGLE = Angle(0, -90, 0)
+E.LIGHTBAR_ANGLE = Angle(0, 0, 0)
 
 -- police spawn name (E.JOB_VEHICLES) -> where the bar sits, in the car's model space: centre line,
 -- just behind the windscreen, on the roof (measured from the meshes: highest painted surface)
@@ -43,13 +43,15 @@ end
 E.LIGHT_MODES = { "CODE 2", "CODE 3" }
 
 --[[
-	LED modules of the bar, in its model space: pos = lens centre, n = outward normal, w = width.
+	LED modules of the bar: pos = lens centre, n = outward normal, w = width.
 	group: o outer, i inner, c centre, k corner; side -1 = driver's side (red), 1 = passenger's
 	side (blue), 0 = centre (white)
+	Written as read from the mesh, which is in the root bone's frame (turned -90 deg about Z:
+	x = rear, y = passenger's side); module() turns them into model space (x, y) -> (y, -x)
 ]]
 local Z = 4.15
 local function module(x, y, nx, ny, w, group, side)
-	return { pos = Vector(x, y, Z), n = Vector(nx, ny, 0), w = w, group = group, side = side }
+	return { pos = Vector(y, -x, Z), n = Vector(ny, -nx, 0), w = w, group = group, side = side }
 end
 
 E.LIGHTBAR_MODULES = {}

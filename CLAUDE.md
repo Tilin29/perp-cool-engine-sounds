@@ -50,8 +50,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `AudioPerpScript` picks the fallback physics). Door soundscripts are never muted. `E.PERP_SCRIPT_UNUSED`: model-less scripts ignored.
 - Police lightbars: `sh_police.lua` (`E.POLICE_VEHICLES` = the 9 marked police job vehicles by spawn name: roof `mount` in the car's
   model space, measured from the meshes, + `bodygroups`; `E.POLICE_BY_SCRIPT` from `E.JOB_VEHICLES`; `E.LIGHTBAR_MODULES` = the LED
-  lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669: long axis Y, message board on +X = rear, mounted at
-  `E.LIGHTBAR_ANGLE` yaw -90 so -Y is the driver's side, red; +Y blue; centre white). `sv_police.lua`: on spawn (script, or the
+  lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669: model space long axis X, front +Y like the cars, so `E.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
+  turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
   Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
   off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the bar's LEDs are plain textures, so lit modules get an additive lens
