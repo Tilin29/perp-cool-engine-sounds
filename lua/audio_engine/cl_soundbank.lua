@@ -349,6 +349,7 @@ local function build(b)
 		-- the peak each sound plays at (cl_engine keeps the car's mix under full scale with it)
 		b.peak = b.peak or {}
 		b.peak[j.name] = math.min(1, peakOf(samples, 0) * jg * (j.trim or 1))
+		b.samples = (b.samples or 0) + N   -- (the memory a generated bank holds: audio_engine_perf)
 		sound.Generate(j.name, sr, N / sr, function(t)
 			local v = (samples[(t % N) + 1] or 0) * jg
 			if v > 1 then v = 1 elseif v < -1 then v = -1 end
@@ -427,6 +428,7 @@ local function buildEnv(b)
 		local name = b.prefix .. j[1]
 		b.peak[j[1]] = math.min(1, pk0 * g)
 		b.peak[name] = b.peak[j[1]]
+		b.samples = (b.samples or 0) + N
 		sound.Generate(name, sr, N / sr, function(t)
 			local v = samples[(t % N) + 1] or 0
 			if v > 1 then v = 1 elseif v < -1 then v = -1 end

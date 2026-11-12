@@ -35,11 +35,19 @@ function AUDIO_ENGINE.RegisterCar(model, cfg)
 	return cfg
 end
 
+-- model path -> lower case, kept: this runs for every car every tick / frame, and lowering the
+-- same few paths again each time was most of its cost
+local lowered = {}
 function AUDIO_ENGINE.GetCarConfig(ent)
 	if not ent or not ent.GetModel then return nil end
 	local mdl = ent:GetModel()
 	if not mdl then return nil end
-	return AUDIO_ENGINE.Cars[string.lower(mdl)]
+	local key = lowered[mdl]
+	if not key then
+		key = string.lower(mdl)
+		lowered[mdl] = key
+	end
+	return AUDIO_ENGINE.Cars[key]
 end
 
 -- Mercedes-Benz SL65 AMG (R230): 6.0 L twin-turbo V12, 5-speed automatic.

@@ -30,9 +30,11 @@ end
 local dbg = "audio_engine_debug/"
 if file.Exists(dbg .. "sh_debug.lua", "LUA") then
 	if SERVER then
-		for _, f in ipairs({ "sh_kv.lua", "sh_debug.lua", "cl_debug.lua" }) do AddCSLuaFile(dbg .. f) end
+		for _, f in ipairs({ "sh_kv.lua", "sh_debug.lua", "cl_debug.lua", "cl_perf.lua" }) do AddCSLuaFile(dbg .. f) end
 	end
 	include(dbg .. "sh_kv.lua")
 	include(dbg .. "sh_debug.lua")
 	include(dbg .. (SERVER and "sv_debug.lua" or "cl_debug.lua"))
+	-- the profiler (audio_engine_perf, audio_engine_perf_hud): measures nothing until it's turned on
+	include(dbg .. (SERVER and "sv_perf.lua" or "cl_perf.lua"))
 end

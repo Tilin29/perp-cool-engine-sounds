@@ -323,12 +323,19 @@ hook.Add("Tick", "audio_engine_wings", function()
 		if IsValid(veh) then
 			local car = E.GetCarConfig(veh)
 			local gp, bw = car and car.gaugeParts, car and car.brakeWing
-			if gp or bw then
-				local phys = veh:GetPhysicsObject()
+			local phys = (gp or bw) and veh:GetPhysicsObject()
+			-- parked (physics asleep, no driver) with its wings settled: nothing moves until it's woken
+			local asleep = phys and IsValid(phys) and phys:IsAsleep() and not IsValid(veh:GetDriver())
+			if (gp or bw) and not (asleep and veh.audioWingsSettled) then
 				local kmh = IsValid(phys) and phys:GetVelocity():Length() * 0.09144 or 0   -- in/s -> km/h
 				local top = E.CarTopSpeed(veh, car)
 				if gp then
-					veh:SetNW2Float("audio_wing", math.Round(E.WingPose(veh, gp, kmh, top) / WING_STEP) * WING_STEP)
+					-- (set only when it moved: the NW2 setter compares too, but that's a call into the engine every tick)
+					local pose = math.Round(E.WingPose(veh, gp, kmh, top) / WING_STEP) * WING_STEP
+					if pose ~= veh.audioWingSent then
+						veh.audioWingSent = pose
+						veh:SetNW2Float("audio_wing", pose)
+					end
 				end
 				if bw then
 					local drv = veh:GetDriver()
@@ -336,6 +343,8 @@ hook.Add("Tick", "audio_engine_wings", function()
 						and kmh > E.WING_BRAKE_MPH * 1.609344
 					brakeWing(veh, bw, kmh, top, dt, braking)
 				end
+				veh.audioWingsSettled = asleep and (veh.audioFlapFrac or 0) == 0 and (veh.audioMainFrac or 0) == 0
+					and (veh.audioFlapShow or 0) <= CurTime()
 			end
 		end
 	end
@@ -365,6 +374,7 @@ concommand.Add("audio_engine_wingflap", function(ply)
 		return
 	end
 	veh.audioFlapShow = CurTime() + 10
+	veh.audioWingsSettled = false   -- (a parked car's wings are otherwise left alone)
 end)
 
 concommand.Add("audio_engine_bonedump", function(ply)

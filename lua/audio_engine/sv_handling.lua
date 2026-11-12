@@ -396,7 +396,11 @@ hook.Add("Tick", "audio_engine_traction", function()
 	local on = cvTraction:GetBool()
 	local T, dt = E.TRACTION, engine.TickInterval()
 	for veh in pairs(E.TrackedVehicles or {}) do
-		if IsValid(veh) and not veh.audioSpiked and veh.audioBase then
+		-- no driver and nothing left to put back (full power, no limiter): nothing to do. The
+		-- steering lock is caught up on the first tick someone drives it
+		local idle = IsValid(veh) and not IsValid(veh:GetDriver()) and (veh.audioTCSent or 1) == 1
+			and veh.audioCruisePowSent == nil and not veh.audioCruise and not veh.audioParamsDirty
+		if IsValid(veh) and not veh.audioSpiked and veh.audioBase and not idle then
 			local phys = veh:GetPhysicsObject()
 			local v = IsValid(phys) and phys:GetVelocity():Length() * 0.0254 or 0
 			-- steering: only on cars that got the wider lock (anti-spin setup)

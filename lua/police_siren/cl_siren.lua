@@ -38,6 +38,7 @@ PS.Serial = (PS.Serial or 0) + 1
 local soundNames = {}   -- id -> { out = name, inside = name }
 local queued = {}       -- ids waiting to be built, the one being built first
 local failed = {}       -- ids whose build failed (not tried again)
+local builtSamples = 0  -- samples held by the built tones (both versions)
 local builder
 
 local function generate(tone, id, inside)
@@ -48,6 +49,7 @@ local function generate(tone, id, inside)
 	sound.Generate(name, rate, n / rate, function(t)
 		return samples[(t % n) + 1] or 0
 	end, 1)
+	builtSamples = builtSamples + n
 	coroutine.yield()
 
 	return name
@@ -189,6 +191,22 @@ end
 
 local sirenCars = {}
 local nextRefresh = 0
+
+-- for profilers (the audio engine's debug module reads it when the siren is installed): what the
+-- siren holds right now. Only counts, kept anyway; nothing is measured unless asked
+function PS.Stats()
+	local built, playing = 0, 0
+	for _ in pairs(soundNames) do built = built + 1 end
+	for _, state in pairs(cars) do
+		if state.patch:IsPlaying() then playing = playing + 1 end
+	end
+
+	return {
+		tonesBuilt = built, samples = builtSamples, sampleRate = PS.CONFIG.sampleRate or 44100,
+		cars = #sirenCars, sounding = table.Count(cars), patches = table.Count(cars) + #fading, playing = playing,
+		building = #queued,
+	}
+end
 
 hook.Add("Think", "police_siren", function()
 	local now = RealTime()

@@ -9,7 +9,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu, cl_police. Server: sv_engine, sv_stability, sv_cruise, sv_police.
   Then the debug module (`lua/audio_engine_debug/`, see "Debug module" below), if that folder exists: deleting it is all it takes to ship without it.
-- `sh_config.lua`: `RegisterCar(model, cfg)`; the SL65 entry (shift points, stability, wheel radius). `audio_engine_editor`
+- `sh_config.lua`: `RegisterCar(model, cfg)`, `GetCarConfig` (keeps each model path's lower case: called per car per tick/frame); the SL65 entry (shift points, stability, wheel radius). `audio_engine_editor`
   (shared, default 0, `E.EditorEnabled()`): the Rev Bench menu (cl_menu: command, `!engine`, context menu; sv_engine rejects `audio_engine_set`) only when 1.
   cl_menu has no gear card any more (its ratio editor never reached the car; it forces `fit = 1`).
 - `sh_presets.lua`: layouts, gearbox presets, 38 engine presets, profile Sanitize/Encode/Decode
@@ -122,6 +122,17 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `audio_engine_tunnel` (0 = off, default 1 = Source's auto preset, 7 = large tunnel, `CSoundPatch:SetDSP`); a car in one carries `TUNNEL_LEVEL` 8 dB further; both inside: no pass-by drop with range.
     SetDSP/SetSoundLevel go on before PlayEx (`startPatch`) and loops restart when the room changes (`roomGen`): not known to reach a playing sound
   - once a second each active loop is checked with `IsPlaying` and restarted if the game dropped it (`car.revive`)
+  - performance (`rest()`, `car.mode`, shown by `audio_engine_perf_snapshot`): engine off, standing, silent = asleep, looked at every
+    `SLEEP_STEP` 0.25 s; idling, standing, no keys, not your car = parked: only the engine's idle plays (supercharger whine, turbo fade out;
+    the EV hum stays: it's the EV's idle), every `PARKED_STEP` 0.1 s while the listener is under `PARKED_EAR` 6 m/s, volume/pitch gliding over
+    that (`car.fade`). Dormancy, ignition or a key wakes them that frame (`wakes()`). A resting car's longer step runs the rpm model in
+    `DT_SLICE` 0.02 s slices (one 0.1 s step: the idle control swung 640-760 rpm), keeping limiter/BOV events from any slice; frame steps are unsliced.
+    Not "in neutral": a car driven and stopped stays in D. `audio_engine_range` (client, m, default 250, 0 = off) for an 85 dB car, scaled
+    by (level - 50) / 35 (Source falloff ~ distance x 20/(level-50)): past it silent (`car.far`, stopAll, no one-shots, rpm model still runs),
+    fading over the last 25%, back on inside 95%. Volume/pitch only sent on change (`sendPatch`: pitch by its whole number, volume over
+    1% + 0.0005), tracked in `car.sentV/sentP` (set by startPatch). setGroup's name/volume lists are reused (`one`, `pairOf`, `vols`),
+    silent inactive groups skipped, settings read once a frame (`cv`). Tunnel probes skip cars that moved under 1 m since their last one.
+    Offline check: the scratchpad-style mock test (mocked client + real sh_config/sh_presets/sh_drivetrain/cl_engine) is not in the repo.
   - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out;
     the gearbox's speed (`car.vDrive`) moves at most `SPEED_SLEW` 40 m/s2. Dividing by the capped frame dt made stutters read as several times the real speed
   - Doppler (`audio_engine_doppler`: 1 = default, real, 4 = maximum, four times real. The scale was 0.25 = real until the user asked for 1:
@@ -138,7 +149,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     also animate wings/vents on that pose (flapped with the revs; Source's speed value folds the R8 Plus/LaFerrari wings back
     down near the top). Those follow speed through per-model {rest, up} pose ranges: up from `E.WING_UP` 0.7 x top speed,
     down under `E.WING_DOWN_MPH` 30 (`cfg.topSpeed`, km/h). The server picks the position (`E.WingPose`, sv_engine `Tick`) and sends it in 0.02 steps
-    (NW2 `audio_wing`); cl_engine glides to it at `E.WING_RATE`. Source writes its speed value to this pose in the driver's move: writing
+    (NW2 `audio_wing`, set only when it changed); cl_engine glides to it at `E.WING_RATE`. Parked cars (physics asleep, no driver) with
+    settled wings are skipped (`veh.audioWingsSettled`; `audio_engine_wingflap` clears it). sv_handling's traction tick skips cars
+    with no driver once the power trim is back to 1 and no limiter is set. Source writes its speed value to this pose in the driver's move: writing
     ours over it server-side stuttered on real servers (fine in single player), set in Think it lost to the networked value. Both this and the tach pose are applied in the car's `RenderOverride`
     (`ent.audioGuage`, chains any existing override)
   - brake wings `E.BRAKE_WINGS` (P1, SLR; sv_engine, bone manipulation): S held 0.5 s over 15 mph tilts the flap (P1 `spoilerbrake`
@@ -246,6 +259,16 @@ it wraps `E.GetEngineConfig` (`DBG.Install`, `DBG.BaseConfig` = the core's) and 
   `E.PERP_PHYSICS` values; baseline (`veh.audioDbg`: file text, params, mass) taken on first request, edits always scaled from it. `audio_engine_debug 0` undoes everything.
 - `cl_debug.lua`: pages Handling script (edit, apply live, copy, save to data/audio_engine_debug/scripts/), Gearing (shift speeds, chart, audibility
   check, copies an E.CAR_GEARING entry), Rev response (copies E.CAR_REV / DT.REV), Handling (PERP default handling = handling/traction/stability 0), Settings.
+- `cl_perf.lua` / `sv_perf.lua`: profiler. Measures nothing until turned on (the user's rule): the wrappers on the addon's hooks
+  (names `audio_engine*` / `police_siren*`), util.Trace*, CreateSound / CSoundPatch methods, DynamicLight, render quads/sprites,
+  NW2 setters (`audio_*`/`siren_*`, changes only), net.Start/Send, and `E.PerfCar` (cl_engine's per-car timing point, a nil check
+  otherwise) go on only while a capture or the overlay runs and come off after; the server's poll timer exists only then; a Lua
+  refresh takes the old wrappers off (`DBG.PerfClient/PerfServer.Uninstall`). `audio_engine_perf [s] [client|server|both]` prints
+  a console report; `audio_engine_perf_hud` live overlay (server figures once a second to subscribers); `audio_engine_perf_snapshot`
+  cars, patches, memory with no timing; `audio_engine_perf_spawn <n> [car|mixed] [lights]` / `_clear` stress grid.
+  Memory: generated banks keep their samples in Lua tables (8 B each, held by the sound.Generate callbacks) + the engine's copy
+  (~2 B); counted as `bank.samples` (cl_soundbank); baked banks = their WAV file sizes; the siren's `PS.Stats()` (cl_siren).
+  Smoke-tested in a mock (wrappers off after each run); not yet measured in game.
 - Power cut after a turn: releasing A/D with W held enters sv_stability's straight-line hold, which counted the turn's leftover yaw as `audioSlide`,
   and traction control cut to `slideFloor` 0.2. In game the reading stayed 0.4-1.0 for 3-6 s (wheel slip 0) until W was pressed again: now
   `holdGrace` and `slideMaxTime` (both on the Handling page). Why the hold's reading persisted isn't known yet: the log's last two columns show it.
