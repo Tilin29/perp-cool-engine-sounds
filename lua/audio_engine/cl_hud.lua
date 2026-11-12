@@ -216,6 +216,13 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		draw.SimpleText(txt, "AudioHud_Num", x + W - 10 * s, y - 10 * s, C.green, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
 	end
 
+	-- police lights (sv_police.lua)
+	local lights = E.LIGHT_MODES[veh:GetNW2Int("audio_lights", 0)]
+	if lights and IsValid(veh:GetNW2Entity("audio_lightbar")) then
+		local col = blink % 0.5 < 0.25 and C.red or C.fg
+		draw.SimpleText(lights, "AudioHud_Num", x + 10 * s, y - 10 * s, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
+	end
+
 	-- shift lights
 	local frac = disp / cfg.redline
 	local limiter = st.limHold > 0 or frac > 0.985
