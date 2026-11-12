@@ -3,7 +3,8 @@
 
 	volume       playback volume of every tone, 0..1 (x the tone's own level)
 	soundLevel   Source sound level in dB: how far it carries. The cars' engines play at 85, high-powered
-	             ones at 92: a little over that keeps the siren to just past the car's own sound
+	             ones at 92: a few dB over the car's own keeps the siren heard first, but not much further
+	soundLevels  the same per car model, for cars whose engine is louder (lower-case model path)
 	doppler      Doppler pitch shift of passing cars: 0 = off, 1 = real (capped at +4 / -5 semitones)
 	attack       seconds a tone takes to fade in when it starts
 	release      seconds it takes to fade out when it stops or changes
@@ -34,7 +35,14 @@ POLICE_SIREN = POLICE_SIREN or {}
 
 POLICE_SIREN.CONFIG = {
 	volume = 0.75,
-	soundLevel = 86,
+	soundLevel = 88,
+	soundLevels = {
+		["models/tdmcars/bmw_340i.mdl"] = 95,
+		["models/tdmcars/bmwm5e60.mdl"] = 95,
+		["models/tdmcars/cayenne.mdl"] = 95,
+		["models/tdmcars/chargersrt8.mdl"] = 95,
+		["models/tdmcars/sl65amg.mdl"] = 95,
+	},
 	doppler = 1,
 	attack = 0.05,
 	release = 0.5,

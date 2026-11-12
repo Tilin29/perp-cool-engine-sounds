@@ -200,8 +200,9 @@ log pitch), cycle 4.7 s; nearly pure: harmonics 2-10 at -25, -22, -34, -32, -42,
 no resonance). Yelp and phaser use the same range and colour. Easy to listen to for long, which the user asked for.
 In a siren car the spawn menu (Q) is blocked (`SpawnMenuOpen`), and the tone shows after the light mode on the engine's HUD through
 the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still never names the siren).
-- `sh_siren_config.lua`: `PS.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (86: about the engines' 85; 94 carried too far for the user;
-  engines 85/92/80), doppler (1 = real), attack/release, stopPitch (pitch drop on fade-out), pitch,
+- `sh_siren_config.lua`: `PS.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (88 = the engines' 85 + 3) and
+  `soundLevels[model]` (95 on the police cars on CAR_EMOTION, engine 92: the user wants the siren heard before the engine, not much
+  further; 94 for all carried too far on the others, 86 lost to the SL65's engine), doppler (1 = real), attack/release, stopPitch (pitch drop on fade-out), pitch,
   sampleRate, `lightTones` { CODE 2, CODE 3 }, `cycle`, `cabin` { volume, muffle Hz }, `keys` { tone }, `tones[id]` (pattern of
   points { f, glide, hold, curve }, logGlide, harmonics, voice2, vibrato, tremolo, speaker). Must stay plain Lua (the studio runs it).
 - `cl_siren_synth.lua`: plain Lua, game and studio. Wavetable of the harmonics (bandlimited to the tone's top pitch), second voice,

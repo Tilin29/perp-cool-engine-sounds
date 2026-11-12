@@ -200,6 +200,7 @@ function fill(obj, shape) {
 }
 function normalize(c) {
   const d = DEFAULTS
+  if (!c.soundLevels || typeof c.soundLevels !== 'object' || Array.isArray(c.soundLevels)) c.soundLevels = clone(d.soundLevels || {})
   for (const k of ['volume', 'soundLevel', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate']) if (c[k] === undefined) c[k] = d[k]
   c.cabin = Object.assign(clone(d.cabin || { volume: 0.35, muffle: 1400 }), c.cabin || {})
   delete c.horn
@@ -547,7 +548,8 @@ function buildGlobals() {
   g.replaceChildren(
     field('Volume', CFG, 'volume', { min: 0, max: 1, step: 0.01, change: onGlobal }),
     field('Sound level', CFG, 'soundLevel', { min: 60, max: 140, step: 1, unit: 'dB', change: onGlobal }),
-    el('p', { class: 'hint' }, 'How far it carries in game (Source sound level). The engines play at 85, high-powered cars at 92: a little over that keeps the siren to just past the car.'),
+    buildLevels(),
+    el('p', { class: 'hint' }, 'How far it carries in game (Source sound level). The engines play at 85, high-powered cars at 92: a few dB over the car\'s own engine keeps the siren heard first.'),
     field('Doppler', CFG, 'doppler', { min: 0, max: 2, step: 0.05, unit: '×', change: onGlobal }),
     el('p', { class: 'hint' }, 'Pitch shift of passing cars: 0 = off, 1 = real. "Drive past" at the top plays a pass-by.'),
     field('Fade in', CFG, 'attack', { min: 0, max: 2, step: 0.01, unit: 's', change: onGlobal }),
@@ -573,6 +575,31 @@ function buildGlobals() {
     keyField('Tone key', 'tone'),
     el('p', { class: 'hint' }, 'A key name as the game knows it: q, j, f2, kp_enter, lalt/ralt (alt = left)… Here on the page: Shift = lights (as in game), then the tone key.'),
   )
+}
+// sound level per car model (cars whose engine carries further get a louder siren)
+function buildLevels() {
+  const box = el('div', { class: 'cycle' })
+  const render = () => {
+    box.replaceChildren(el('div', { class: 'hint', style: 'margin:4px 0 0' }, 'Per car model (overrides the level above):'))
+    for (const [model, level] of Object.entries(CFG.soundLevels)) {
+      const m = el('input', { type: 'text', value: model, style: 'flex:1;min-width:0', onchange: () => {
+        const v = m.value.trim().toLowerCase()
+        delete CFG.soundLevels[model]
+        if (v) CFG.soundLevels[v] = level
+        onGlobal(); render()
+      } })
+      const n = el('input', { type: 'number', value: level, min: 60, max: 140, step: 1, style: 'width:56px', oninput: () => {
+        const v = parseFloat(n.value)
+        if (Number.isFinite(v)) { CFG.soundLevels[model] = v; onGlobal() }
+      } })
+      box.append(el('div', null, m, n, el('button', { class: 'small', textContent: '×', onclick: () => { delete CFG.soundLevels[model]; onGlobal(); render() } })))
+    }
+    box.append(el('div', null, el('button', { class: 'small', textContent: '+ Car model', onclick: () => {
+      CFG.soundLevels['models/tdmcars/' + 'new.mdl'] = CFG.soundLevel + 7; onGlobal(); render()
+    } })))
+  }
+  render()
+  return box
 }
 function keyField(label, k) {
   const i = el('input', { type: 'text', value: CFG.keys[k], style: 'width:80px', oninput: () => { CFG.keys[k] = i.value.trim().toLowerCase(); onGlobal() } })
@@ -870,7 +897,7 @@ window.addEventListener('resize', () => drawPattern())
 // ---------------------------------------------------------------------------------------------
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
-const GLOBAL_ORDER = ['volume', 'soundLevel', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'cabin', 'keys', 'tones']
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'soundLevels', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'cabin', 'keys', 'tones']
 const TONE_ORDER = ['name', 'level', 'pattern', 'logGlide', 'harmonics', 'voice2', 'vibrato', 'tremolo', 'speaker']
 const SUB_ORDER = {
   pattern: ['f', 'glide', 'hold', 'curve'], voice2: ['on', 'semitones', 'cents', 'level', 'offset'], vibrato: ['rate', 'depth'],
@@ -915,6 +942,12 @@ function exportLua() {
         }
         out.push(tab(2) + '},')
       }
+      out.push(tab(1) + '},')
+    } else if (k === 'soundLevels') {
+      const models = Object.keys(v).sort()
+      if (!models.length) { out.push(tab(1) + 'soundLevels = {},'); continue }
+      out.push(tab(1) + 'soundLevels = {')
+      for (const m of models) out.push(tab(2) + luaKey(m) + ' = ' + luaNum(v[m]) + ',')
       out.push(tab(1) + '},')
     } else if (Array.isArray(v)) {
       out.push(tab(1) + k + ' = { ' + v.map(luaScalar).join(', ') + ' },')

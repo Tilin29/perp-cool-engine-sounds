@@ -123,7 +123,7 @@ end
 local function startTone(veh, id, inside, fade)
 	local cfg = PS.CONFIG
 	local patch = CreateSound(veh, inside and soundNames[id].inside or soundNames[id].out)
-	patch:SetSoundLevel(cfg.soundLevel)
+	patch:SetSoundLevel(cfg.soundLevels[string.lower(veh:GetModel() or "")] or cfg.soundLevel)
 	patch:PlayEx(0, BASE_PITCH)
 	local volume = cfg.volume * (cfg.tones[id].level or 1) * cvVolume:GetFloat() * (inside and cfg.cabin.volume or 1)
 
