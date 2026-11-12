@@ -5,3 +5,4 @@ dev/baker/bake_log.txt
 # browser test page build output
 dev/rev_bench.html
 dev/tone_studio.html
+dev/siren_studio.html
