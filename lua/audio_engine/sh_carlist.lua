@@ -374,12 +374,12 @@ E.SC_PITCH = {
 	["Pontiac Firebird Trans Am"] = 0.35,
 }
 
--- gear count with fitted gearing (sh_presets.lua E.FitGearEnds), where the time-based count
--- should give way to the car's PERP script. Runtime only: no re-bake
+-- gear count with fitted gearing (sh_presets.lua E.FitGearEnds), instead of the one the top speed
+-- gives (at most E.GEAR_FIT.maxCount 5; set here 2..8). Runtime only: no re-bake
 E.CAR_GEARS = {
-	["Bugatti Veyron 16.4"] = 5,
-	["Bugatti Veyron SS"] = 5,
-	["Mazda Furai"] = 5,
+	["Mazda Furai"] = 6,
+	["Mini Cooper 1965"] = 3,
+	["Mini Cooper S 2011"] = 3,
 }
 
 --[[

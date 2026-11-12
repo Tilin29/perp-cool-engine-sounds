@@ -74,14 +74,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   changes up flat out (lazy upshifts at the same lazyUpRpm/upRpm share of it), `down` mph to change down coasting/braking, last entry = top gear
   (`topRpm` at `cfg.topSpeed`); sets `cfg.gears` as overall ratios, `final = 1`, `cfg.shiftPlan` { up = rpm[g], down = m/s[g] }. Each gear at least
   `E.GEAR_MIN_STEP` 1.1 taller. Kickdown/corner landings also stay under the target gear's up rpm.
-  Fitted gearing respaces the box by time (`E.FitGearEnds`, `E.GEAR_FIT`): each gear lasts a set share of the modelled
-  full-throttle run, growing `grow` 1.18x per gear; as many gears as keep 1st at `minTime` 1.6 s or more, at most the box's count;
-  steps `stepMin` 1.22 .. `stepMax` 1.8 (upshifts land at 51-76% of redline), 1st ends at `firstMin` 15 km/h or more. Median 6 gears.
-  The model (`E.GearAccel`, `E.GEAR_ACCEL`): pull `perWkg` 0.035 x power to weight (W/kg, server NW2 `audio_pwr` = stock hp / mass,
-  `E.CarPower`; x the tuned accel), at most `max` 5 m/s2, fading as (v/top)^`fade` 3. A guess: calibrate it with
-  `audio_engine_accel_log 30` from a standstill (prints the sound gears' redline speeds and the time to 25..95% of top speed next to the model's).
-  PERP's 163 cars share TDM's generic 5-speed, so only top speed (30-145 mph) and power are per car. `CAR_GEARS[name]` sets the count (Veyrons, Furai: 5).
-  Spacing by km/h (1 gear per 40 km/h, steps to 2.3x) gave most cars 3 gears landing at 40-50% of redline. HUD speed defaults to mph (`audio_engine_units`).
+  Fitted gearing comes from the top speed only, deliberately not realistic (the user's choice; a time-based, realistic spacing
+  with up to 7 gears was tried and reverted) (`E.FitGearEnds`, `E.GEAR_FIT`): 1 gear per `kmhPerGear` 40 km/h, steps at most
+  `stepMax` 2.3x, 1st ends at `firstShare` 0.28 of top speed (at least `firstMin` 25 km/h), gear ends evenly spaced in speed^`spread` 2.2;
+  2 to `maxCount` 5 gears (or the box's count if lower). `CAR_GEARS[name]` overrides the count, 2..8: Furai 6 (the only 6-speed), both Mini Coopers 3.
+  Manual gearing (`E.CAR_GEARING`, debug gearing editor) still replaces the fitted gears.
+  `E.GearAccel`/`E.GEAR_ACCEL` (pull `perWkg` 0.035 x power to weight, W/kg from NW2 `audio_pwr`) is now only the model that
+  `audio_engine_accel_log` and dev/drive_demo compare against, not used for the gear spacing. HUD speed defaults to mph (`audio_engine_units`).
   The top gear never reaches redline: at top speed it turns `E.TOP_GEAR_DROP` 1000 rpm under redline (`E.TopGearShare`, at least
   `E.TOP_GEAR_MIN` 0.6 of it; FitFinal), the gears are spaced up to
   that gear's redline speed, and there's no lazy upshift into it: the car changes up near top speed and settles lower.

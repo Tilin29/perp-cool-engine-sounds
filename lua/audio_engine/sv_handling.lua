@@ -489,7 +489,7 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x | wheel angle deg"
 		.. " | yaw off what's asked deg/s, slip angle deg")
 	local id = "audio_engine_accel_log_" .. veh:EntIndex()
-	-- calibration for the gear spacing (sh_presets.lua E.GEAR_ACCEL): the time to each share of the
+	-- calibration for the acceleration model (sh_presets.lua E.GEAR_ACCEL): the time to each share of the
 	-- top speed, next to the model's. Start from a standstill and hold W on a straight road
 	local topKmh = E.CarTopSpeed(veh, E.GetCarConfig(veh))
 	local wkg = E.CarPower(veh, E.GetCarConfig(veh)) * ((E.DecodeProfile(veh:GetNW2String("audio_prof", "")) or {}).accel or 1)

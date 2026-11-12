@@ -261,24 +261,23 @@ function E.TopGearShare(redline)
 end
 
 --[[
-	Fitted gearing is spaced by time, not speed. PERP's cars share TDM's generic 5-speed, so only
-	their top speed (30-145 mph) and power are per car; spacing gears by km/h (one per 40 km/h,
-	steps up to 2.3x) gave most cars 3 gears whose upshifts dropped the revs to 40-50% of redline,
-	a 1st gear over in a blink and a last gear dragging through the slowest part of the run.
-
-	Instead each gear lasts a set time at full throttle: the times grow by GEAR_FIT.grow per gear
-	(a real box feels like that: 1st and 2nd go quickly, the higher gears pull longer), and the
-	car gets as many gears as keep 1st at GEAR_FIT.minTime s or more, at most the box's own count
-	(or CAR_GEARS). Every step between gears stays within stepMin..stepMax (an upshift at 92% lands
-	at 51-75% of redline), 1st ends at firstMin km/h or more.
-
-	The time comes from an estimate of the car's acceleration (E.GearAccel): a pull of
-	GEAR_ACCEL.perWkg x its power-to-weight (W/kg; the server sends it as NW2 audio_pwr, the
-	tuning menu's acceleration scales it), at most GEAR_ACCEL.max m/s2, fading as (v/top)^fade
-	towards the top speed. Calibrate perWkg and fade from audio_engine_accel_log runs (it prints
-	the time to each share of the top speed and this model's times next to them).
+	Fitted gearing comes from the top speed alone, not from a model of a real gearbox: about one
+	gear per GEAR_FIT.kmhPerGear of top speed, and enough that no step between gears is over
+	stepMax (a slow car's 1st still ends at firstMin km/h), at least 2 and at most maxCount or the
+	box's own count, whichever is lower. A car may set its own count (sh_carlist.lua CAR_GEARS,
+	any 2..8: the Furai's 6). 1st reaches firstShare of the top speed (at least firstMin km/h),
+	the gears in between end at speeds evenly spaced in speed^spread: a car gains speed slower the
+	faster it goes, so each gear spans less speed than the one before. If that makes a step over
+	stepMax (few gears over a wide span) the spread is lowered until it fits.
+	upShare: where the debug module's gearing editor puts a gear's upshift (share of redline).
 ]]
-E.GEAR_FIT = { grow = 1.18, minTime = 1.6, stepMin = 1.22, stepMax = 1.8, firstMin = 15, upShare = 0.92 }
+E.GEAR_FIT = { firstMin = 25, firstShare = 0.28, kmhPerGear = 40, stepMax = 2.3, spread = 2.2, maxCount = 5, upShare = 0.92 }
+
+--[[
+	A guess at the car's full-throttle acceleration (E.GearAccel), only for audio_engine_accel_log
+	and the drive demo (not the gear spacing): a pull of GEAR_ACCEL.perWkg x its power-to-weight
+	(W/kg, NW2 audio_pwr), at most GEAR_ACCEL.max m/s2, fading as (v/top)^fade towards the top speed.
+]]
 E.GEAR_ACCEL = { perWkg = 0.035, max = 5, fade = 3, defaultWkg = 60, floor = 0.02 }
 
 -- the modelled full-throttle acceleration (m/s2) at v (m/s), for a car of wkg W/kg and top speed vmax (m/s)
@@ -288,74 +287,52 @@ function E.GearAccel(v, vmax, wkg)
 	return max(A.floor, a0 * (1 - (min(v, vmax * 0.999) / vmax) ^ A.fade))
 end
 
--- t(v): the modelled time from a standstill to v, as a table over STEPS speeds up to 96% of vmax
-local T_STEPS = 240
-local function timeTable(vmax, wkg)
-	local dv = vmax * 0.96 / T_STEPS
-	local t = { [0] = 0 }
-	for i = 1, T_STEPS do t[i] = t[i - 1] + dv / E.GearAccel((i - 0.5) * dv, vmax, wkg) end
-	return t, dv
-end
-local function timeAt(t, dv, v)
-	local x = math.Clamp(v / dv, 0, T_STEPS)
-	local i = min(T_STEPS - 1, floor(x))
-	return t[i] + (t[i + 1] - t[i]) * (x - i)
-end
-local function speedAt(t, dv, time)
-	local lo, hi = 0, T_STEPS * dv
-	for _ = 1, 30 do
-		local m = (lo + hi) / 2
-		if timeAt(t, dv, m) < time then lo = m else hi = m end
-	end
-	return lo
-end
-
 -- the modelled time (s) from a standstill to share x top speed (audio_engine_accel_log compares it)
+local T_STEPS = 240
 function E.GearModelTime(topKmh, wkg, share)
-	local t, dv = timeTable(topKmh / 3.6, wkg)
-	return timeAt(t, dv, topKmh / 3.6 * share)
+	local vmax = topKmh / 3.6
+	local dv = vmax * share / T_STEPS
+	local t = 0
+	for i = 1, T_STEPS do t = t + dv / E.GearAccel((i - 0.5) * dv, vmax, wkg) end
+	return t
 end
 
--- the speeds (km/h) where each gear reaches redline
+-- the speeds (km/h) where each gear reaches redline (`count`: sh_carlist.lua CAR_GEARS)
 function E.FitGearEnds(topKmh, maxCount, redline, wkg, count)
 	local F = E.GEAR_FIT
-	local vmax = topKmh / 3.6
-	local vRed = vmax / E.TopGearShare(redline or 6000)   -- the top gear's redline speed
-	local t, dv = timeTable(vmax, wkg)
-	local T = timeAt(t, dv, vmax * 0.95)
-	local best, last
-	local nLo, nHi = count or 2, count or maxCount
-	for n = max(2, nLo), max(2, nHi) do
-		local wsum = 0
-		for i = 1, n do wsum = wsum + F.grow ^ (i - 1) end
-		local tau1 = T / wsum
-		-- shift speeds where the planned gear times add up, then each gear's redline speed
-		local e, acc = {}, 0
-		for i = 1, n - 1 do
-			acc = acc + T * F.grow ^ (i - 1) / wsum
-			e[i] = speedAt(t, dv, acc) / F.upShare
+	local v1 = max(F.firstMin, topKmh * F.firstShare)
+	local span = topKmh / E.TopGearShare(redline or 6000) / v1
+	local bySteps = 1 + math.ceil(math.log(span) / math.log(F.stepMax))
+	local n
+	if count then n = math.Clamp(count, 2, 8)
+	else n = math.Clamp(max(floor(topKmh / F.kmhPerGear + 0.5), bySteps), 2, min(maxCount or F.maxCount, F.maxCount)) end
+	-- the speed (as a share of 1st's) where gear i ends, for a spread p (p 0 = geometric)
+	local function ends(p)
+		local e = {}
+		for i = 1, n do
+			local t = (i - 1) / (n - 1)
+			e[i] = p < 0.05 and span ^ t or (1 + t * (span ^ p - 1)) ^ (1 / p)
 		end
-		e[n] = vRed
-		-- keep every step within stepMin..stepMax, working down from the top gear
-		for i = n - 1, 1, -1 do
-			e[i] = math.Clamp(e[i], e[i + 1] / F.stepMax, e[i + 1] / F.stepMin)
-		end
-		last = e
-		if count or e[1] * 3.6 >= F.firstMin then
-			if tau1 < F.minTime and best then break end
-			best = e
-		end
+		return e
 	end
-	best = best or last
+	local p, e = F.spread
+	repeat
+		e = ends(p)
+		local ok = true
+		for i = 2, n do if e[i] / e[i - 1] > F.stepMax then ok = false end end
+		if ok then break end
+		p = p - 0.25
+	until p < 0.05
+	if p < 0.05 then e = ends(0) end
 	local kmh = {}
-	for i, v in ipairs(best) do kmh[i] = v * 3.6 end
+	for i = 1, n do kmh[i] = e[i] * v1 end
 	return kmh
 end
 
--- the box's ratios respaced for the car (`count`: sh_carlist.lua CAR_GEARS; wkg: power to weight)
+-- the box's ratios respaced for the car's top speed (E.FitFinal then sets the final drive)
 function E.FitGearCount(gears, topKmh, count, redline, wkg)
 	if #gears < 2 then return gears end
-	local e = E.FitGearEnds(topKmh, #gears, redline, wkg, count and math.Clamp(count, 2, 8) or nil)
+	local e = E.FitGearEnds(topKmh, #gears, redline, wkg, count)
 	local g = {}
 	for i = 1, #e do g[i] = floor(gears[1] * e[1] / e[i] * 100 + 0.5) / 100 end
 	return g
@@ -451,7 +428,7 @@ function E.ResolveProfile(car, prof)
 	cfg.popTone = prof.popTone
 	-- the speed the car will actually reach: the profile's top speed, else the car's own
 	cfg.topSpeed = prof.vmax > 0 and prof.vmax or (tonumber(car.topSpeed) or 250)
-	-- power to weight (W/kg) for the gear spacing: the car's own (server, NW2 audio_pwr), scaled by the tuned acceleration
+	-- power to weight (W/kg): the car's own (server, NW2 audio_pwr), scaled by the tuned acceleration
 	cfg.powerKg = (tonumber(car.powerKg) or E.GEAR_ACCEL.defaultWkg) * (prof.accel or 1)
 	cfg.gears = prof.fit > 0 and E.FitGearCount(prof.gears, cfg.topSpeed, car.gearCount, prof.redline, cfg.powerKg) or prof.gears
 	cfg.final = prof.fit > 0 and E.FitFinal(cfg.gears, prof.redline, car.wheelRadius, cfg.topSpeed, true) or prof.final
