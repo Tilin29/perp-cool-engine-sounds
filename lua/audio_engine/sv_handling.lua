@@ -486,7 +486,7 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 	local secs = math.Clamp(tonumber(args[1]) or 12, 1, 60)
 	local t0 = CurTime()
 	local function out(s) if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, s) end end
-	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x"
+	out("[Audio Engine] accel log: t | mph | Source gear, rpm | wheel slip | slide | power x | steer x | wheel angle deg"
 		.. " | yaw off what's asked deg/s, slip angle deg")
 	local id = "audio_engine_accel_log_" .. veh:EntIndex()
 	-- calibration for the gear spacing (sh_presets.lua E.GEAR_ACCEL): the time to each share of the
@@ -525,9 +525,9 @@ concommand.Add("audio_engine_accel_log", function(ply, _, args)
 		local okp, op = pcall(veh.GetOperatingParams, veh)
 		op = okp and istable(op) and op or {}
 		local hold = veh.audioLogYaw and string.format(" | %5.1f %5.1f", veh.audioLogYaw, veh.audioLogBeta) or ""
-		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f%s", CurTime() - t0, mph,
+		out(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %.2f | %.2f | %.2f | %5.1f%s", CurTime() - t0, mph,
 			tostring(op.gear or "?"), op.RPM or 0, veh.audioSlip or 0, veh.audioSlide or 0, veh.audioTC or 1,
-			veh.audioSteerLock or 1, hold))
+			veh.audioSteerLock or 1, op.steeringAngle or 0, hold))
 	end)
 end, nil, "Log speed, Source gear/rpm, wheel slip and traction trim of the car you drive (admins)")
 
