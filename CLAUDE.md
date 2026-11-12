@@ -211,7 +211,7 @@ In a siren car the spawn menu (Q) is blocked (`SpawnMenuOpen`), and the tone sho
 the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still never names the siren).
 - `sh_siren_config.lua`: `PS.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (88 = the engines' 85 + 3) and
   `soundLevels[model]` (94 on the police cars on CAR_EMOTION (95 a touch far), engine 92: the user wants the siren heard before the engine, not much
-  further; 94 for all carried too far on the others, 86 lost to the SL65's engine), doppler (1 = real), attack/release, stopPitch (pitch drop on fade-out), pitch,
+  further; 94 for all carried too far on the others, 86 lost to the SL65's engine), doppler (1 = real), attack/release (release 0.08: an electronic siren cuts off; 0.5 s with stopPitch 0.7, a motor wind-down, sounded wonky), stopPitch (pitch drop on fade-out, 1 = none), pitch,
   sampleRate, `lightTones` { CODE 2, CODE 3 }, `cycle`, `schemes[name]` { lightTones, cycle } (fire, medical; the studio keeps them
   through its export but plays the police rules), `cabin` { volume, muffle Hz }, `keys` { tone }, `tones[id]` (pattern of
   points { f, glide, hold, curve }, logGlide, harmonics, voice2, vibrato, tremolo, speaker). Must stay plain Lua (the studio runs it).
