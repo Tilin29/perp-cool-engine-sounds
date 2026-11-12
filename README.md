@@ -144,7 +144,7 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_cruise` | server | 1 | speed limiter on registered cars (middle mouse switches it, the mouse wheel sets the limit) |
 | `audio_engine_stability` | server | 0 | drift-friendly stability assist (all cars except spiked tyres) |
 | `audio_engine_handling` | server | 0 | anti-spin setup: front brake bias, less power while steering at speed, lower centre of mass, wider lock at speed (applies at once) |
-| `audio_engine_traction` | server | 1 | traction control: less power while the driven wheels spin |
+| `audio_engine_traction` | server | 0 | traction control: less power while the driven wheels spin |
 | `audio_engine_editor` | shared | 0 | 1 = the in-game engine tuning menu is available (`!engine`, `audio_engine_menu`, context menu) |
 | `audio_engine_debug` | shared | 1 | the debug tools for superadmins; 0 = off (debug module only) |
 | `audio_engine_tuneaccess` | server | 1 | who can retune engines: 0 = whoever drives the car, 1 = admins, 2 = superadmins |

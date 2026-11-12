@@ -282,7 +282,7 @@ end
 ---------------------------------------------------------------------------
 -- 4. launch traction control
 ---------------------------------------------------------------------------
-local cvTraction = CreateConVar("audio_engine_traction", "1", FCVAR_ARCHIVE,
+local cvTraction = CreateConVar("audio_engine_traction", "0", FCVAR_ARCHIVE,
 	"1 = traction control: less power while the driven wheels spin (strong cars launch instead of spinning)")
 
 E.TRACTION = {

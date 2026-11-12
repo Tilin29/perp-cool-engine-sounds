@@ -152,9 +152,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   downhill): power off and a braking impulse from 0.6 mph over until 0.15 (0.6 + 0.7/mph, max 3.5 m/s2: 60 to 40 mph in ~2.5 s).
   Exit/engine off cancel. NW2 `audio_cruise` (limit, mph) for the HUD ("LIMIT"), `audio_limst` 0 free / 1 holding (sounds like
   steady part throttle, `inp.cruise`) / 2 over (throttle shut). `audio_engine_cruise`.
-- Steering/handling: PERP's own by default (the user's choice): `audio_engine_stability` and `audio_engine_handling` default 0,
-  both archived (a server keeps what it saved). Traction control (`audio_engine_traction`) stays on; with the stability off it only
-  sees wheel spin (no `audioSlide`). The two below are kept, switched off.
+- Handling: the PERPHeads server's by default (the user's choice; the shipped port, PORTING.md, has no handling changes at all):
+  `audio_engine_handling`, `audio_engine_stability` and `audio_engine_traction` default 0, all archived (a server keeps what it saved).
+  The cars then drive on PERP's vehicle scripts only (`addons/perp_vehicle_scripts_local` locally; on the test-script fallback
+  `perpOnto` puts PERP's values on). The assists below are kept, switched off; the speed limiter only acts when switched on.
 - `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `veh.audioSpiked`.
   Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
   and reports any rotation as `veh.audioSlide`, so traction control cuts the power. Taken over from a turn (still rotating), it only damps
