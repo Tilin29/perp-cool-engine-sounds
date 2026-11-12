@@ -4,8 +4,7 @@
 	sv_police.lua), so it sounds on any car that has a lightbar.
 
 	The lights pick the tone (CONFIG.lightTones); the driver's tone key overrides it until the
-	light mode changes (NW2 siren_tone + siren_at, the light mode it was chosen in). Holding the
-	horn key plays the horn tone over everything, lights or not.
+	light mode changes (NW2 siren_tone + siren_at, the light mode it was chosen in).
 ]]
 local PS = POLICE_SIREN
 
@@ -27,10 +26,8 @@ end
 
 -- what the car sounds right now: a tone id, or nil
 function PS.SoundingTone(veh)
-	local cfg = PS.CONFIG
-	local horn = veh:GetNW2Bool("siren_horn", false) and cfg.horn ~= "" and cfg.horn
-	local id = horn or PS.ChosenTone(veh)
-	if id == "" or not cfg.tones[id] then return nil end
+	local id = PS.ChosenTone(veh)
+	if id == "" or not PS.CONFIG.tones[id] then return nil end
 
 	return id
 end

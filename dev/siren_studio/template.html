@@ -78,11 +78,13 @@
     <label class="bar" style="gap:4px;color:var(--dim)">Monitor <input id="monitor" type="range" min="0" max="1" step="0.01" value="0.5" style="width:90px"></label>
   </div>
   <div class="sep"></div>
-  <div class="bar" title="Plays the siren the way the game will: the light mode picks the tone, the tone key steps through the cycle, the horn plays while held">
+  <div class="bar" title="Plays the siren the way the game will: the light mode picks the tone, the tone key steps through the cycle">
     <span style="color:var(--dim)">In-game test:</span>
     <button id="simLights">Lights: off</button><span class="lights" id="lightDots"><i></i><i></i></span>
     <button id="simTone">Tone key</button>
-    <button id="simHorn">Horn (hold)</button>
+    <button id="passBy" title="A car with this siren driving past you 4 m away (pitch as in game; loudness only roughly)">Drive past</button>
+    <input id="passSpeed" type="number" value="80" min="10" max="250" step="10" style="width:60px" title="km/h"><span style="color:var(--dim)">km/h</span>
+    <label class="bar" style="gap:4px;color:var(--dim)" title="Hear it as the driver and passengers do: muffled and quieter (In game: Inside the car)"><input id="inside" type="checkbox"> Inside the car</label>
     <span id="sounding">silent</span>
   </div>
   <span id="status">Loading the synth…</span>
@@ -145,7 +147,7 @@ function SirenHost(post, wasmoonLib) {
     buf = []
     res = null
     const t0 = Date.now()
-    await L.doString('STUDIO.render(' + lua(m.tone) + ',' + lua(m.cfg) + ')')
+    await L.doString('STUDIO.render(' + lua(m.tone) + ',' + lua(m.cfg) + ',' + (m.inside ? 'true' : 'false') + ')')
     const data = Float32Array.from(buf)
     buf = null
     post({ type: 'rendered', id: m.id, key: m.key, sr: res, data, ms: Date.now() - t0 }, [data.buffer])
@@ -173,7 +175,7 @@ const el = (tag, props, ...kids) => {
   return e
 }
 const clone = (x) => JSON.parse(JSON.stringify(x))
-const STORE = 'siren_studio_settings'
+const STORE = 'siren_studio_settings_v2'   // (v2: horn removed, softer tones: older saves are left behind)
 
 let DEFAULTS = null, CFG = null, SEL = null
 
@@ -198,14 +200,16 @@ function fill(obj, shape) {
 }
 function normalize(c) {
   const d = DEFAULTS
-  for (const k of ['volume', 'soundLevel', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'horn']) if (c[k] === undefined) c[k] = d[k]
+  for (const k of ['volume', 'soundLevel', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate']) if (c[k] === undefined) c[k] = d[k]
+  c.cabin = Object.assign(clone(d.cabin || { volume: 0.35, muffle: 1400 }), c.cabin || {})
+  delete c.horn
   if (!Array.isArray(c.lightTones)) c.lightTones = clone(d.lightTones)
   while (c.lightTones.length < 2) c.lightTones.push('')
   if (!Array.isArray(c.cycle)) c.cycle = []
-  c.keys = Object.assign({ tone: 'j', horn: 'h' }, c.keys || {})
+  c.keys = { tone: (c.keys && c.keys.tone) || (d.keys && d.keys.tone) || 'q' }
   if (!c.tones || typeof c.tones !== 'object' || Array.isArray(c.tones)) c.tones = {}
-  // Lua doesn't keep the file's order: the cycle's tones first, then the horn, then the rest
-  const order = [...c.cycle, c.horn, ...Object.keys(c.tones)].filter((id, i, a) => c.tones[id] && a.indexOf(id) === i)
+  // Lua doesn't keep the file's order: the cycle's tones first, then the rest
+  const order = [...c.cycle, ...Object.keys(c.tones)].filter((id, i, a) => c.tones[id] && a.indexOf(id) === i)
   c.tones = Object.fromEntries(order.map((id) => [id, c.tones[id]]))
   for (const t of Object.values(c.tones)) {
     fill(t, TONE_SHAPE)
@@ -240,13 +244,14 @@ function startHost() {
 
 const rendered = {}   // id -> { key, data, sr, buffer }
 const asked = {}      // id -> key last sent
-function renderKey(id) { return JSON.stringify([CFG.tones[id], CFG.pitch, CFG.sampleRate]) }
+let inside = false
+function renderKey(id) { return JSON.stringify([CFG.tones[id], CFG.pitch, CFG.sampleRate, inside && CFG.cabin.muffle]) }
 function requestRender(id) {
   if (!CFG.tones[id]) return
   const key = renderKey(id)
   if ((rendered[id] && rendered[id].key === key) || asked[id] === key) return
   asked[id] = key
-  host({ type: 'render', id, key, tone: CFG.tones[id], cfg: { pitch: CFG.pitch, sampleRate: CFG.sampleRate } })
+  host({ type: 'render', id, key, inside, tone: CFG.tones[id], cfg: { pitch: CFG.pitch, sampleRate: CFG.sampleRate, cabin: CFG.cabin } })
 }
 let renderTimer = null
 function scheduleRender(ids) {
@@ -282,7 +287,7 @@ function onHost(m) {
 let ctx = null, master = null
 let voice = null        // { id, src, gain, start, dur } or { id, waiting: true }
 let mode = null         // 'preview' | 'sim' | null
-const sim = { lights: 0, tone: '', at: -1, horn: false }
+const sim = { lights: 0, tone: '', at: -1 }
 
 function audio() {
   if (!ctx) {
@@ -303,7 +308,7 @@ function bufferOf(id) {
   }
   return r.buffer
 }
-function levelOf(id) { const t = CFG.tones[id]; return CFG.volume * (t ? t.level : 1) }
+function levelOf(id) { const t = CFG.tones[id]; return CFG.volume * (t ? t.level : 1) * (inside ? CFG.cabin.volume : 1) }
 
 function startVoice(id, fade, offsetShare) {
   const buf = bufferOf(id)
@@ -358,7 +363,7 @@ function chosenTone() {
   return CFG.lightTones[sim.lights - 1] || ''
 }
 function soundingTone() {
-  const id = sim.horn && CFG.horn ? CFG.horn : chosenTone()
+  const id = chosenTone()
   return id && CFG.tones[id] ? id : null
 }
 function nextTone(id) {
@@ -372,7 +377,6 @@ function simUpdate() {
   const names = ['off', 'CODE 2', 'CODE 3']
   $('simLights').textContent = 'Lights: ' + names[sim.lights]
   $('lightDots').className = 'lights' + (sim.lights ? ' c' + (sim.lights + 1) : '')
-  $('simHorn').classList.toggle('on', sim.horn)
   sound(soundingTone())
 }
 function simLights() { sim.lights = (sim.lights + 1) % 3; simUpdate() }
@@ -382,19 +386,47 @@ function simTone() {
   sim.at = sim.lights
   simUpdate()
 }
-function simHorn(on) { if (sim.horn !== on) { sim.horn = on; simUpdate() } }
 
 $('play').onclick = () => { if (!SEL) return; mode = 'preview'; sound(null); sound(SEL) }
-$('stop').onclick = () => { mode = null; sim.lights = 0; sim.horn = false; sim.at = -1; $('simLights').textContent = 'Lights: off'; $('lightDots').className = 'lights'; $('simHorn').classList.remove('on'); sound(null) }
+$('stop').onclick = () => { mode = null; sim.lights = 0; sim.at = -1; $('simLights').textContent = 'Lights: off'; $('lightDots').className = 'lights'; sound(null) }
+// a pass-by: the playing tone (or the CODE 3 one) as a car drives past 4 m away, with the game's Doppler
+let passTimer = null
+function passEnd() {
+  clearInterval(passTimer)
+  passTimer = null
+  if (!ctx) return
+  master.gain.setTargetAtTime(+$('monitor').value, ctx.currentTime, 0.05)
+  if (voice && voice.src) voice.src.playbackRate.setTargetAtTime(1, ctx.currentTime, 0.05)
+}
+$('passBy').onclick = () => {
+  if ($('inside').checked) { $('inside').checked = false; $('inside').onchange() }
+  if (!voice) {
+    if (CFG.lightTones[1]) { sim.lights = 2; sim.at = -1; simUpdate() } else if (SEL) { mode = 'preview'; sound(SEL) }
+  }
+  const v = Math.max(+$('passSpeed').value || 80, 1) / 3.6, C = 343, side = 4, half = 60
+  const t0 = performance.now()
+  clearInterval(passTimer)
+  passTimer = setInterval(() => {
+    const x = -half + v * (performance.now() - t0) / 1000
+    if (x > half) { passEnd(); return }
+    const d = Math.hypot(x, side)
+    let ratio = C / Math.max(C - v * (-x / d), 1)
+    ratio = 1 + (ratio - 1) * CFG.doppler
+    ratio = Math.min(Math.max(Math.round(100 * ratio), 75), 133) / 100
+    if (voice && voice.src) voice.src.playbackRate.setTargetAtTime(ratio, ctx.currentTime, 0.02)
+    master.gain.setTargetAtTime(+$('monitor').value * Math.min(1, 6 / d), ctx.currentTime, 0.03)
+  }, 30)
+}
+$('inside').onchange = () => {
+  inside = $('inside').checked
+  retargetLevel()
+  for (const id of Object.keys(CFG.tones)) requestRender(id)
+}
 $('monitor').oninput = () => { if (master) master.gain.value = +$('monitor').value }
 $('simLights').onclick = simLights
 $('simTone').onclick = simTone
-$('simHorn').onmousedown = () => simHorn(true)
-$('simHorn').onmouseup = $('simHorn').onmouseleave = () => simHorn(false)
-$('simHorn').ontouchstart = (e) => { e.preventDefault(); simHorn(true) }
-$('simHorn').ontouchend = () => simHorn(false)
 
-// keyboard, as in game: Shift = lights, the tone key, the horn key (held). The game's names
+// keyboard, as in game: Shift = lights, the tone key. The game's names
 // (lalt, rshift, lcontrol...) are matched to the browser's (Alt, Shift, Control)
 const GAME_TO_PAGE = { lalt: 'alt', ralt: 'alt', lshift: 'shift', rshift: 'shift', lcontrol: 'control', rcontrol: 'control', ctrl: 'control', enter: 'enter', space: ' ' }
 const pageKey = (name) => { const n = String(name).toLowerCase(); return GAME_TO_PAGE[n] || n }
@@ -404,12 +436,8 @@ document.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase()
   if (e.key === 'Shift') simLights()
   else if (k === pageKey(CFG.keys.tone)) simTone()
-  else if (k === pageKey(CFG.keys.horn)) simHorn(true)
   else return
   e.preventDefault()
-})
-document.addEventListener('keyup', (e) => {
-  if (CFG && e.key.toLowerCase() === pageKey(CFG.keys.horn)) simHorn(false)
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -508,7 +536,6 @@ $('delTone').onclick = () => {
   delete CFG.tones[id]
   CFG.lightTones = CFG.lightTones.map((x) => (x === id ? '' : x))
   CFG.cycle = CFG.cycle.filter((x) => x !== id)
-  if (CFG.horn === id) CFG.horn = ''
   if (voice && voice.id === id) sound(null)
   save()
   SEL = Object.keys(CFG.tones)[0]
@@ -520,7 +547,9 @@ function buildGlobals() {
   g.replaceChildren(
     field('Volume', CFG, 'volume', { min: 0, max: 1, step: 0.01, change: onGlobal }),
     field('Sound level', CFG, 'soundLevel', { min: 60, max: 140, step: 1, unit: 'dB', change: onGlobal }),
-    el('p', { class: 'hint' }, 'How far it carries in game (Source sound level): 75 normal, 90 loud, 100+ across the block. Not heard here.'),
+    el('p', { class: 'hint' }, 'How far it carries in game (Source sound level). The engines play at 85, high-powered cars at 92: a little over that keeps the siren to just past the car.'),
+    field('Doppler', CFG, 'doppler', { min: 0, max: 2, step: 0.05, unit: '×', change: onGlobal }),
+    el('p', { class: 'hint' }, 'Pitch shift of passing cars: 0 = off, 1 = real. "Drive past" at the top plays a pass-by.'),
     field('Fade in', CFG, 'attack', { min: 0, max: 2, step: 0.01, unit: 's', change: onGlobal }),
     field('Fade out', CFG, 'release', { min: 0, max: 3, step: 0.01, unit: 's', change: onGlobal }),
     field('Pitch on fade-out', CFG, 'stopPitch', { min: 0.3, max: 1, step: 0.01, unit: '×', change: onGlobal }),
@@ -534,13 +563,15 @@ function buildGlobals() {
     el('h3', null, 'Which tone plays'),
     toneSelect('Lights CODE 2', () => CFG.lightTones[0], (v) => { CFG.lightTones[0] = v }, true),
     toneSelect('Lights CODE 3', () => CFG.lightTones[1], (v) => { CFG.lightTones[1] = v }, true),
-    toneSelect('Horn (held)', () => CFG.horn, (v) => { CFG.horn = v }, true),
     el('h3', null, 'Tone key cycle (in order, then off)'),
     buildCycle(),
-    el('h3', null, 'Keys (players can rebind)'),
+    el('h3', null, 'Inside the car (driver and passengers)'),
+    field('Volume inside', CFG.cabin, 'volume', { min: 0, max: 1, step: 0.01, unit: '×', change: onGlobal }),
+    field('Muffled above', CFG.cabin, 'muffle', { min: 300, max: 8000, step: 10, log: true, unit: 'Hz', change: onGlobalRender }),
+    el('p', { class: 'hint' }, 'The car body between you and the speaker. Tick "Inside the car" at the top to hear it.'),
+    el('h3', null, 'Key (players can rebind)'),
     keyField('Tone key', 'tone'),
-    keyField('Horn key', 'horn'),
-    el('p', { class: 'hint' }, 'A key name as the game knows it: q, j, f2, kp_enter, lalt/ralt (alt = left)… Here on the page: Shift = lights (as in game), the tone key, the horn key held.'),
+    el('p', { class: 'hint' }, 'A key name as the game knows it: q, j, f2, kp_enter, lalt/ralt (alt = left)… Here on the page: Shift = lights (as in game), then the tone key.'),
   )
 }
 function keyField(label, k) {
@@ -677,7 +708,8 @@ const HARMONIC_PRESETS = {
   Square: () => Array.from({ length: 16 }, (_, i) => ((i + 1) % 2 ? +(1 / (i + 1)).toFixed(3) : 0)),
   Saw: () => Array.from({ length: 16 }, (_, i) => +(1 / (i + 1)).toFixed(3)),
   Triangle: () => Array.from({ length: 16 }, (_, i) => ((i + 1) % 2 ? +(1 / ((i + 1) * (i + 1))).toFixed(3) : 0)),
-  'Siren driver': () => [1, 0.05, 0.33, 0.04, 0.2, 0.03, 0.14, 0.02, 0.11, 0, 0.09, 0, 0.07],
+  'Siren (soft)': () => [1, 0.03, 0.2, 0.02, 0.09, 0.01, 0.04, 0, 0.02],
+  'Siren (bright)': () => [1, 0.05, 0.33, 0.04, 0.2, 0.03, 0.14, 0.02, 0.11, 0, 0.09, 0, 0.07],
 }
 
 function buildPoints() {
@@ -838,11 +870,12 @@ window.addEventListener('resize', () => drawPattern())
 // ---------------------------------------------------------------------------------------------
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
-const GLOBAL_ORDER = ['volume', 'soundLevel', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'horn', 'keys', 'tones']
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'cabin', 'keys', 'tones']
 const TONE_ORDER = ['name', 'level', 'pattern', 'logGlide', 'harmonics', 'voice2', 'vibrato', 'tremolo', 'speaker']
 const SUB_ORDER = {
   pattern: ['f', 'glide', 'hold', 'curve'], voice2: ['on', 'semitones', 'cents', 'level', 'offset'], vibrato: ['rate', 'depth'],
-  tremolo: ['rate', 'depth'], speaker: ['highpass', 'lowpass', 'drive', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['tone', 'horn'],
+  tremolo: ['rate', 'depth'], speaker: ['highpass', 'lowpass', 'drive', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['tone'],
+  cabin: ['volume', 'muffle'],
 }
 const luaKey = (k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '[' + JSON.stringify(k) + ']')
 function luaNum(v) { return String(+(+v).toFixed(4)) }

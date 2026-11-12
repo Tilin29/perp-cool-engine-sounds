@@ -10,6 +10,7 @@
 	  * frequencies are scaled (by well under a cent) so each voice ends on a whole cycle
 	  * vibrato and tremolo get a whole number of cycles per loop
 	  * the loop is rendered twice and the second pass kept, so the filters are already settled
+	The inside-the-car version adds a steeper lowpass (the car's body muffling it).
 ]]
 POLICE_SIREN = POLICE_SIREN or {}
 local Synth = {}
@@ -153,11 +154,12 @@ local function wholeRate(rate, T)
 end
 
 --[[
-	Renders tone `tone` with the settings `cfg` (POLICE_SIREN.CONFIG's volume/pitch/sampleRate).
+	Renders tone `tone` with the settings `cfg` (POLICE_SIREN.CONFIG's pitch/sampleRate/cabin).
 	Returns the samples (1-based, peak PEAK), the sample rate and the loop length in samples.
 	`yield`, if given, is called every few thousand samples (the game renders in a coroutine).
+	`inside`: the version heard inside the car, muffled at cfg.cabin.muffle Hz.
 ]]
-function Synth.Render(tone, cfg, yield)
+function Synth.Render(tone, cfg, yield, inside)
 	local sr = cfg.sampleRate or 44100
 	local f1, n, T = patternFreqs(tone, cfg.pitch or 1, sr)
 
@@ -197,6 +199,9 @@ function Synth.Render(tone, cfg, yield)
 	local peak = biquad("peak", sp.resonance or 1000, sp.resonanceQ or 1, sp.resonanceGain or 0, sr)
 	local drive = max(sp.drive or 0, 0)
 	local driveNorm = drive > 0 and 1 / tanh(drive) or 1
+	local muffleHz = inside and cfg.cabin and cfg.cabin.muffle
+	local muffleA = muffleHz and biquad("lp", muffleHz, 0.707, 0, sr)
+	local muffleB = muffleHz and biquad("lp", muffleHz, 0.707, 0, sr)
 
 	local out, outPeak = {}, 0
 	local ph1, ph2 = 0, 0
@@ -218,6 +223,7 @@ function Synth.Render(tone, cfg, yield)
 			x = runBiquad(hp, x)
 			if drive > 0 then x = tanh(x * drive) * driveNorm end
 			x = runBiquad(lp, runBiquad(peak, x))
+			if muffleA then x = runBiquad(muffleB, runBiquad(muffleA, x)) end
 			if pass == 2 then
 				out[i + 1] = x
 				outPeak = max(outPeak, abs(x))

@@ -31,8 +31,8 @@ end
 
 -- the samples go out through __push in blocks (a JS null or a huge table would not cross well)
 local BLOCK = 512
-function STUDIO.render(tone, cfg)
-	local samples, sr, n = POLICE_SIREN.Synth.Render(tone, cfg)
+function STUDIO.render(tone, cfg, inside)
+	local samples, sr, n = POLICE_SIREN.Synth.Render(tone, cfg, nil, inside)
 	for i = 1, n, BLOCK do __push(table.unpack(samples, i, math.min(i + BLOCK - 1, n))) end
 	__result(sr)
 end
