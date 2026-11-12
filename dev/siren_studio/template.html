@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Siren Studio</title>
+<style>
+  :root {
+    --bg: #111418; --panel: #1a1f25; --panel2: #222932; --line: #2f3843; --fg: #e6eaef; --dim: #8d99a6;
+    --accent: #4ea1ff; --red: #ff4b3a; --blue: #3a6bff; --amber: #ffb03a; --green: #4cd18a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  #status { color: var(--dim); font-size: 12px; }
+  #status.err { color: var(--red); }
+  .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.small { padding: 2px 7px; font-size: 12px; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  input, select, textarea { background: #0d1014; color: var(--fg); border: 1px solid var(--line); border-radius: 5px; font: inherit; padding: 3px 6px; }
+  input[type=number] { width: 78px; }
+  input[type=range] { flex: 1; min-width: 80px; accent-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); }
+  main { display: grid; grid-template-columns: 360px 1fr; gap: 14px; padding: 14px 16px 40px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+  section h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  section h3 { font-size: 12px; margin: 14px 0 6px; color: var(--dim); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+  .row > label:first-child { width: 128px; flex: none; color: var(--dim); }
+  .row .unit { color: var(--dim); width: 34px; font-size: 12px; }
+  #globals .row > label:first-child { width: 112px; }
+  #globals input[type=number] { width: 64px; }
+  .hint { color: var(--dim); font-size: 12px; margin: 4px 0 8px; }
+  .tones { display: flex; flex-direction: column; gap: 4px; }
+  .tone { display: flex; justify-content: space-between; align-items: center; padding: 6px 9px; border-radius: 6px; background: var(--panel2); border: 1px solid transparent; cursor: pointer; }
+  .tone.sel { border-color: var(--accent); }
+  .tone .id { color: var(--dim); font-size: 11px; font-family: ui-monospace, Consolas, monospace; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; }
+  @media (max-width: 1200px) { .grid2 { grid-template-columns: 1fr; } }
+  canvas { width: 100%; display: block; background: #0d1014; border: 1px solid var(--line); border-radius: 8px; }
+  #pattern { height: 240px; cursor: crosshair; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  th, td { padding: 3px 5px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  td input[type=number] { width: 74px; }
+  .note { font-family: ui-monospace, Consolas, monospace; color: var(--amber); }
+  .harm { display: flex; gap: 4px; align-items: flex-end; height: 140px; margin-bottom: 6px; }
+  .harm div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; }
+  .harm input[type=range] { writing-mode: vertical-lr; direction: rtl; flex: 1 1 0; min-height: 0; height: calc(100% - 20px); width: 18px; min-width: 0; }
+  .harm span { font-size: 11px; color: var(--dim); }
+  .cycle { display: flex; flex-direction: column; gap: 3px; }
+  .cycle div { display: flex; align-items: center; gap: 6px; }
+  .cycle div label { flex: 1; }
+  textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .lights { display: inline-flex; gap: 4px; margin-left: 4px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #333; display: inline-block; }
+  .lights.c2 i:first-child { animation: blink 1.2s steps(1) infinite; background: var(--red); }
+  .lights.c2 i:last-child { animation: blink 1.2s steps(1) infinite 0.6s; background: var(--blue); }
+  .lights.c3 i:first-child { animation: blink 0.25s steps(1) infinite; background: var(--red); }
+  .lights.c3 i:last-child { animation: blink 0.25s steps(1) infinite 0.125s; background: var(--blue); }
+  @keyframes blink { 50% { opacity: 0.15; } }
+  kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 11px; }
+  #sounding { font-weight: 600; min-width: 90px; color: var(--green); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Siren Studio</h1>
+  <div class="bar">
+    <button id="play">▶ Play selected</button>
+    <button id="stop">■ Stop</button>
+    <label class="bar" style="gap:4px;color:var(--dim)">Monitor <input id="monitor" type="range" min="0" max="1" step="0.01" value="0.5" style="width:90px"></label>
+  </div>
+  <div class="sep"></div>
+  <div class="bar" title="Plays the siren the way the game will: the light mode picks the tone, the tone key steps through the cycle, the horn plays while held">
+    <span style="color:var(--dim)">In-game test:</span>
+    <button id="simLights">Lights: off</button><span class="lights" id="lightDots"><i></i><i></i></span>
+    <button id="simTone">Tone key</button>
+    <button id="simHorn">Horn (hold)</button>
+    <span id="sounding">silent</span>
+  </div>
+  <span id="status">Loading the synth…</span>
+</header>
+
+<main>
+  <div>
+    <section>
+      <h2>Tones <span class="bar"><button class="small" id="addTone">New</button><button class="small" id="dupTone">Duplicate</button><button class="small" id="delTone">Delete</button></span></h2>
+      <div class="tones" id="toneList"></div>
+    </section>
+    <section>
+      <h2>In game</h2>
+      <div id="globals"></div>
+    </section>
+    <section>
+      <h2>Pass it back</h2>
+      <p class="hint">Copy the settings file and paste it to Claude: it replaces <code>lua/police_siren/sh_siren_config.lua</code>. Your edits are also kept in this browser.</p>
+      <div class="bar"><button id="copyLua">Copy settings file</button><button id="copyJson">Copy JSON</button><button id="reset">Reset to the file's settings</button></div>
+      <textarea id="exportLua" rows="10" readonly style="margin-top:8px"></textarea>
+      <h3>Load settings (JSON)</h3>
+      <textarea id="importJson" rows="3" placeholder="Paste JSON copied from this page"></textarea>
+      <div class="bar" style="margin-top:6px"><button id="loadJson">Load</button></div>
+    </section>
+  </div>
+
+  <div id="editor"></div>
+</main>
+
+<script id="src-wasmoon" type="text/plain">{{WASMOON}}</script>
+<script id="src-wasm" type="text/plain">{{WASM_B64}}</script>
+{{LUA_FILES}}
+
+<script id="src-host" type="text/plain">
+// runs in a worker (or on the page if workers are blocked): the siren's Lua, rendering tones
+function SirenHost(post, wasmoonLib) {
+  let L = null, res = null, buf = null
+  function lua(v) {
+    if (v === null || v === undefined) return 'nil'
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '0'
+    if (typeof v === 'boolean') return v ? 'true' : 'false'
+    if (typeof v === 'string') return JSON.stringify(v)
+    if (Array.isArray(v)) return '{' + v.map(lua).join(',') + '}'
+    return '{' + Object.keys(v).filter((k) => v[k] !== undefined && v[k] !== null)
+      .map((k) => '[' + JSON.stringify(k) + ']=' + lua(v[k])).join(',') + '}'
+  }
+  async function init(files, wasm) {
+    globalThis.__WASMOON_BINARY = new Uint8Array(wasm)
+    L = await new wasmoonLib.LuaFactory().createEngine()
+    L.global.set('__result', (s) => { res = s })
+    L.global.set('__push', (...xs) => { for (let i = 0; i < xs.length; i++) buf.push(xs[i]) })
+    for (const f of files) {
+      try { await L.doString(f.src) } catch (e) { throw new Error(f.name + ': ' + e.message) }
+    }
+    res = null
+    await L.doString('STUDIO.defaults()')
+    post({ type: 'ready', defaults: JSON.parse(res) })
+  }
+  async function render(m) {
+    buf = []
+    res = null
+    const t0 = Date.now()
+    await L.doString('STUDIO.render(' + lua(m.tone) + ',' + lua(m.cfg) + ')')
+    const data = Float32Array.from(buf)
+    buf = null
+    post({ type: 'rendered', id: m.id, key: m.key, sr: res, data, ms: Date.now() - t0 }, [data.buffer])
+  }
+  let queue = Promise.resolve()
+  return (m) => {
+    queue = queue.then(() => (m.type === 'init' ? init(m.files, m.wasm) : render(m)))
+      .catch((e) => post({ type: 'error', text: String((e && e.message) || e) }))
+  }
+}
+</script>
+
+<script>
+const CONFIG_HEADER = {{CONFIG_HEADER}}
+const $ = (id) => document.getElementById(id)
+const el = (tag, props, ...kids) => {
+  const e = document.createElement(tag)
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v)
+    else if (k in e) e[k] = v
+    else e.setAttribute(k, v)
+  }
+  for (const k of kids) if (k !== null && k !== undefined) e.append(k)
+  return e
+}
+const clone = (x) => JSON.parse(JSON.stringify(x))
+const STORE = 'siren_studio_settings'
+
+let DEFAULTS = null, CFG = null, SEL = null
+
+function status(t, cls) { $('status').textContent = t; $('status').className = cls || '' }
+
+// ---------------------------------------------------------------------------------------------
+// settings: the shape the Lua file has, filled in where an old save or an import lacks a field
+// ---------------------------------------------------------------------------------------------
+const TONE_SHAPE = {
+  name: 'Tone', level: 1, pattern: [{ f: 800, glide: 0, hold: 0.5, curve: 1 }], logGlide: true,
+  harmonics: [1, 0, 0.33, 0, 0.2, 0, 0.14, 0, 0.11],
+  voice2: { on: false, semitones: 0, cents: 6, level: 0.6, offset: 0 },
+  vibrato: { rate: 0, depth: 0 }, tremolo: { rate: 0, depth: 0 },
+  speaker: { highpass: 400, lowpass: 5500, drive: 1.5, resonance: 1100, resonanceQ: 1.4, resonanceGain: 5 },
+}
+function fill(obj, shape) {
+  for (const [k, v] of Object.entries(shape)) {
+    if (obj[k] === undefined || obj[k] === null) obj[k] = clone(v)
+    else if (v && typeof v === 'object' && !Array.isArray(v)) fill(obj[k], v)
+  }
+  return obj
+}
+function normalize(c) {
+  const d = DEFAULTS
+  for (const k of ['volume', 'soundLevel', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'horn']) if (c[k] === undefined) c[k] = d[k]
+  if (!Array.isArray(c.lightTones)) c.lightTones = clone(d.lightTones)
+  while (c.lightTones.length < 2) c.lightTones.push('')
+  if (!Array.isArray(c.cycle)) c.cycle = []
+  c.keys = Object.assign({ tone: 'j', horn: 'h' }, c.keys || {})
+  if (!c.tones || typeof c.tones !== 'object' || Array.isArray(c.tones)) c.tones = {}
+  // Lua doesn't keep the file's order: the cycle's tones first, then the horn, then the rest
+  const order = [...c.cycle, c.horn, ...Object.keys(c.tones)].filter((id, i, a) => c.tones[id] && a.indexOf(id) === i)
+  c.tones = Object.fromEntries(order.map((id) => [id, c.tones[id]]))
+  for (const t of Object.values(c.tones)) {
+    fill(t, TONE_SHAPE)
+    for (const p of t.pattern) { p.glide = p.glide || 0; p.hold = p.hold || 0; p.curve = p.curve || 1 }
+  }
+  return c
+}
+function save() { try { localStorage.setItem(STORE, JSON.stringify(CFG)) } catch (e) { } }
+
+// ---------------------------------------------------------------------------------------------
+// the Lua side
+// ---------------------------------------------------------------------------------------------
+let host = null
+function startHost() {
+  const libSrc = $('src-wasmoon').textContent, hostSrc = $('src-host').textContent
+  const bin = Uint8Array.from(atob($('src-wasm').textContent.trim()), (c) => c.charCodeAt(0))
+  const files = [...document.querySelectorAll('script[type="text/x-lua"]')].map((s) => ({ name: s.dataset.name, src: s.textContent }))
+  const boot = '\nconst __h = SirenHost((m, t) => postMessage(m, t || []), self.wasmoon)\nonmessage = (e) => __h(e.data)\n'
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([libSrc, '\n', hostSrc, boot], { type: 'text/javascript' })))
+    w.onmessage = (e) => onHost(e.data)
+    w.onerror = (e) => status('Worker error: ' + e.message, 'err')
+    host = (m, t) => w.postMessage(m, t || [])
+  } catch (e) {
+    // workers blocked (some browsers on file://): run on the page, it just pauses while rendering
+    ;(0, eval)(libSrc + '\n' + hostSrc + '\nwindow.SirenHost = SirenHost')
+    const h = window.SirenHost((m) => setTimeout(() => onHost(m)), window.wasmoon)
+    host = (m) => setTimeout(() => h(m))
+  }
+  host({ type: 'init', files, wasm: bin.buffer }, [bin.buffer])
+}
+
+const rendered = {}   // id -> { key, data, sr, buffer }
+const asked = {}      // id -> key last sent
+function renderKey(id) { return JSON.stringify([CFG.tones[id], CFG.pitch, CFG.sampleRate]) }
+function requestRender(id) {
+  if (!CFG.tones[id]) return
+  const key = renderKey(id)
+  if ((rendered[id] && rendered[id].key === key) || asked[id] === key) return
+  asked[id] = key
+  host({ type: 'render', id, key, tone: CFG.tones[id], cfg: { pitch: CFG.pitch, sampleRate: CFG.sampleRate } })
+}
+let renderTimer = null
+function scheduleRender(ids) {
+  clearTimeout(renderTimer)
+  renderTimer = setTimeout(() => { for (const id of ids) requestRender(id) }, 150)
+}
+
+function onHost(m) {
+  if (m.type === 'error') { status('Lua error: ' + m.text, 'err'); return }
+  if (m.type === 'ready') {
+    DEFAULTS = m.defaults
+    let saved = null
+    try { saved = JSON.parse(localStorage.getItem(STORE) || 'null') } catch (e) { }
+    CFG = normalize(saved || clone(DEFAULTS))
+    SEL = Object.keys(CFG.tones)[0] || null
+    status(saved ? 'Ready (your saved edits)' : 'Ready')
+    refreshAll()
+    if (SEL) requestRender(SEL)
+    for (const id of Object.keys(CFG.tones)) requestRender(id)
+    return
+  }
+  if (m.type === 'rendered') {
+    if (!CFG.tones[m.id] || renderKey(m.id) !== m.key) return
+    rendered[m.id] = { key: m.key, data: m.data, sr: m.sr, buffer: null }
+    if (m.id === SEL) status(`${CFG.tones[m.id].name}: ${(m.data.length / m.sr).toFixed(2)} s loop, rendered in ${m.ms} ms`)
+    onRendered(m.id)
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// playback: one tone at a time, faded in and out the way the game does it
+// ---------------------------------------------------------------------------------------------
+let ctx = null, master = null
+let voice = null        // { id, src, gain, start, dur } or { id, waiting: true }
+let mode = null         // 'preview' | 'sim' | null
+const sim = { lights: 0, tone: '', at: -1, horn: false }
+
+function audio() {
+  if (!ctx) {
+    ctx = new AudioContext()
+    master = ctx.createGain()
+    master.gain.value = +$('monitor').value
+    master.connect(ctx.destination)
+  }
+  if (ctx.state === 'suspended') ctx.resume()
+  return ctx
+}
+function bufferOf(id) {
+  const r = rendered[id]
+  if (!r) return null
+  if (!r.buffer) {
+    r.buffer = ctx.createBuffer(1, r.data.length, r.sr)
+    r.buffer.copyToChannel(r.data, 0)
+  }
+  return r.buffer
+}
+function levelOf(id) { const t = CFG.tones[id]; return CFG.volume * (t ? t.level : 1) }
+
+function startVoice(id, fade, offsetShare) {
+  const buf = bufferOf(id)
+  if (!buf) { requestRender(id); return { id, waiting: true } }
+  const now = ctx.currentTime
+  const src = ctx.createBufferSource()
+  src.buffer = buf
+  src.loop = true
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(0, now)
+  gain.gain.linearRampToValueAtTime(levelOf(id), now + Math.max(fade, 0.005))
+  src.connect(gain).connect(master)
+  const offset = (offsetShare || 0) * buf.duration
+  src.start(now, offset)
+  return { id, src, gain, start: now - offset, dur: buf.duration }
+}
+function stopVoice(v, fade, pitchTo) {
+  if (!v || v.waiting) return
+  const now = ctx.currentTime
+  v.gain.gain.cancelScheduledValues(now)
+  v.gain.gain.setValueAtTime(v.gain.gain.value, now)
+  v.gain.gain.linearRampToValueAtTime(0, now + Math.max(fade, 0.005))
+  if (pitchTo < 1) v.src.playbackRate.linearRampToValueAtTime(pitchTo, now + Math.max(fade, 0.005))
+  v.src.stop(now + fade + 0.05)
+}
+function sound(id) {
+  if ((voice ? voice.id : null) === (id || null)) return
+  if (id || voice) audio()
+  stopVoice(voice, CFG.release, CFG.stopPitch)
+  voice = id ? startVoice(id, CFG.attack) : null
+  showSounding()
+}
+// a tone re-rendered while it plays: swapped in at the same point of its loop
+function onRendered(id) {
+  if (!voice || voice.id !== id || !ctx) return
+  if (voice.waiting) { voice = startVoice(id, CFG.attack); showSounding(); return }
+  const share = (((ctx.currentTime - voice.start) % voice.dur) + voice.dur) % voice.dur / voice.dur
+  stopVoice(voice, 0.03, 1)
+  voice = startVoice(id, 0.03, share)
+}
+function retargetLevel() {
+  if (voice && !voice.waiting) voice.gain.gain.setTargetAtTime(levelOf(voice.id), ctx.currentTime, 0.02)
+}
+function showSounding() {
+  $('sounding').textContent = voice ? (CFG.tones[voice.id] ? CFG.tones[voice.id].name : voice.id) + (voice.waiting ? ' (rendering)' : '') : 'silent'
+}
+
+// the in-game rules (lua/police_siren/sh_siren.lua)
+function chosenTone() {
+  if (!sim.lights) return ''
+  if (sim.at === sim.lights) return sim.tone
+  return CFG.lightTones[sim.lights - 1] || ''
+}
+function soundingTone() {
+  const id = sim.horn && CFG.horn ? CFG.horn : chosenTone()
+  return id && CFG.tones[id] ? id : null
+}
+function nextTone(id) {
+  const c = CFG.cycle
+  const i = c.indexOf(id)
+  if (i >= 0) return c[i + 1] || ''
+  return c[0] || ''
+}
+function simUpdate() {
+  mode = 'sim'
+  const names = ['off', 'CODE 2', 'CODE 3']
+  $('simLights').textContent = 'Lights: ' + names[sim.lights]
+  $('lightDots').className = 'lights' + (sim.lights ? ' c' + (sim.lights + 1) : '')
+  $('simHorn').classList.toggle('on', sim.horn)
+  sound(soundingTone())
+}
+function simLights() { sim.lights = (sim.lights + 1) % 3; simUpdate() }
+function simTone() {
+  if (!sim.lights) { status('The tone key works with the lights on'); return }
+  sim.tone = nextTone(chosenTone())
+  sim.at = sim.lights
+  simUpdate()
+}
+function simHorn(on) { if (sim.horn !== on) { sim.horn = on; simUpdate() } }
+
+$('play').onclick = () => { if (!SEL) return; mode = 'preview'; sound(null); sound(SEL) }
+$('stop').onclick = () => { mode = null; sim.lights = 0; sim.horn = false; sim.at = -1; $('simLights').textContent = 'Lights: off'; $('lightDots').className = 'lights'; $('simHorn').classList.remove('on'); sound(null) }
+$('monitor').oninput = () => { if (master) master.gain.value = +$('monitor').value }
+$('simLights').onclick = simLights
+$('simTone').onclick = simTone
+$('simHorn').onmousedown = () => simHorn(true)
+$('simHorn').onmouseup = $('simHorn').onmouseleave = () => simHorn(false)
+$('simHorn').ontouchstart = (e) => { e.preventDefault(); simHorn(true) }
+$('simHorn').ontouchend = () => simHorn(false)
+
+// keyboard, as in game: Shift = lights, the tone key, the horn key (held)
+function typing() { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') }
+document.addEventListener('keydown', (e) => {
+  if (!CFG || typing() || e.repeat) return
+  const k = e.key.toLowerCase()
+  if (e.key === 'Shift') simLights()
+  else if (k === String(CFG.keys.tone).toLowerCase()) simTone()
+  else if (k === String(CFG.keys.horn).toLowerCase()) simHorn(true)
+  else return
+  e.preventDefault()
+})
+document.addEventListener('keyup', (e) => {
+  if (CFG && e.key.toLowerCase() === String(CFG.keys.horn).toLowerCase()) simHorn(false)
+})
+
+// ---------------------------------------------------------------------------------------------
+// controls
+// ---------------------------------------------------------------------------------------------
+function fmt(v, step) {
+  const d = step >= 1 ? 0 : Math.min(4, Math.ceil(-Math.log10(step)))
+  return (+v).toFixed(d)
+}
+// a slider + number box bound to obj[key]; o: { min, max, step, log, unit, change }
+function field(label, obj, key, o) {
+  const toSlider = (v) => o.log ? Math.log(v / o.min) / Math.log(o.max / o.min) * 1000 : v
+  const fromSlider = (s) => o.log ? o.min * Math.pow(o.max / o.min, s / 1000) : s
+  const range = el('input', { type: 'range', min: o.log ? 0 : o.min, max: o.log ? 1000 : o.max, step: o.log ? 1 : o.step, value: toSlider(obj[key]) })
+  const num = el('input', { type: 'number', min: o.min, max: o.max, step: o.step, value: fmt(obj[key], o.step) })
+  range.oninput = () => {
+    let v = +fromSlider(+range.value)
+    v = Math.round(v / o.step) * o.step
+    obj[key] = +fmt(v, o.step)
+    num.value = fmt(obj[key], o.step)
+    o.change()
+  }
+  num.oninput = () => {
+    const v = parseFloat(num.value)
+    if (!Number.isFinite(v)) return
+    obj[key] = v
+    range.value = toSlider(Math.min(Math.max(v, o.min), o.max))
+    o.change()
+  }
+  return el('div', { class: 'row' }, el('label', null, label), range, num, el('span', { class: 'unit' }, o.unit || ''))
+}
+function check(label, obj, key, change) {
+  const c = el('input', { type: 'checkbox', checked: !!obj[key], onchange: () => { obj[key] = c.checked; change() } })
+  return el('div', { class: 'row' }, el('label', null, label), c)
+}
+function toneSelect(label, get, set, allowNone) {
+  const s = el('select', { onchange: () => { set(s.value); onGlobal() } })
+  if (allowNone) s.append(el('option', { value: '', textContent: '(none)' }))
+  for (const [id, t] of Object.entries(CFG.tones)) s.append(el('option', { value: id, textContent: t.name }))
+  s.value = get()
+  return el('div', { class: 'row' }, el('label', null, label), s)
+}
+
+function onTone() {
+  save()
+  drawPattern()
+  updateExport()
+  if (SEL) scheduleRender([SEL])
+}
+function onToneLevel() { save(); updateExport(); retargetLevel() }
+function onGlobal() { save(); updateExport(); retargetLevel() }
+function onGlobalRender() { save(); updateExport(); scheduleRender(Object.keys(CFG.tones)) }
+
+// ---------------------------------------------------------------------------------------------
+// left: tones and the in-game settings
+// ---------------------------------------------------------------------------------------------
+function refreshAll() { buildToneList(); buildGlobals(); buildEditor(); updateExport() }
+
+function buildToneList() {
+  const list = $('toneList')
+  list.replaceChildren()
+  for (const [id, t] of Object.entries(CFG.tones)) {
+    list.append(el('div', { class: 'tone' + (id === SEL ? ' sel' : ''), onclick: () => select(id) },
+      el('span', null, t.name), el('span', { class: 'id' }, id)))
+  }
+}
+function select(id) {
+  SEL = id
+  buildToneList()
+  buildEditor()
+  requestRender(id)
+  if (mode === 'preview') { sound(null); sound(id) }
+}
+function uniqueId(base) {
+  base = (base.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'tone').replace(/^(\d)/, 't$1')
+  let id = base, i = 2
+  while (CFG.tones[id]) id = base + '_' + i++
+  return id
+}
+$('addTone').onclick = () => {
+  const id = uniqueId('tone')
+  CFG.tones[id] = fill({ name: 'New tone' }, TONE_SHAPE)
+  save(); select(id); buildGlobals(); updateExport()
+}
+$('dupTone').onclick = () => {
+  if (!SEL) return
+  const t = clone(CFG.tones[SEL])
+  t.name += ' copy'
+  const id = uniqueId(SEL + '_copy')
+  CFG.tones[id] = t
+  save(); select(id); buildGlobals(); updateExport()
+}
+$('delTone').onclick = () => {
+  if (!SEL || Object.keys(CFG.tones).length <= 1) return
+  const id = SEL
+  delete CFG.tones[id]
+  CFG.lightTones = CFG.lightTones.map((x) => (x === id ? '' : x))
+  CFG.cycle = CFG.cycle.filter((x) => x !== id)
+  if (CFG.horn === id) CFG.horn = ''
+  if (voice && voice.id === id) sound(null)
+  save()
+  SEL = Object.keys(CFG.tones)[0]
+  refreshAll()
+}
+
+function buildGlobals() {
+  const g = $('globals')
+  g.replaceChildren(
+    field('Volume', CFG, 'volume', { min: 0, max: 1, step: 0.01, change: onGlobal }),
+    field('Sound level', CFG, 'soundLevel', { min: 60, max: 140, step: 1, unit: 'dB', change: onGlobal }),
+    el('p', { class: 'hint' }, 'How far it carries in game (Source sound level): 75 normal, 90 loud, 100+ across the block. Not heard here.'),
+    field('Fade in', CFG, 'attack', { min: 0, max: 2, step: 0.01, unit: 's', change: onGlobal }),
+    field('Fade out', CFG, 'release', { min: 0, max: 3, step: 0.01, unit: 's', change: onGlobal }),
+    field('Pitch on fade-out', CFG, 'stopPitch', { min: 0.3, max: 1, step: 0.01, unit: '×', change: onGlobal }),
+    field('Overall pitch', CFG, 'pitch', { min: 0.5, max: 2, step: 0.01, unit: '×', change: onGlobalRender }),
+    (() => {
+      const s = el('select', { onchange: () => { CFG.sampleRate = +s.value; onGlobalRender() } },
+        el('option', { value: 44100, textContent: '44100 Hz' }), el('option', { value: 22050, textContent: '22050 Hz (half the memory)' }))
+      s.value = CFG.sampleRate
+      return el('div', { class: 'row' }, el('label', null, 'Sample rate'), s)
+    })(),
+    el('h3', null, 'Which tone plays'),
+    toneSelect('Lights CODE 2', () => CFG.lightTones[0], (v) => { CFG.lightTones[0] = v }, true),
+    toneSelect('Lights CODE 3', () => CFG.lightTones[1], (v) => { CFG.lightTones[1] = v }, true),
+    toneSelect('Horn (held)', () => CFG.horn, (v) => { CFG.horn = v }, true),
+    el('h3', null, 'Tone key cycle (in order, then off)'),
+    buildCycle(),
+    el('h3', null, 'Keys (players can rebind)'),
+    keyField('Tone key', 'tone'),
+    keyField('Horn key', 'horn'),
+    el('p', { class: 'hint' }, 'A key name: j, h, f2, kp_enter… Here on the page: Shift = lights (as in game), the tone key, the horn key held.'),
+  )
+}
+function keyField(label, k) {
+  const i = el('input', { type: 'text', value: CFG.keys[k], style: 'width:80px', oninput: () => { CFG.keys[k] = i.value.trim().toLowerCase(); onGlobal() } })
+  return el('div', { class: 'row' }, el('label', null, label), i)
+}
+function buildCycle() {
+  const box = el('div', { class: 'cycle' })
+  const order = [...CFG.cycle.filter((id) => CFG.tones[id]), ...Object.keys(CFG.tones).filter((id) => !CFG.cycle.includes(id))]
+  for (const id of order) {
+    const inCycle = CFG.cycle.includes(id)
+    const c = el('input', { type: 'checkbox', checked: inCycle, onchange: () => {
+      CFG.cycle = c.checked ? [...CFG.cycle, id] : CFG.cycle.filter((x) => x !== id)
+      onGlobal(); buildGlobals()
+    } })
+    const move = (d) => {
+      const i = CFG.cycle.indexOf(id), j = i + d
+      if (i < 0 || j < 0 || j >= CFG.cycle.length) return
+      ;[CFG.cycle[i], CFG.cycle[j]] = [CFG.cycle[j], CFG.cycle[i]]
+      onGlobal(); buildGlobals()
+    }
+    box.append(el('div', null, c, el('label', null, (inCycle ? CFG.cycle.indexOf(id) + 1 + '. ' : '') + CFG.tones[id].name),
+      el('button', { class: 'small', textContent: '↑', disabled: !inCycle, onclick: () => move(-1) }),
+      el('button', { class: 'small', textContent: '↓', disabled: !inCycle, onclick: () => move(1) })))
+  }
+  return box
+}
+
+// ---------------------------------------------------------------------------------------------
+// right: the selected tone
+// ---------------------------------------------------------------------------------------------
+const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+function noteName(f) {
+  if (!(f > 0)) return ''
+  const m = 69 + 12 * Math.log2(f / 440)
+  const r = Math.round(m), cents = Math.round((m - r) * 100)
+  return NOTES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1) + (cents ? (cents > 0 ? ' +' : ' ') + cents + '¢' : '')
+}
+const snapSemitone = (f) => 440 * Math.pow(2, Math.round(12 * Math.log2(f / 440)) / 12)
+let snap = false
+
+function buildEditor() {
+  const ed = $('editor')
+  ed.replaceChildren()
+  if (!SEL) return
+  const t = CFG.tones[SEL]
+  const name = el('input', { type: 'text', value: t.name, style: 'width:200px', oninput: () => { t.name = name.value; save(); buildToneList(); buildGlobals(); updateExport() } })
+
+  const patternSec = el('section', null,
+    el('h2', null, 'Pitch pattern (one loop)', el('span', { class: 'bar' },
+      el('label', { class: 'bar', style: 'gap:4px;text-transform:none;letter-spacing:0' },
+        el('input', { type: 'checkbox', checked: snap, onchange: (e) => { snap = e.target.checked } }), 'snap to semitones')),
+    ),
+    el('div', { class: 'row' }, el('label', null, 'Name'), name, el('span', { class: 'id' }, 'id: ' + SEL)),
+    el('canvas', { id: 'pattern' }),
+    el('p', { class: 'hint' }, 'Drag a point: up/down = its pitch, left/right = how long it glides there. Each point glides from the one before it (the last one into the first), then holds.'),
+    el('div', { id: 'points' }),
+    el('div', { class: 'bar', style: 'margin-top:8px' },
+      el('button', { class: 'small', textContent: '+ Point', onclick: () => { t.pattern.push(clone(t.pattern[t.pattern.length - 1] || TONE_SHAPE.pattern[0])); buildPoints(); onTone() } }),
+      el('span', { class: 'sep' }),
+      'Transpose', (() => { const i = el('input', { type: 'number', value: 1, step: 0.5, style: 'width:60px' }); return el('span', { class: 'bar' }, i,
+        el('button', { class: 'small', textContent: 'semitones up', onclick: () => { const k = Math.pow(2, +i.value / 12); for (const p of t.pattern) p.f = +(p.f * k).toFixed(2); buildPoints(); onTone() } }),
+        el('button', { class: 'small', textContent: 'down', onclick: () => { const k = Math.pow(2, -i.value / 12); for (const p of t.pattern) p.f = +(p.f * k).toFixed(2); buildPoints(); onTone() } })) })(),
+      el('span', { class: 'sep' }),
+      'Timing', (() => { const i = el('input', { type: 'number', value: 1.25, step: 0.05, style: 'width:60px' }); return el('span', { class: 'bar' }, i,
+        el('button', { class: 'small', textContent: '× slower', onclick: () => { stretch(t, +i.value) } }),
+        el('button', { class: 'small', textContent: '÷ faster', onclick: () => { stretch(t, 1 / +i.value) } })) })(),
+    ),
+    check('Glide in musical steps', t, 'logGlide', onTone),
+  )
+
+  const harm = el('div', { class: 'harm' })
+  const harmSec = el('section', null,
+    el('h2', null, 'Tone colour (harmonics)', el('span', { class: 'bar' },
+      ...Object.entries(HARMONIC_PRESETS).map(([n, f]) => el('button', { class: 'small', textContent: n, onclick: () => { t.harmonics = f(); buildEditor(); onTone() } })))),
+    harm,
+    el('p', { class: 'hint' }, 'Level of each harmonic of the note (1 = the note itself). Odd ones only = a square-wave buzz, all of them = a brassy saw.'),
+  )
+  while (t.harmonics.length < 16) t.harmonics.push(0)
+  t.harmonics.forEach((v, i) => {
+    const s = el('input', { type: 'range', min: 0, max: 1, step: 0.01, value: v, oninput: () => { t.harmonics[i] = +s.value; onTone() } })
+    harm.append(el('div', null, s, el('span', null, i + 1)))
+  })
+
+  const v2 = t.voice2, sp = t.speaker
+  const soundSec = el('section', null,
+    el('h2', null, 'Second voice, wobble, level'),
+    el('div', { class: 'grid2' },
+      el('div', null,
+        check('Second voice', v2, 'on', onTone),
+        field('Interval', v2, 'semitones', { min: -24, max: 24, step: 0.01, unit: 'st', change: onTone }),
+        field('Detune', v2, 'cents', { min: -100, max: 100, step: 1, unit: '¢', change: onTone }),
+        field('Its level', v2, 'level', { min: 0, max: 1.5, step: 0.01, change: onTone }),
+        field('Pattern offset', v2, 'offset', { min: 0, max: 1, step: 0.01, unit: 'loop', change: onTone }),
+        el('p', { class: 'hint' }, 'Interval in semitones above the first voice (3 = minor third, 4 = major third, 7 = fifth). Offset runs it later in the pattern: 0.5 = half a loop behind.'),
+      ),
+      el('div', null,
+        field('Vibrato rate', t.vibrato, 'rate', { min: 0, max: 30, step: 0.1, unit: 'Hz', change: onTone }),
+        field('Vibrato depth', t.vibrato, 'depth', { min: 0, max: 300, step: 1, unit: '¢', change: onTone }),
+        field('Tremolo rate', t.tremolo, 'rate', { min: 0, max: 30, step: 0.1, unit: 'Hz', change: onTone }),
+        field('Tremolo depth', t.tremolo, 'depth', { min: 0, max: 1, step: 0.01, change: onTone }),
+        field('Tone level', t, 'level', { min: 0, max: 1, step: 0.01, change: onToneLevel }),
+      ),
+    ),
+  )
+  const speakerSec = el('section', null,
+    el('h2', null, 'Speaker'),
+    el('div', { class: 'grid2' },
+      el('div', null,
+        field('Low cut', sp, 'highpass', { min: 20, max: 3000, step: 1, log: true, unit: 'Hz', change: onTone }),
+        field('High cut', sp, 'lowpass', { min: 500, max: 20000, step: 1, log: true, unit: 'Hz', change: onTone }),
+        field('Drive', sp, 'drive', { min: 0, max: 10, step: 0.05, change: onTone }),
+      ),
+      el('div', null,
+        field('Horn resonance', sp, 'resonance', { min: 100, max: 6000, step: 1, log: true, unit: 'Hz', change: onTone }),
+        field('Resonance width (Q)', sp, 'resonanceQ', { min: 0.1, max: 10, step: 0.05, change: onTone }),
+        field('Resonance boost', sp, 'resonanceGain', { min: -12, max: 24, step: 0.5, unit: 'dB', change: onTone }),
+      ),
+    ),
+    el('p', { class: 'hint' }, 'Drive = how hard the speaker driver is pushed (0 = clean, more = harsher and louder in the mids). The resonance is the horn\'s own peak.'),
+  )
+  ed.append(patternSec, harmSec, soundSec, speakerSec)
+  buildPoints()
+  setupCanvas()
+  drawPattern()
+}
+function stretch(t, k) {
+  for (const p of t.pattern) { p.glide = +(p.glide * k).toFixed(3); p.hold = +(p.hold * k).toFixed(3) }
+  buildPoints(); onTone()
+}
+
+const HARMONIC_PRESETS = {
+  Sine: () => [1],
+  Square: () => Array.from({ length: 16 }, (_, i) => ((i + 1) % 2 ? +(1 / (i + 1)).toFixed(3) : 0)),
+  Saw: () => Array.from({ length: 16 }, (_, i) => +(1 / (i + 1)).toFixed(3)),
+  Triangle: () => Array.from({ length: 16 }, (_, i) => ((i + 1) % 2 ? +(1 / ((i + 1) * (i + 1))).toFixed(3) : 0)),
+  'Siren driver': () => [1, 0.05, 0.33, 0.04, 0.2, 0.03, 0.14, 0.02, 0.11, 0, 0.09, 0, 0.07],
+}
+
+function buildPoints() {
+  const t = CFG.tones[SEL]
+  const box = $('points')
+  if (!box) return
+  const n = t.pattern.length
+  const rows = t.pattern.map((p, i) => {
+    const prev = t.pattern[(i - 1 + n) % n]
+    const iv = n > 1 && prev.f > 0 && p.f > 0 ? 12 * Math.log2(p.f / prev.f) : 0
+    const num = (key, step, min, after) => el('input', { type: 'number', step, min, value: p[key], onchange: (e) => {
+      const v = parseFloat(e.target.value)
+      if (!Number.isFinite(v)) return
+      p[key] = Math.max(min, v)
+      if (after) after()
+      buildPoints(); onTone()
+    } })
+    const ivIn = el('input', { type: 'number', step: 0.5, value: iv.toFixed(2), disabled: n < 2, onchange: (e) => {
+      const v = parseFloat(e.target.value)
+      if (!Number.isFinite(v)) return
+      p.f = +(prev.f * Math.pow(2, v / 12)).toFixed(2)
+      buildPoints(); onTone()
+    } })
+    return el('tr', null,
+      el('td', null, String(i + 1)),
+      el('td', null, num('f', 1, 20, () => { if (snap) p.f = +snapSemitone(p.f).toFixed(2) })),
+      el('td', { class: 'note' }, noteName(p.f)),
+      el('td', null, ivIn),
+      el('td', null, num('glide', 0.01, 0)),
+      el('td', null, num('hold', 0.01, 0)),
+      el('td', null, num('curve', 0.05, 0.05)),
+      el('td', null, el('button', { class: 'small', textContent: '×', disabled: n < 2, onclick: () => { t.pattern.splice(i, 1); buildPoints(); onTone() } })),
+    )
+  })
+  const total = t.pattern.reduce((s, p) => s + p.glide + p.hold, 0)
+  box.replaceChildren(el('table', null,
+    el('tr', null, ...['#', 'Pitch (Hz)', 'Note', 'Interval from previous (st)', 'Glide in (s)', 'Hold (s)', 'Curve', ''].map((h) => el('th', null, h))),
+    ...rows),
+    el('p', { class: 'hint' }, `Loop: ${total.toFixed(3)} s. Curve: 1 = even glide, below 1 = fast at first (a motor siren spinning up), above 1 = slow at first.`))
+}
+
+// the pitch pattern drawn over one loop (the same timing the synth uses), with draggable points
+const F_MIN = 60, F_MAX = 5000
+let cv = null, drag = null
+function segments(t) {
+  const segs = [], pts = []
+  let time = 0
+  const n = t.pattern.length
+  t.pattern.forEach((p, i) => {
+    const prev = t.pattern[(i - 1 + n) % n]
+    const start = time
+    if (p.glide > 0) { segs.push({ t0: time, t1: time + p.glide, f0: prev.f, f1: p.f, curve: p.curve }); time += p.glide }
+    pts.push({ i, t: time, start, f: p.f })
+    if (p.hold > 0) { segs.push({ t0: time, t1: time + p.hold, f0: p.f, f1: p.f, curve: 1 }); time += p.hold }
+  })
+  return { segs, pts, T: Math.max(time, 0.05) }
+}
+function freqAt(segs, time, logGlide) {
+  const s = segs.find((x) => time < x.t1) || segs[segs.length - 1]
+  if (!s) return 0
+  if (s.f0 === s.f1) return s.f0
+  const u = Math.pow(Math.min(Math.max((time - s.t0) / (s.t1 - s.t0), 0), 1), Math.max(s.curve, 0.05))
+  return logGlide && s.f0 > 0 && s.f1 > 0 ? s.f0 * Math.pow(s.f1 / s.f0, u) : s.f0 + (s.f1 - s.f0) * u
+}
+function setupCanvas() {
+  cv = $('pattern')
+  const pos = (e) => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top } }
+  cv.onmousedown = (e) => {
+    const t = CFG.tones[SEL], g = geom(), m = pos(e)
+    const { pts, T } = segments(t)
+    let best = null, bd = 12
+    for (const p of pts) {
+      const d = Math.hypot(g.x(p.t, T) - m.x, g.y(p.f) - m.y)
+      if (d < bd) { bd = d; best = p }
+    }
+    if (best) drag = { i: best.i, start: best.start, T }
+  }
+  window.onmousemove = (e) => {
+    if (!drag || !cv) return
+    const t = CFG.tones[SEL], g = geom(), m = pos(e)
+    const p = t.pattern[drag.i]
+    let f = g.fy(m.y)
+    if (snap) f = snapSemitone(f)
+    p.f = +f.toFixed(2)
+    p.glide = +Math.max(0, g.tx(m.x, drag.T) - drag.start).toFixed(3)
+    drawPattern(drag.T)
+    buildPoints()
+    onTone()
+  }
+  window.onmouseup = () => { if (drag) { drag = null; drawPattern() } }
+}
+function geom() {
+  const w = cv.clientWidth, h = cv.clientHeight, L = 46, R = 12, Tp = 10, B = 22
+  const lf = (f) => Math.log(f / F_MIN) / Math.log(F_MAX / F_MIN)
+  return {
+    w, h, L, R, Tp, B,
+    x: (time, T) => L + (time / T) * (w - L - R),
+    tx: (x, T) => Math.min(Math.max((x - L) / (w - L - R), 0), 1) * T,
+    y: (f) => Tp + (1 - lf(Math.min(Math.max(f, F_MIN), F_MAX))) * (h - Tp - B),
+    fy: (y) => F_MIN * Math.pow(F_MAX / F_MIN, 1 - Math.min(Math.max((y - Tp) / (h - Tp - B), 0), 1)),
+  }
+}
+function drawPattern(fixedT) {
+  if (!cv || !SEL || !document.body.contains(cv)) return
+  const t = CFG.tones[SEL]
+  const dpr = window.devicePixelRatio || 1
+  cv.width = cv.clientWidth * dpr
+  cv.height = cv.clientHeight * dpr
+  const c = cv.getContext('2d')
+  c.setTransform(dpr, 0, 0, dpr, 0, 0)
+  const g = geom()
+  const { segs, pts, T: T0 } = segments(t)
+  const T = fixedT || T0
+  c.clearRect(0, 0, g.w, g.h)
+  c.font = '11px system-ui'
+  c.fillStyle = '#8d99a6'
+  c.strokeStyle = '#2f3843'
+  for (const f of [100, 200, 400, 800, 1600, 3200]) {
+    const y = g.y(f)
+    c.beginPath(); c.moveTo(g.L, y); c.lineTo(g.w - g.R, y); c.stroke()
+    c.fillText(f >= 1000 ? f / 1000 + 'k' : String(f), 8, y + 4)
+  }
+  const steps = Math.max(1, Math.round(T / 0.5))
+  for (let k = 0; k <= steps; k++) {
+    const time = (k / steps) * T, x = g.x(time, T)
+    c.fillText(time.toFixed(2) + 's', Math.min(x, g.w - 40), g.h - 6)
+  }
+  const line = (mul, shift, color, dash) => {
+    c.strokeStyle = color; c.lineWidth = 2; c.setLineDash(dash || []); c.beginPath()
+    const N = 600
+    for (let k = 0; k <= N; k++) {
+      const time = (k / N) * T0
+      const f = freqAt(segs, ((time + shift * T0) % T0 + T0) % T0, t.logGlide) * mul * CFG.pitch
+      const x = g.x(time, T), y = g.y(f)
+      k ? c.lineTo(x, y) : c.moveTo(x, y)
+    }
+    c.stroke(); c.setLineDash([])
+  }
+  if (t.voice2.on) line(Math.pow(2, (t.voice2.semitones + t.voice2.cents / 100) / 12), t.voice2.offset, '#ffb03a', [5, 4])
+  line(1, 0, '#4ea1ff')
+  for (const p of pts) {
+    const x = g.x(p.t, T), y = g.y(p.f * CFG.pitch)
+    c.fillStyle = drag && drag.i === p.i ? '#fff' : '#4ea1ff'
+    c.beginPath(); c.arc(x, y, 6, 0, Math.PI * 2); c.fill()
+    c.fillStyle = '#e6eaef'
+    c.fillText(String(p.i + 1), x + 8, y - 8)
+  }
+  if (voice && !voice.waiting && voice.id === SEL && ctx) {
+    const share = (((ctx.currentTime - voice.start) % voice.dur) + voice.dur) % voice.dur / voice.dur
+    const x = g.x(share * T0, T)
+    c.strokeStyle = '#4cd18a'; c.lineWidth = 1
+    c.beginPath(); c.moveTo(x, g.Tp); c.lineTo(x, g.h - g.B); c.stroke()
+  }
+}
+;(function tick() { if (voice && voice.id === SEL && !drag) drawPattern(); requestAnimationFrame(tick) })()
+window.addEventListener('resize', () => drawPattern())
+
+// ---------------------------------------------------------------------------------------------
+// export: the settings file, written the way the Lua file is
+// ---------------------------------------------------------------------------------------------
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'horn', 'keys', 'tones']
+const TONE_ORDER = ['name', 'level', 'pattern', 'logGlide', 'harmonics', 'voice2', 'vibrato', 'tremolo', 'speaker']
+const SUB_ORDER = {
+  pattern: ['f', 'glide', 'hold', 'curve'], voice2: ['on', 'semitones', 'cents', 'level', 'offset'], vibrato: ['rate', 'depth'],
+  tremolo: ['rate', 'depth'], speaker: ['highpass', 'lowpass', 'drive', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['tone', 'horn'],
+}
+const luaKey = (k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '[' + JSON.stringify(k) + ']')
+function luaNum(v) { return String(+(+v).toFixed(4)) }
+function luaScalar(v) {
+  if (typeof v === 'number') return luaNum(v)
+  if (typeof v === 'boolean') return String(v)
+  return JSON.stringify(String(v))
+}
+function luaInline(obj, order) {
+  const keys = order ? order.filter((k) => k in obj) : Object.keys(obj)
+  return '{ ' + keys.map((k) => luaKey(k) + ' = ' + luaScalar(obj[k])).join(', ') + ' }'
+}
+function exportLua() {
+  const tab = (n) => '\t'.repeat(n)
+  const out = ['POLICE_SIREN.CONFIG = {']
+  for (const k of GLOBAL_ORDER) {
+    const v = CFG[k]
+    if (k === 'tones') {
+      out.push(tab(1) + 'tones = {')
+      for (const [id, t] of Object.entries(CFG.tones)) {
+        out.push(tab(2) + luaKey(id) + ' = {')
+        for (const tk of TONE_ORDER) {
+          const tv = t[tk]
+          if (tk === 'pattern') {
+            out.push(tab(3) + 'pattern = {')
+            for (const p of tv) out.push(tab(4) + luaInline(p, SUB_ORDER.pattern) + ',')
+            out.push(tab(3) + '},')
+          } else if (tk === 'harmonics') {
+            let h = tv.slice()
+            while (h.length > 1 && !h[h.length - 1]) h.pop()
+            out.push(tab(3) + 'harmonics = { ' + h.map(luaNum).join(', ') + ' },')
+          } else if (tv && typeof tv === 'object') {
+            out.push(tab(3) + tk + ' = ' + luaInline(tv, SUB_ORDER[tk]) + ',')
+          } else {
+            out.push(tab(3) + tk + ' = ' + luaScalar(tv) + ',')
+          }
+        }
+        out.push(tab(2) + '},')
+      }
+      out.push(tab(1) + '},')
+    } else if (Array.isArray(v)) {
+      out.push(tab(1) + k + ' = { ' + v.map(luaScalar).join(', ') + ' },')
+    } else if (v && typeof v === 'object') {
+      out.push(tab(1) + k + ' = ' + luaInline(v, SUB_ORDER[k]) + ',')
+    } else {
+      out.push(tab(1) + k + ' = ' + luaScalar(v) + ',')
+    }
+  }
+  out.push('}')
+  return CONFIG_HEADER + out.join('\n') + '\n'
+}
+function updateExport() { if (CFG) $('exportLua').value = exportLua() }
+async function copy(text, what) {
+  try { await navigator.clipboard.writeText(text); status(what + ' copied') } catch (e) {
+    $('exportLua').value = text; $('exportLua').select(); document.execCommand('copy'); status(what + ' copied')
+  }
+}
+$('copyLua').onclick = () => copy(exportLua(), 'Settings file')
+$('copyJson').onclick = () => copy(JSON.stringify(CFG), 'JSON')
+$('reset').onclick = () => {
+  if (!DEFAULTS) return
+  CFG = normalize(clone(DEFAULTS))
+  save()
+  SEL = Object.keys(CFG.tones)[0]
+  sound(null)
+  refreshAll()
+  for (const id of Object.keys(CFG.tones)) requestRender(id)
+  status("Back to the file's settings")
+}
+$('loadJson').onclick = () => {
+  try {
+    CFG = normalize(JSON.parse($('importJson').value))
+    save()
+    SEL = Object.keys(CFG.tones)[0]
+    sound(null)
+    refreshAll()
+    for (const id of Object.keys(CFG.tones)) requestRender(id)
+    status('Loaded')
+  } catch (e) { status('Not valid JSON: ' + e.message, 'err') }
+}
+
+startHost()
+</script>
+</body>
+</html>

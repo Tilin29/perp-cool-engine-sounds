@@ -189,6 +189,25 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   (`E.RefreshCarStats`, sv_engine) and re-applies performance. The `audio_engine_handling` change callback runs it on every car: it applies at once.
 - `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling. The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
 
+## Police siren (separate module, may not stay)
+Own loader `lua/autorun/police_siren_init.lua`, files in `lua/police_siren/`, studio in `dev/siren_studio/`: delete those three
+to drop it. Never referenced by the audio engine; it only reads the lights' NW2 vars (`audio_lightbar`, `audio_lights`,
+`PS.LIGHTBAR_NW`/`PS.LIGHTS_NW`), so any car with a lightbar has a siren. Global `POLICE_SIREN` (PS).
+- `sh_siren_config.lua`: `PS.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel, attack/release,
+  stopPitch (pitch drop on fade-out), pitch, sampleRate, `lightTones` { CODE 2, CODE 3 }, `cycle`, `horn`, `keys`, `tones[id]`
+  (pattern of points { f, glide, hold, curve }, logGlide, harmonics, voice2, vibrato, tremolo, speaker). Must stay plain Lua (the studio runs it).
+- `cl_siren_synth.lua`: plain Lua, game and studio. Wavetable of the harmonics (bandlimited to the tone's top pitch), second voice,
+  highpass -> tanh drive -> resonant peak -> lowpass. Seamless loops: each voice scaled to whole cycles per loop, vibrato/tremolo whole
+  cycles, rendered twice and the second pass kept (filters settled), peak 0.95.
+- `sh_siren.lua`: `PS.SoundingTone(veh)`: horn held (NW2 `siren_horn`) > the driver's pick (NW2 `siren_tone`, valid while
+  NW2 `siren_at` = the light mode it was picked in) > `lightTones[mode]`. `sv_siren.lua`: `police_siren_tone` (next in the cycle, then
+  off), `police_siren_horn 0/1`, driver only. `cl_siren.lua`: builds every tone in a coroutine (5 ms/frame) once a siren car is near,
+  `sound.Generate` names carry `PS.Serial` (lua refresh), one CSoundPatch per car (fade-in a frame after PlayEx), keys
+  `police_siren_tonekey` (j) / `police_siren_hornkey` (h), `police_siren_volume`.
+- `dev/siren_studio/build.js [--test]` builds `dev/siren_studio.html` (wasmoon from dev/baker, opens from disk; Chrome automation needs
+  it served over http). `--test` renders every tone in Node and checks length, peak and the loop seam. The page mirrors sh_siren's rules
+  for its in-game test (Shift = lights) and writes the export in the file's layout (header comment taken from the file).
+
 ## Debug module (not part of the final addon)
 `lua/audio_engine_debug/`, loaded by audio_engine_init.lua when the folder exists (delete it to ship). On by default (`audio_engine_debug` 1, shared; 0 = off);
 superadmins, listen host or single player (`DBG.Allowed`). `audio_engine_debug_menu`, `!enginedebug`, context menu. The core never refers to it:
