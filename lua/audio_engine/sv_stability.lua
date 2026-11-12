@@ -257,8 +257,12 @@ local function assist(veh, cfg, dt)
 	-- beyond what the steering asks. Not in a drift: there the driver wants the power.
 	-- audioSpin: over-rotating, cut hard; only the tail out (the car still turns as asked) is a
 	-- corner taken fast, and it keeps enough power to pull through it (sv_handling slideTurnFloor)
+	-- the keys just let go, the steering still coming back (until the straight-line hold takes
+	-- over): the turn's own rotation isn't over-rotating, it read as a spin and dipped the power
 	if not handbrake then
-		local over = yaw * wRef >= 0 and (abs(yaw) - abs(wRef) - allow) / 20 or (abs(yaw) - allow * 0.5) / 20
+		local returning = want == 0
+		local over = returning and 0
+			or yaw * wRef >= 0 and (abs(yaw) - abs(wRef) - allow) / 20 or (abs(yaw) - allow * 0.5) / 20
 		local tail = beta * yaw > 0 and (a - P("slideFrom")) / (P("slideFull") - P("slideFrom")) or 0
 		veh.audioSlide = clamp(max(over, tail), 0, 1) * fade
 		veh.audioSpin = over > 0
