@@ -4,7 +4,7 @@
 	volume       playback volume of every tone, 0..1 (x the tone's own level)
 	soundLevel   Source sound level in dB: how far it carries. The cars' engines play at 85, high-powered
 	             ones at 92: a little over that keeps the siren to just past the car's own sound
-	doppler      Doppler pitch shift of passing cars: 0 = off, 1 = real (capped at about 5 semitones)
+	doppler      Doppler pitch shift of passing cars: 0 = off, 1 = real (capped at +4 / -5 semitones)
 	attack       seconds a tone takes to fade in when it starts
 	release      seconds it takes to fade out when it stops or changes
 	stopPitch    pitch it falls to while fading out (1 = none, 0.6 = winds down like a motor siren)

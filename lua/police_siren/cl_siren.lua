@@ -15,12 +15,19 @@ local LIST_REFRESH = 0.5
 local BUILD_BUDGET = 0.005
 local SWAP_FADE = 0.15
 -- Doppler: speeds from positions sampled at least SPEED_SAMPLE s apart (a frame-to-frame
--- reading jumps on every stutter), gaps over SPEED_GAP dropped, smoothed by SPEED_SMOOTH
+-- reading jumps on every stutter), gaps over SPEED_GAP or speeds over SPEED_MAX (a teleport)
+-- dropped, smoothed by SPEED_SMOOTH; the pitch follows its target at DOPPLER_RATE per second
 local SPEED_OF_SOUND = 13504   -- units/s (343 m/s)
 local SPEED_SAMPLE = 0.05
 local SPEED_GAP = 0.3
+local SPEED_MAX = 6000
 local SPEED_SMOOTH = 0.5
-local PITCH_MIN, PITCH_MAX = 75, 133
+local DOPPLER_RATE = 14
+-- Source sets pitch in whole percent: on a near-pure tone a Doppler bend came out in audible
+-- steps. The tones are generated an octave low and played at BASE_PITCH, which halves the step
+-- (and caps the pitch at PITCH_MAX / BASE_PITCH, +4 semitones)
+local BASE_PITCH = 200
+local PITCH_MIN, PITCH_MAX = 150, 255
 local PITCH_GLIDE = 0.05
 
 -- sound.Generate names can't be reused: a lua refresh builds under a new serial
@@ -32,7 +39,8 @@ local function generate(tone, id, inside)
 	local cfg = PS.CONFIG
 	local samples, sr, n = Synth.Render(tone, cfg, coroutine.yield, inside)
 	local name = string.format("police_siren_%d_%s_%s", PS.Serial, id, inside and "in" or "out")
-	sound.Generate(name, sr, n / sr, function(t)
+	local rate = sr / 2   -- an octave low (BASE_PITCH)
+	sound.Generate(name, rate, n / rate, function(t)
 		return samples[(t % n) + 1] or 0
 	end, 1)
 	coroutine.yield()
@@ -79,7 +87,8 @@ local function trackVelocity(track, pos, now)
 	end
 	local dt = now - track.t
 	if dt < SPEED_SAMPLE then return track.v end
-	if dt <= SPEED_GAP then track.v = track.v + ((pos - track.p) / dt - track.v) * SPEED_SMOOTH end
+	local v = (pos - track.p) / dt
+	if dt <= SPEED_GAP and v:Length() < SPEED_MAX then track.v = track.v + (v - track.v) * SPEED_SMOOTH end
 	track.p, track.t = pos, now
 
 	return track.v
@@ -88,35 +97,43 @@ end
 local listener = {}
 local listenerPos, listenerVel = Vector(0, 0, 0), Vector(0, 0, 0)
 
--- the pitch (percent) a listener hears from a source moving at vel through pos
-local function dopplerPitch(pos, vel)
+-- the listener: the camera entity when the view is on one, else the player's eyes (EyePos()
+-- is only reliable while drawing: read in Think it jittered, and so did the listener's speed)
+local function listenerPosition()
+	local ply = LocalPlayer()
+	local view = GetViewEntity()
+
+	return (IsValid(view) and view ~= ply) and view:GetPos() or ply:EyePos()
+end
+
+-- how much higher (ratio) a listener hears a source moving at vel through pos
+local function dopplerRatio(pos, vel)
 	local strength = PS.CONFIG.doppler or 0
-	if strength <= 0 then return 100 end
+	if strength <= 0 then return 1 end
 	local dir = listenerPos - pos
-	if dir:LengthSqr() < 1 then return 100 end
+	if dir:LengthSqr() < 1 then return 1 end
 	dir:Normalize()
 	local toward = vel:Dot(dir)            -- source closing in
 	local away = listenerVel:Dot(dir)      -- listener moving off
 	local ratio = (SPEED_OF_SOUND - away) / math.max(SPEED_OF_SOUND - toward, 1)
-	ratio = 1 + (ratio - 1) * strength
 
-	return math.Clamp(math.Round(100 * ratio), PITCH_MIN, PITCH_MAX)
+	return 1 + (ratio - 1) * strength
 end
 
 local function startTone(veh, id, inside, fade)
 	local cfg = PS.CONFIG
 	local patch = CreateSound(veh, inside and soundNames[id].inside or soundNames[id].out)
 	patch:SetSoundLevel(cfg.soundLevel)
-	patch:PlayEx(0, 100)
+	patch:PlayEx(0, BASE_PITCH)
 	local volume = cfg.volume * (cfg.tones[id].level or 1) * cvVolume:GetFloat() * (inside and cfg.cabin.volume or 1)
 
-	return { id = id, inside = inside, patch = patch, fadeIn = volume, fade = fade, pitch = 100, track = {} }
+	return { id = id, inside = inside, patch = patch, fadeIn = volume, fade = fade, pitch = BASE_PITCH, dop = 1, track = {} }
 end
 
 local function stopTone(state, fade, pitchDrop)
 	local patch = state.patch
 	patch:ChangeVolume(0, fade)
-	if pitchDrop and PS.CONFIG.stopPitch < 1 then patch:ChangePitch(100 * PS.CONFIG.stopPitch, fade) end
+	if pitchDrop and PS.CONFIG.stopPitch < 1 then patch:ChangePitch(state.pitch * PS.CONFIG.stopPitch, fade) end
 	table.insert(fading, { patch = patch, stopAt = RealTime() + fade })
 end
 
@@ -137,7 +154,9 @@ local function update(veh)
 		end
 		-- (inside the car you move with it: no Doppler)
 		local vel = trackVelocity(state.track, veh:GetPos(), RealTime())
-		local pitch = inside and 100 or dopplerPitch(veh:GetPos(), vel)
+		local target = inside and 1 or dopplerRatio(veh:GetPos(), vel)
+		state.dop = state.dop + (target - state.dop) * math.min(1, RealFrameTime() * DOPPLER_RATE)
+		local pitch = math.Clamp(math.Round(BASE_PITCH * state.dop), PITCH_MIN, PITCH_MAX)
 		if pitch ~= state.pitch then
 			state.patch:ChangePitch(pitch, PITCH_GLIDE)
 			state.pitch = pitch
@@ -156,7 +175,7 @@ local nextRefresh = 0
 hook.Add("Think", "police_siren", function()
 	local now = RealTime()
 	stepBuilder()
-	listenerPos = EyePos()
+	listenerPos = listenerPosition()
 	listenerVel = trackVelocity(listener, listenerPos, now)
 	if now >= nextRefresh then
 		nextRefresh = now + LIST_REFRESH

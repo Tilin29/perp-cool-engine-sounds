@@ -412,7 +412,7 @@ $('passBy').onclick = () => {
     const d = Math.hypot(x, side)
     let ratio = C / Math.max(C - v * (-x / d), 1)
     ratio = 1 + (ratio - 1) * CFG.doppler
-    ratio = Math.min(Math.max(Math.round(100 * ratio), 75), 133) / 100
+    ratio = Math.min(Math.max(Math.round(200 * ratio), 150), 255) / 200   // as in game: half-percent steps, at most +4 semitones
     if (voice && voice.src) voice.src.playbackRate.setTargetAtTime(ratio, ctx.currentTime, 0.02)
     master.gain.setTargetAtTime(+$('monitor').value * Math.min(1, 6 / d), ctx.currentTime, 0.03)
   }, 30)
