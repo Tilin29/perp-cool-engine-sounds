@@ -1,7 +1,7 @@
 --[[
-	Police siren, client side: builds each tone of POLICE_SIREN.CONFIG with the synth
-	(cl_siren_synth.lua, a few frames' work, once a siren car is near) in two versions, as heard
-	outside and inside the car (muffled, CONFIG.cabin), plays the tone each siren car sounds
+	Police siren, client side: builds the tones of POLICE_SIREN.CONFIG with the synth
+	(cl_siren_synth.lua, a few frames' work, the first time a nearby car sounds each one) in two
+	versions, as heard outside and inside the car (muffled, CONFIG.cabin), plays the tone each siren car sounds
 	(sh_siren.lua) as a looping sound on the car, and reads the driver's tone key.
 ]]
 local PS = POLICE_SIREN
@@ -36,6 +36,8 @@ local PITCH_GLIDE = 0.05
 -- sound.Generate names can't be reused: a lua refresh builds under a new serial
 PS.Serial = (PS.Serial or 0) + 1
 local soundNames = {}   -- id -> { out = name, inside = name }
+local queued = {}       -- ids waiting to be built, the one being built first
+local failed = {}       -- ids whose build failed (not tried again)
 local builder
 
 local function generate(tone, id, inside)
@@ -51,11 +53,20 @@ local function generate(tone, id, inside)
 	return name
 end
 
-local function buildAll()
-	for id, tone in pairs(PS.CONFIG.tones) do
+local function buildQueued()
+	while #queued > 0 do
+		local id = queued[1]
+		local tone = PS.CONFIG.tones[id]
 		local out = generate(tone, id, false)
 		soundNames[id] = { out = out, inside = generate(tone, id, true) }
+		table.remove(queued, 1)
 	end
+end
+
+local function requestTone(id)
+	if failed[id] or table.HasValue(queued, id) then return end
+	table.insert(queued, id)
+	if not builder or coroutine.status(builder) == "dead" then builder = coroutine.create(buildQueued) end
 end
 
 local function stepBuilder()
@@ -64,7 +75,8 @@ local function stepBuilder()
 	repeat
 		local ok, err = coroutine.resume(builder)
 		if not ok then
-			ErrorNoHalt("[Police siren] building the tones failed: " .. tostring(err) .. "\n")
+			ErrorNoHalt("[Police siren] building tone " .. tostring(queued[1]) .. " failed: " .. tostring(err) .. "\n")
+			failed[table.remove(queued, 1) or ""] = true
 			builder = nil
 			return
 		end
@@ -148,7 +160,7 @@ local function update(veh)
 	local state = cars[veh]
 	local want = not veh:IsDormant() and PS.SoundingTone(veh) or nil
 	if want and not soundNames[want] then
-		if not builder then builder = coroutine.create(buildAll) end
+		requestTone(want)
 		want = nil
 	end
 	local inside = want ~= nil and insideOf(veh)

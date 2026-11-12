@@ -207,8 +207,17 @@ function normalize(c) {
   if (!Array.isArray(c.lightTones)) c.lightTones = clone(d.lightTones)
   while (c.lightTones.length < 2) c.lightTones.push('')
   if (!Array.isArray(c.cycle)) c.cycle = []
-  c.keys = { tone: (c.keys && c.keys.tone) || (d.keys && d.keys.tone) || 'q' }
+  // the fire / medical tone sets (edited in the file: the page plays the police rules); an older save
+  // gets the file's sets and the tones they name
+  if (!c.schemes || typeof c.schemes !== 'object' || Array.isArray(c.schemes)) c.schemes = clone(d.schemes || {})
   if (!c.tones || typeof c.tones !== 'object' || Array.isArray(c.tones)) c.tones = {}
+  for (const sc of Object.values(c.schemes)) {
+    if (!Array.isArray(sc.lightTones)) sc.lightTones = []
+    while (sc.lightTones.length < 2) sc.lightTones.push('')
+    if (!Array.isArray(sc.cycle)) sc.cycle = []
+    for (const id of [...sc.lightTones, ...sc.cycle]) if (id && !c.tones[id] && d.tones && d.tones[id]) c.tones[id] = clone(d.tones[id])
+  }
+  c.keys = { tone: (c.keys && c.keys.tone) || (d.keys && d.keys.tone) || 'q' }
   // Lua doesn't keep the file's order: the cycle's tones first, then the rest
   const order = [...c.cycle, ...Object.keys(c.tones)].filter((id, i, a) => c.tones[id] && a.indexOf(id) === i)
   c.tones = Object.fromEntries(order.map((id) => [id, c.tones[id]]))
@@ -537,6 +546,10 @@ $('delTone').onclick = () => {
   delete CFG.tones[id]
   CFG.lightTones = CFG.lightTones.map((x) => (x === id ? '' : x))
   CFG.cycle = CFG.cycle.filter((x) => x !== id)
+  for (const sc of Object.values(CFG.schemes)) {
+    sc.lightTones = sc.lightTones.map((x) => (x === id ? '' : x))
+    sc.cycle = sc.cycle.filter((x) => x !== id)
+  }
   if (voice && voice.id === id) sound(null)
   save()
   SEL = Object.keys(CFG.tones)[0]
@@ -897,7 +910,7 @@ window.addEventListener('resize', () => drawPattern())
 // ---------------------------------------------------------------------------------------------
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
-const GLOBAL_ORDER = ['volume', 'soundLevel', 'soundLevels', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'cabin', 'keys', 'tones']
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'soundLevels', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'schemes', 'cabin', 'keys', 'tones']
 const TONE_ORDER = ['name', 'level', 'pattern', 'logGlide', 'harmonics', 'voice2', 'vibrato', 'tremolo', 'speaker']
 const SUB_ORDER = {
   pattern: ['f', 'glide', 'hold', 'curve'], voice2: ['on', 'semitones', 'cents', 'level', 'offset'], vibrato: ['rate', 'depth'],
@@ -941,6 +954,13 @@ function exportLua() {
           }
         }
         out.push(tab(2) + '},')
+      }
+      out.push(tab(1) + '},')
+    } else if (k === 'schemes') {
+      out.push(tab(1) + 'schemes = {')
+      for (const [name, sc] of Object.entries(v)) {
+        const list = (a) => '{ ' + a.map(luaScalar).join(', ') + ' }'
+        out.push(tab(2) + luaKey(name) + ' = { lightTones = ' + list(sc.lightTones) + ', cycle = ' + list(sc.cycle) + ' },')
       }
       out.push(tab(1) + '},')
     } else if (k === 'soundLevels') {

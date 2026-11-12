@@ -1,8 +1,10 @@
 --[[
-	Police lightbars (sh_police.lua): on spawn a marked police car gets its livery and the bar,
-	parented to the car. The driver switches the lights (audio_engine_lights, sent by the light key
-	in cl_police.lua): off -> CODE 2 -> CODE 3 -> off. The mode is NW2 audio_lights on the car,
-	the bar NW2 audio_lightbar; the clients draw the flashing.
+	Emergency lights (sh_police.lua): on spawn a police, fire or medical car gets its livery and
+	the bar, parented to the car (a car with lights of its own in the model carries them itself:
+	the car is its own audio_lightbar). The driver switches the lights (audio_engine_lights, sent
+	by the light key in cl_police.lua): off -> CODE 2 -> CODE 3 -> off. The mode is NW2
+	audio_lights on the car, the bar NW2 audio_lightbar, the colours NW2 audio_lightscheme; the
+	clients draw the flashing.
 ]]
 local E = AUDIO_ENGINE
 
@@ -19,6 +21,12 @@ end
 
 local function attachLightbar(veh, police)
 	if IsValid(veh.audioLightbar) then return end
+	veh:SetNW2String("audio_lightscheme", police.scheme or "police")
+	if police.builtin then
+		veh.audioLightbar = veh
+		veh:SetNW2Entity("audio_lightbar", veh)
+		return
+	end
 	if not util.IsValidModel(E.LIGHTBAR_MODEL) then
 		if not warnedModel then
 			warnedModel = true
@@ -74,4 +82,4 @@ concommand.Add("audio_engine_lights", function(ply, _, args)
 		mode = (veh:GetNW2Int("audio_lights", 0) + 1) % (modes + 1)
 	end
 	veh:SetNW2Int("audio_lights", mode)
-end, nil, "Police lightbar of the car you're driving: no argument = next mode, 0 = off, 1 = CODE 2, 2 = CODE 3")
+end, nil, "Emergency lights of the car you're driving: no argument = next mode, 0 = off, 1 = CODE 2, 2 = CODE 3")

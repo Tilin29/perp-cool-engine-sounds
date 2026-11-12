@@ -14,6 +14,8 @@
 	sampleRate   44100 or 22050
 	lightTones   the tone each light mode starts: [1] = CODE 2, [2] = CODE 3 ("" = none)
 	cycle        the tones the tone key steps through, in order (then off, then the first again)
+	schemes      lightTones and cycle for the other light schemes (the lights' NW2 audio_lightscheme:
+	             fire, medical); a police car, or any scheme not listed, uses the two above
 	cabin        inside the car (driver and passengers): volume x this, muffled above `muffle` Hz
 	keys         default keys (players can rebind: police_siren_tonekey)
 
@@ -52,6 +54,10 @@ POLICE_SIREN.CONFIG = {
 	sampleRate = 44100,
 	lightTones = { "", "wail" },
 	cycle = { "wail", "yelp", "phaser", "hilo" },
+	schemes = {
+		fire = { lightTones = { "", "firewail" }, cycle = { "firewail", "fireyelp", "firephaser" } },
+		medical = { lightTones = { "", "emswail" }, cycle = { "emswail", "emsyelp", "hilo" } },
+	},
 	cabin = { volume = 0.35, muffle = 1400 },
 	keys = { tone = "q" },
 	tones = {
@@ -110,6 +116,76 @@ POLICE_SIREN.CONFIG = {
 			vibrato = { rate = 0, depth = 0 },
 			tremolo = { rate = 0, depth = 0 },
 			speaker = { highpass = 300, lowpass = 8000, drive = 0, resonance = 1000, resonanceQ = 1, resonanceGain = 0 },
+		},
+		firewail = {
+			name = "Fire wail",
+			level = 0.9,
+			pattern = {
+				{ f = 1200, glide = 1.8, hold = 0.1, curve = 0.4 },
+				{ f = 560, glide = 2.6, hold = 0, curve = 1 },
+			},
+			logGlide = true,
+			harmonics = { 1, 0.05, 0.2, 0.03, 0.1, 0.02, 0.06, 0.01, 0.04 },
+			voice2 = { on = false, semitones = 0, cents = 6, level = 0.6, offset = 0 },
+			vibrato = { rate = 0, depth = 0 },
+			tremolo = { rate = 0, depth = 0 },
+			speaker = { highpass = 250, lowpass = 6500, drive = 0.6, resonance = 1200, resonanceQ = 1.2, resonanceGain = 3 },
+		},
+		fireyelp = {
+			name = "Fire yelp",
+			level = 0.9,
+			pattern = {
+				{ f = 1200, glide = 0.16, hold = 0, curve = 0.5 },
+				{ f = 560, glide = 0.18, hold = 0, curve = 1 },
+			},
+			logGlide = true,
+			harmonics = { 1, 0.05, 0.2, 0.03, 0.1, 0.02, 0.06, 0.01, 0.04 },
+			voice2 = { on = false, semitones = 0, cents = 6, level = 0.6, offset = 0 },
+			vibrato = { rate = 0, depth = 0 },
+			tremolo = { rate = 0, depth = 0 },
+			speaker = { highpass = 250, lowpass = 6500, drive = 0.6, resonance = 1200, resonanceQ = 1.2, resonanceGain = 3 },
+		},
+		firephaser = {
+			name = "Fire phaser",
+			level = 0.85,
+			pattern = {
+				{ f = 1200, glide = 0.05, hold = 0, curve = 0.6 },
+				{ f = 560, glide = 0.06, hold = 0, curve = 1 },
+			},
+			logGlide = true,
+			harmonics = { 1, 0.05, 0.2, 0.03, 0.1, 0.02, 0.06, 0.01, 0.04 },
+			voice2 = { on = false, semitones = 0, cents = 6, level = 0.6, offset = 0 },
+			vibrato = { rate = 0, depth = 0 },
+			tremolo = { rate = 0, depth = 0 },
+			speaker = { highpass = 250, lowpass = 6500, drive = 0.6, resonance = 1200, resonanceQ = 1.2, resonanceGain = 3 },
+		},
+		emswail = {
+			name = "EMS wail",
+			level = 1,
+			pattern = {
+				{ f = 1480, glide = 1.1, hold = 0.05, curve = 0.35 },
+				{ f = 720, glide = 2.2, hold = 0, curve = 1 },
+			},
+			logGlide = true,
+			harmonics = { 1, 0.08, 0.12, 0.04, 0.05, 0.015, 0.015 },
+			voice2 = { on = false, semitones = 0, cents = 6, level = 0.6, offset = 0 },
+			vibrato = { rate = 0, depth = 0 },
+			tremolo = { rate = 0, depth = 0 },
+			speaker = { highpass = 350, lowpass = 9000, drive = 0, resonance = 1000, resonanceQ = 1, resonanceGain = 0 },
+		},
+		emsyelp = {
+			name = "EMS yelp",
+			level = 1,
+			pattern = {
+				{ f = 1480, glide = 0.12, hold = 0, curve = 0.5 },
+				{ f = 720, glide = 0.14, hold = 0, curve = 1 },
+			},
+			logGlide = true,
+			harmonics = { 1, 0.08, 0.12, 0.04, 0.05, 0.015, 0.015 },
+			voice2 = { on = false, semitones = 0, cents = 6, level = 0.6, offset = 0 },
+			vibrato = { rate = 0, depth = 0 },
+			tremolo = { rate = 0, depth = 0 },
+			speaker = { highpass = 350, lowpass = 9000, drive = 0, resonance = 1000, resonanceQ = 1, resonanceGain = 0 },
 		},
 	},
 }

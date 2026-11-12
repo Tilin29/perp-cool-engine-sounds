@@ -1,18 +1,27 @@
 --[[
 	Police siren: which tone a car plays. Separate from the audio engine: it only reads the
-	police lights' networked state (the lightbar and the light mode, set by the audio engine's
-	sv_police.lua), so it sounds on any car that has a lightbar.
+	police lights' networked state (the lightbar, the light mode and the lights' scheme, set by the
+	audio engine's sv_police.lua), so it sounds on any car that has a lightbar or lights of its own.
 
-	The lights pick the tone (CONFIG.lightTones); the driver's tone key overrides it until the
-	light mode changes (NW2 siren_tone + siren_at, the light mode it was chosen in).
+	The lights pick the tone (CONFIG.lightTones, or the scheme's in CONFIG.schemes: fire and
+	medical cars have tones of their own); the driver's tone key overrides it until the light mode
+	changes (NW2 siren_tone + siren_at, the light mode it was chosen in).
 ]]
 local PS = POLICE_SIREN
 
 PS.LIGHTBAR_NW = "audio_lightbar"
 PS.LIGHTS_NW = "audio_lights"
+PS.SCHEME_NW = "audio_lightscheme"
 
 function PS.HasSiren(veh)
 	return IsValid(veh) and IsValid(veh:GetNW2Entity(PS.LIGHTBAR_NW))
+end
+
+-- the car's tone set: its scheme's lightTones and cycle, else the police ones
+function PS.Scheme(veh)
+	local schemes = PS.CONFIG.schemes
+
+	return schemes and schemes[veh:GetNW2String(PS.SCHEME_NW, "")] or PS.CONFIG
 end
 
 -- the tone the lights or the driver chose: an id of CONFIG.tones, or "" for none
@@ -21,7 +30,7 @@ function PS.ChosenTone(veh)
 	if lights == 0 then return "" end
 	if veh:GetNW2Int("siren_at", -1) == lights then return veh:GetNW2String("siren_tone", "") end
 
-	return PS.CONFIG.lightTones[lights] or ""
+	return PS.Scheme(veh).lightTones[lights] or ""
 end
 
 -- what the car sounds right now: a tone id, or nil
@@ -32,9 +41,9 @@ function PS.SoundingTone(veh)
 	return id
 end
 
--- the tone after `id` for the tone key: through CONFIG.cycle, then off, then round again
-function PS.NextTone(id)
-	local cycle = PS.CONFIG.cycle
+-- the tone after `id` for the tone key: through the car's cycle, then off, then round again
+function PS.NextTone(veh, id)
+	local cycle = PS.Scheme(veh).cycle
 	for i, c in ipairs(cycle) do
 		if c == id then return cycle[i + 1] or "" end
 	end

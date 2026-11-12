@@ -48,8 +48,14 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Sliding tyres scrape with their surface material's sound (PERP uses `glassbottle` on ~1/3 of scripts, rubber = `Dirt.Scrape`):
   `audio_engine_mutetyrescrape` mutes `E.TYRE_SCRAPE_SOUNDS` (global game soundscripts). Spawn-menu categories for testing: PERP cars, and PERP job vehicles (own script, skin via `PlayerSpawnedVehicle`;
   `AudioPerpScript` picks the fallback physics). Door soundscripts are never muted. `E.PERP_SCRIPT_UNUSED`: model-less scripts ignored.
-- Police lightbars: `sh_police.lua` (`E.POLICE_VEHICLES` = the 9 marked police job vehicles by spawn name: roof `mount` in the car's
-  model space, measured from the meshes, + `bodygroups`; `E.POLICE_BY_SCRIPT` from `E.JOB_VEHICLES`; `E.LIGHTBAR_MODULES` = the LED
+- Emergency lights: `sh_police.lua` (`E.POLICE_VEHICLES` = the 9 marked police job vehicles + fire (RAM SRT10, F350 Fire Rescue:
+  its own roof lights are amber, so it gets a bar too, Defender, Fire Truck) and medical (RS4 Avant, Prius, Ambulance, F450 Ambulance)
+  by spawn name: roof `mount` in the car's model space, measured from the meshes (mesh tops sit ~10.5 under the game's on TDM models:
+  the user fixed the 340i 57.5 -> 68.5; the new mounts have +10.5 and may need nudging, `lua_run ... GetNW2Entity("audio_lightbar"):SetLocalPos`),
+  + `bodygroups`, `scheme` police / fire (red, yellow) / medical (red, white), NW2 `audio_lightscheme`; `builtin` = no bar,
+  the model's own lamps `E.BUILTIN_LIGHTS[model]` { bone, lamps { pos, n, w, h, color, side, group } } in the body bone's space
+  (GTA IV ports turn car.body 90 deg; drawn through `GetBoneMatrix`), picked from the lens material's vertices and texture colours
+  with an MDL/VVD reader (headlights, tail lights, indicators left out); such a car is its own NW2 `audio_lightbar`; `E.POLICE_BY_SCRIPT` from `E.JOB_VEHICLES`; `E.LIGHTBAR_MODULES` = the LED
   lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669: model space long axis X, front +Y like the cars, so `E.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
   turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
@@ -193,7 +199,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 ## Police siren (separate module, may not stay)
 Own loader `lua/autorun/police_siren_init.lua`, files in `lua/police_siren/`, studio in `dev/siren_studio/`: delete those three
 to drop it. Never referenced by the audio engine and never calls it (the user wants them kept apart); it only reads the lights'
-NW2 vars (`audio_lightbar`, `audio_lights`: `PS.LIGHTBAR_NW`/`PS.LIGHTS_NW`), so any car with a lightbar has a siren. Global `POLICE_SIREN` (PS).
+NW2 vars (`audio_lightbar`, `audio_lights`, `audio_lightscheme`: `PS.LIGHTBAR_NW`/`PS.LIGHTS_NW`/`PS.SCHEME_NW`), so any car with a
+lightbar (or built-in lights) has a siren. Fire and medical cars get their own tones (`CONFIG.schemes`): fire = an electronic
+wail / yelp / phaser like a modern fire engine's (560 <-> 1200 Hz, wail 1.8 s up / 2.6 s down) with a brasher horn-speaker colour
+(odd harmonics, light drive, a 1.2 kHz peak); a Q-siren style spin-up / coast-down growl sounded like an air raid siren (the user said no), medical = a higher, brighter electronic wail (emswail 720 <-> 1480 Hz, emsyelp) and the hi-lo. Global `POLICE_SIREN` (PS).
 No horn (the user removed it). Tones copied from the reference recording the user picked (YouTube HKieGUH9pzg, "Police Siren Sound
 Effect"), measured with an analyser in the browser: wail 613 <-> 1190 Hz, rise 1.5 s (spin-up, curve 0.25), fall 3.15 s (even in
 log pitch), cycle 4.7 s; nearly pure: harmonics 2-10 at -25, -22, -34, -32, -42, -42, -54, -54, -61 dB, so a clean speaker (no drive,
@@ -203,14 +212,16 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
 - `sh_siren_config.lua`: `PS.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (88 = the engines' 85 + 3) and
   `soundLevels[model]` (94 on the police cars on CAR_EMOTION (95 a touch far), engine 92: the user wants the siren heard before the engine, not much
   further; 94 for all carried too far on the others, 86 lost to the SL65's engine), doppler (1 = real), attack/release, stopPitch (pitch drop on fade-out), pitch,
-  sampleRate, `lightTones` { CODE 2, CODE 3 }, `cycle`, `cabin` { volume, muffle Hz }, `keys` { tone }, `tones[id]` (pattern of
+  sampleRate, `lightTones` { CODE 2, CODE 3 }, `cycle`, `schemes[name]` { lightTones, cycle } (fire, medical; the studio keeps them
+  through its export but plays the police rules), `cabin` { volume, muffle Hz }, `keys` { tone }, `tones[id]` (pattern of
   points { f, glide, hold, curve }, logGlide, harmonics, voice2, vibrato, tremolo, speaker). Must stay plain Lua (the studio runs it).
 - `cl_siren_synth.lua`: plain Lua, game and studio. Wavetable of the harmonics (bandlimited to the tone's top pitch), second voice,
   highpass -> tanh drive -> resonant peak -> lowpass (+ a 4-pole lowpass at cabin.muffle for the inside version). Seamless loops: each
   voice scaled to whole cycles per loop, vibrato/tremolo whole cycles, rendered twice and the second pass kept, peak 0.95.
 - `sh_siren.lua`: `PS.SoundingTone(veh)`: the driver's pick (NW2 `siren_tone`, valid while NW2 `siren_at` = the light mode it was
-  picked in), else `lightTones[mode]`. `sv_siren.lua`: `police_siren_tone` (next in the cycle, then off), driver only, lights on.
-- `cl_siren.lua`: builds every tone twice (outside / inside) in a coroutine (5 ms/frame) once a siren car is near; `sound.Generate`
+  picked in), else `lightTones[mode]` of the car's scheme (`PS.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle,
+  then off), driver only, lights on.
+- `cl_siren.lua`: builds a tone twice (outside / inside) in a coroutine (5 ms/frame) the first time a car near sounds it (a failed one isn't retried); `sound.Generate`
   names carry `PS.Serial` (lua refresh); one CSoundPatch per car (fade-in a frame after PlayEx), swapped in 0.15 s on getting in/out
   (driver or a seat parented to the car, and the view on the player: watching through a camera = outside, as the engine). Doppler from its own speed sampling (positions >= 0.05 s apart, gaps > 0.3 s and teleports
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
