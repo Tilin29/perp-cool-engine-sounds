@@ -45,7 +45,9 @@ local DEFAULTS = {
 	driftYaw = 70,         -- ... with the handbrake held (drifting)
 	overDamp = 9,          -- how firmly it catches oversteer (per second)
 	turnHelp = 4,          -- how much turn-in it adds when the car pushes wide (per second)...
-	turnShare = 0.9,       -- ...up to this share of the rotation the steering asks for
+	-- ...up to this share of the rotation the steering asks for. Off (0): with the throttle held it
+	-- pushed the tyres to their side limit, leaving no grip to drive, and turns bled 3-4 mph/s
+	turnShare = 0,
 	-- braking (S held, rolling forward): the front tyres lock and the car ploughs straight on.
 	-- It still turns, less: turn-in help up to brakeTurn of the asked rotation, applied firmer
 	brakeTurn = 0.6,
@@ -61,7 +63,9 @@ local DEFAULTS = {
 	slipMax = 4,           -- tail-out slip angle (degrees) it lets the car reach
 	slipReturn = 4,        -- deg/s of nose turned back per degree beyond it
 	slipDamp = 12,         -- how firmly (per second)
-	gripAssist = 1.0,      -- extra sideways tyre grip without the handbrake (g): stops slides, turns fast cars
+	-- extra sideways tyre grip without the handbrake (g): stops slides, turns fast cars. Off (0) by
+	-- choice with turnShare: the cars drive better on their own tyres (it also scrubbed speed in turns)
+	gripAssist = 0,
 	-- straight-line hold (throttle with no steering): no spin-outs when accelerating
 	straightDamp = 20,     -- how firmly it stops rotation (per second)
 	straightHold = 3,      -- deg/s of turn back per degree off the held heading

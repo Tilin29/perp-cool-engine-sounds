@@ -159,10 +159,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   the line from the moment the keys were let go turned the car back against its tyres for seconds (yaw off 10-20 deg/s), read as a slide. `audio_engine_accel_log` prints the yaw off what's asked (hold or steering) and the slip angle.
   Slip limit (no handbrake): past `slipMax` 4 deg tail-out the nose rotates no faster than the path (yaw - dBeta/dt); the turn-in help
   stops while the tail is out, so fast corners turn instead of drifting.
-  Lateral grip (no handbrake, also in the straight-line hold): `gripAssist` 1 g of extra side grip removes sideways speed at any slip
-  angle, forward speed untouched (turning the whole velocity toward the nose launched cars before).
-  Turn-in help (understeer): up to `turnShare` 0.9 of the asked rotation at `turnHelp` 4/s; braking (S, locked fronts plough on)
-  up to `brakeTurn` 0.6 at `brakeHelp` 6/s.
+  Lateral grip (no handbrake, also in the straight-line hold): `gripAssist` g of extra side grip removes sideways speed at any slip
+  angle, forward speed untouched (turning the whole velocity toward the nose launched cars before). Off: 0 (was 1).
+  Turn-in help (understeer): up to `turnShare` of the asked rotation at `turnHelp` 4/s. Off: 0 (was 0.9; with W held it pushed the
+  tyres to their side limit, no grip left to drive: turns at 60 mph bled 3-4 mph/s at full power; the user prefers both off).
+  Braking (S, locked fronts plough on) still up to `brakeTurn` 0.6 at `brakeHelp` 6/s.
   Never turns a sliding car's velocity (that launched cars toward the nose). A drift starts with the handbrake and lasts while
   the slide angle > `driftHold`; while drifting counter-steer isn't damped. Grip 1.5 g; `veh.audioSteerFast` widens the lock at speed.
 - `sv_handling.lua`: on spawn (`E.PrepareHandling`, before `captureBase`): PERP base physics from generated `sv_perp_physics.lua` onto cars
