@@ -119,7 +119,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - once a second each active loop is checked with `IsPlaying` and restarted if the game dropped it (`car.revive`)
   - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out;
     the gearbox's speed (`car.vDrive`) moves at most `SPEED_SLEW` 40 m/s2. Dividing by the capped frame dt made stutters read as several times the real speed
-  - Doppler (`audio_engine_doppler`: 0.25 = default, real, 1 = maximum, four times real; old clients saved 1, moved to 0.25 once through the `audio_engine_doppler_moved` cookie), road/wind, turbo/BOV from the env bank, pops logic
+  - Doppler (`audio_engine_doppler`: 1 = default, real, 4 = maximum, four times real. The scale was 0.25 = real until the user asked for 1:
+    clients with the old `audio_engine_doppler_moved` cookie get their saved value x4 once (`audio_engine_doppler_real1` cookie)), road/wind, turbo/BOV from the env bank, pops logic
   - pass-by swell (`audio_engine_passby`): other cars follow (5 m / distance)^curve down to 30 m (after the headroom; start/stop one-shots too), up to x2 at 2.5 m, all by speed
     (`pace` 5-30 m/s): curve 0.35 (-5.4 dB at 30 m) to 0.7 (-10.9 dB; steep on every car, slow ones stopped carrying), the part over 1 scales with pace and is held under a 0.95 peak;
     a car counts as 0.2 s of its speed closer (a 60 m/s pass is otherwise a blink); combustion cars at full pace are 5 dB down from the front, 3 dB up from behind (exhaust direction);
@@ -216,7 +217,8 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on
   the near-pure tone 1 % Doppler steps were audible; so the pitch stays within 150..255 (-5..+4 semitones). Key `police_siren_tonekey` (q; alt/shift/ctrl = left one),
-  `police_siren_volume`, `audio_engine_police_doppler` (0-2, x CONFIG.doppler; the user picked the name, it is the siren's).
+  `police_siren_volume`, `audio_engine_police_doppler` (0-2, x CONFIG.doppler 0.5 = half of real: the user wanted that strength as the cvar's 1; the user
+  picked the name, it is the siren's).
 - `dev/siren_studio/build.js [--test]` builds `dev/siren_studio.html` (wasmoon from dev/baker, opens from disk; Chrome automation needs
   it served over http). `--test` renders every tone in Node and checks length, peak and the loop seam. The page mirrors sh_siren's rules
   for its in-game test (Shift = lights), previews the inside version and a Doppler pass-by, and writes the export in the file's layout

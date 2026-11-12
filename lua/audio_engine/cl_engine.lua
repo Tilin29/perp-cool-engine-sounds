@@ -18,12 +18,17 @@ local cvVol = CreateClientConVar("audio_engine_volume", "1", true, false, "Engin
 local cvStartKey = CreateClientConVar("audio_engine_startkey", "r", true, false, "Key that starts/stops the engine of the car you drive (a key name such as r, k or f1; none = off)")
 local cvRoad = CreateClientConVar("audio_engine_roadnoise", "1", true, false, "Tyre roar volume (0-2)", 0, 2)
 local cvWind = CreateClientConVar("audio_engine_windnoise", "1", true, false, "Wind noise volume (0-2)", 0, 2)
-local cvDoppler = CreateClientConVar("audio_engine_doppler", "0.25", true, false, "Doppler pitch shift of passing cars (0 = off, 0.25 = default, real, 1 = four times real)", 0, 1)
+local cvDoppler = CreateClientConVar("audio_engine_doppler", "1", true, false, "Doppler pitch shift of passing cars (0 = off, 1 = default, real, 4 = four times real)", 0, 4)
 -- the default was 1 and clients saved it, so a new default alone wouldn't reach them: moved over
 -- once, leaving any other value someone picked
-if cookie.GetNumber("audio_engine_doppler_moved", 0) == 0 then
-	cookie.Set("audio_engine_doppler_moved", "1")
-	if cvDoppler:GetFloat() == 1 then RunConsoleCommand("audio_engine_doppler", "0.25") end
+-- The scale moved: it was 0.25 = real (1 = four times real), now 1 = real. Every client that ran
+-- the old scale has the audio_engine_doppler_moved cookie (from the move before that): its saved
+-- value is turned into the new scale once (x4); new clients start on the default
+if cookie.GetNumber("audio_engine_doppler_real1", 0) == 0 then
+	cookie.Set("audio_engine_doppler_real1", "1")
+	if cookie.GetNumber("audio_engine_doppler_moved", 0) == 1 then
+		RunConsoleCommand("audio_engine_doppler", tostring(math.min(cvDoppler:GetFloat() * 4, 4)))
+	end
 end
 local cvPassby = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off, 1 = default)", 0, 2)
 local cvTunnel = CreateClientConVar("audio_engine_tunnel", "1", true, false, "Source DSP preset for cars in a tunnel (0 = no tunnel effect, 1 = default, the map's own, 6 = medium tunnel, 7 = large tunnel)", 0, 133)
@@ -274,9 +279,8 @@ local function updateListener(dt)
 end
 
 -- f' = f (c + v_listener) / (c - v_source), both measured toward each other. Sound travels at
--- c / (audio_engine_doppler x DOPPLER_BOOST): the default 0.25 is the real speed of sound, where
--- an 80 mph drive-by bends 3-4 semitones; 1 is four times that
-local DOPPLER_BOOST = 4
+-- c / audio_engine_doppler: the default 1 is the real speed of sound, where an 80 mph drive-by
+-- bends 3-4 semitones; 4 is four times that
 -- The full boost goes shrill at speed: closing at 40 m/s came out almost an octave up. Up to
 -- DOPPLER_KNEE semitones it's left alone (an ordinary pass), past it the shift bends over towards
 -- DOPPLER_MAX, which a head-on pass at any speed never goes over
@@ -300,7 +304,7 @@ local function dopplerFactor(car, dt, mine)
 			d:Mul(1 / dist)
 			local vs = car.vel:Dot(d)            -- source toward listener
 			local vl = -listener.vel:Dot(d)      -- listener toward source
-			local c = SPEED_OF_SOUND / (amt * DOPPLER_BOOST)
+			local c = SPEED_OF_SOUND / amt
 			target = softPitch(max(c * 0.25, c + vl) / max(c * 0.5, c - vs))
 		end
 	end

@@ -124,7 +124,8 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_volume` | client | 1 | engine volume, 0–2 |
 | `audio_engine_roadnoise` | client | 1 | tyre roar volume, 0–2 (0 = off) |
 | `audio_engine_windnoise` | client | 1 | wind volume, 0–2 (0 = off) |
-| `audio_engine_doppler` | client | 0.25 | Doppler on passing cars, 0 = off, 0.25 = real, 1 = four times real (the maximum) |
+| `audio_engine_doppler` | client | 1 | Doppler on passing cars, 0 = off, 1 = real, 4 = four times real (the maximum) |
+| `audio_engine_police_doppler` | client | 1 | Doppler on passing police sirens, 0 = off, 1 = default (half of real), 2 = real |
 | `audio_engine_passby` | client | 1 | how much passing cars swell in loudness, 0 = off, up to 2 |
 | `audio_engine_tunnel` | client | 1 | Source DSP preset for cars in tunnels, 0 = off, 1 = the map's own, 6 = medium tunnel, 7 = large tunnel |
 | `audio_engine_hud` | client | 1 | show the HUD |

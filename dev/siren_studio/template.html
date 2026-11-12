@@ -551,7 +551,7 @@ function buildGlobals() {
     buildLevels(),
     el('p', { class: 'hint' }, 'How far it carries in game (Source sound level). The engines play at 85, high-powered cars at 92: a few dB over the car\'s own engine keeps the siren heard first.'),
     field('Doppler', CFG, 'doppler', { min: 0, max: 2, step: 0.05, unit: '×', change: onGlobal }),
-    el('p', { class: 'hint' }, 'Pitch shift of passing cars: 0 = off, 1 = real. "Drive past" at the top plays a pass-by.'),
+    el('p', { class: 'hint' }, 'Pitch shift of passing cars: 0 = off, 1 = real, 0.5 = half (players scale it with audio_engine_police_doppler, 1 = this). "Drive past" at the top plays a pass-by.'),
     field('Fade in', CFG, 'attack', { min: 0, max: 2, step: 0.01, unit: 's', change: onGlobal }),
     field('Fade out', CFG, 'release', { min: 0, max: 3, step: 0.01, unit: 's', change: onGlobal }),
     field('Pitch on fade-out', CFG, 'stopPitch', { min: 0.3, max: 1, step: 0.01, unit: '×', change: onGlobal }),

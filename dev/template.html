@@ -511,7 +511,7 @@ const cs = $('clientSliders')
 slider(cs, 'cvVol', 'Engine volume', 0, 2, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_volume', value: v }), (v) => Math.round(v * 100) + '%')
 slider(cs, 'cvRoad', 'Tyre noise', 0, 2, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_roadnoise', value: v }), (v) => v <= 0 ? 'Off' : Math.round(v * 100) + '%')
 slider(cs, 'cvWind', 'Wind noise', 0, 2, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_windnoise', value: v }), (v) => v <= 0 ? 'Off' : Math.round(v * 100) + '%')
-slider(cs, 'cvDop', 'Doppler', 0, 1, 0.05, 0.25, (v) => send && send({ type: 'cv', name: 'audio_engine_doppler', value: v }), (v) => v <= 0 ? 'Off' : (v * 4).toFixed(1) + '× real')
+slider(cs, 'cvDop', 'Doppler', 0, 4, 0.05, 1, (v) => send && send({ type: 'cv', name: 'audio_engine_doppler', value: v }), (v) => v <= 0 ? 'Off' : v.toFixed(2) + '× real')
 slider(cs, 'master', 'Your speakers', 0, 1, 0.01, 1, (v) => { A.masterVol = v; if (A.master) A.master.gain.value = v }, (v) => Math.round(v * 100) + '%')
 $('sr').addEventListener('change', () => {
   if (!send) return

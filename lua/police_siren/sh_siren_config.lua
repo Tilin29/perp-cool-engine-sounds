@@ -5,7 +5,8 @@
 	soundLevel   Source sound level in dB: how far it carries. The cars' engines play at 85, high-powered
 	             ones at 92: a few dB over the car's own keeps the siren heard first, but not much further
 	soundLevels  the same per car model, for cars whose engine is louder (lower-case model path)
-	doppler      Doppler pitch shift of passing cars: 0 = off, 1 = real (capped at +4 / -5 semitones)
+	doppler      Doppler pitch shift of passing cars: 0 = off, 1 = real, 0.5 = half (capped at +4 / -5 semitones).
+	             Each player scales it with audio_engine_police_doppler (1 = this)
 	attack       seconds a tone takes to fade in when it starts
 	release      seconds it takes to fade out when it stops or changes
 	stopPitch    pitch it falls to while fading out (1 = none, 0.6 = winds down like a motor siren)
@@ -43,7 +44,7 @@ POLICE_SIREN.CONFIG = {
 		["models/tdmcars/chargersrt8.mdl"] = 94,
 		["models/tdmcars/sl65amg.mdl"] = 94,
 	},
-	doppler = 1,
+	doppler = 0.5,
 	attack = 0.05,
 	release = 0.5,
 	stopPitch = 0.7,
