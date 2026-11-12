@@ -216,7 +216,7 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on
   the near-pure tone 1 % Doppler steps were audible; so the pitch stays within 150..255 (-5..+4 semitones). Key `police_siren_tonekey` (q; alt/shift/ctrl = left one),
-  `police_siren_volume`.
+  `police_siren_volume`, `audio_engine_police_doppler` (0-2, x CONFIG.doppler; the user picked the name, it is the siren's).
 - `dev/siren_studio/build.js [--test]` builds `dev/siren_studio.html` (wasmoon from dev/baker, opens from disk; Chrome automation needs
   it served over http). `--test` renders every tone in Node and checks length, peak and the loop seam. The page mirrors sh_siren's rules
   for its in-game test (Shift = lights), previews the inside version and a Doppler pass-by, and writes the export in the file's layout

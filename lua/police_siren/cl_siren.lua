@@ -8,6 +8,9 @@ local PS = POLICE_SIREN
 local Synth = PS.Synth
 
 local cvVolume = CreateClientConVar("police_siren_volume", "1", true, false, "Police siren volume (0-1)", 0, 1)
+-- (named with the engine's settings, where players look for it, but it belongs to the siren)
+local cvDoppler = CreateClientConVar("audio_engine_police_doppler", "1", true, false,
+	"Doppler pitch shift of passing police sirens, x the siren's own setting (0 = off, 1 = default, 2 = double)", 0, 2)
 local cvToneKey = CreateClientConVar("police_siren_tonekey", PS.CONFIG.keys.tone, true, false,
 	"Key that steps the police siren of the car you drive to the next tone (a key name such as q; none = off)")
 
@@ -111,7 +114,7 @@ end
 
 -- how much higher (ratio) a listener hears a source moving at vel through pos
 local function dopplerRatio(pos, vel)
-	local strength = PS.CONFIG.doppler or 0
+	local strength = (PS.CONFIG.doppler or 0) * cvDoppler:GetFloat()
 	if strength <= 0 then return 1 end
 	local dir = listenerPos - pos
 	if dir:LengthSqr() < 1 then return 1 end
