@@ -200,6 +200,20 @@ local function keyDown(cv)
 	return key ~= nil and input.IsKeyDown(key)
 end
 
+-- the tone next to the light mode on the audio engine's HUD (its audio_engine/lights-label hook)
+hook.Add("audio_engine/lights-label", "police_siren", function(veh)
+	local id = PS.SoundingTone(veh)
+	if id then return string.upper(PS.CONFIG.tones[id].name) end
+end)
+
+-- Q (sandbox's spawn menu key) is the default tone key: no spawn menu while sitting in a siren car
+hook.Add("SpawnMenuOpen", "police_siren", function()
+	local seat = LocalPlayer():GetVehicle()
+	if not IsValid(seat) then return end
+	local car = IsValid(seat:GetParent()) and seat:GetParent() or seat
+	if PS.HasSiren(car) then return false end
+end)
+
 local toneHeld = false
 hook.Add("Think", "police_siren_keys", function()
 	local ply = LocalPlayer()
