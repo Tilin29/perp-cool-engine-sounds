@@ -41,14 +41,14 @@ POLICE_SIREN.CONFIG = {
 	lightTones = { "", "wail" },
 	cycle = { "wail", "yelp", "phaser", "hilo" },
 	horn = "horn",
-	keys = { tone = "j", horn = "h" },
+	keys = { tone = "q", horn = "alt" },
 	tones = {
 		wail = {
 			name = "Wail",
 			level = 1,
 			pattern = {
-				{ f = 1400, glide = 2, hold = 0.1, curve = 0.6 },
-				{ f = 620, glide = 2.6, hold = 0.05, curve = 1.5 },
+				{ f = 1247.19, glide = 2, hold = 0.09, curve = 0.6 },
+				{ f = 552.36, glide = 2.08, hold = 0.041, curve = 1.6 },
 			},
 			logGlide = true,
 			harmonics = { 1, 0.05, 0.33, 0.04, 0.2, 0.03, 0.14, 0.02, 0.11, 0, 0.09, 0, 0.07 },

@@ -122,9 +122,13 @@ hook.Add("EntityRemoved", "police_siren", function(ent)
 	cars[ent] = nil
 end)
 
--- the keys, sent as console commands (as the audio engine's start and light keys)
+-- the keys, sent as console commands (as the audio engine's start and light keys).
+-- Plain alt/shift/ctrl mean the left one (the game only knows KEY_LALT, KEY_LSHIFT...)
+local KEY_ALIASES = { alt = "lalt", shift = "lshift", ctrl = "lcontrol", control = "lcontrol" }
+
 local function keyDown(cv)
-	local key = _G["KEY_" .. string.upper(cv:GetString())]
+	local name = string.lower(cv:GetString())
+	local key = _G["KEY_" .. string.upper(KEY_ALIASES[name] or name)]
 
 	return key ~= nil and input.IsKeyDown(key)
 end

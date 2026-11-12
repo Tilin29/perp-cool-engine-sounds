@@ -394,19 +394,22 @@ $('simHorn').onmouseup = $('simHorn').onmouseleave = () => simHorn(false)
 $('simHorn').ontouchstart = (e) => { e.preventDefault(); simHorn(true) }
 $('simHorn').ontouchend = () => simHorn(false)
 
-// keyboard, as in game: Shift = lights, the tone key, the horn key (held)
+// keyboard, as in game: Shift = lights, the tone key, the horn key (held). The game's names
+// (lalt, rshift, lcontrol...) are matched to the browser's (Alt, Shift, Control)
+const GAME_TO_PAGE = { lalt: 'alt', ralt: 'alt', lshift: 'shift', rshift: 'shift', lcontrol: 'control', rcontrol: 'control', ctrl: 'control', enter: 'enter', space: ' ' }
+const pageKey = (name) => { const n = String(name).toLowerCase(); return GAME_TO_PAGE[n] || n }
 function typing() { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') }
 document.addEventListener('keydown', (e) => {
   if (!CFG || typing() || e.repeat) return
   const k = e.key.toLowerCase()
   if (e.key === 'Shift') simLights()
-  else if (k === String(CFG.keys.tone).toLowerCase()) simTone()
-  else if (k === String(CFG.keys.horn).toLowerCase()) simHorn(true)
+  else if (k === pageKey(CFG.keys.tone)) simTone()
+  else if (k === pageKey(CFG.keys.horn)) simHorn(true)
   else return
   e.preventDefault()
 })
 document.addEventListener('keyup', (e) => {
-  if (CFG && e.key.toLowerCase() === String(CFG.keys.horn).toLowerCase()) simHorn(false)
+  if (CFG && e.key.toLowerCase() === pageKey(CFG.keys.horn)) simHorn(false)
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -537,7 +540,7 @@ function buildGlobals() {
     el('h3', null, 'Keys (players can rebind)'),
     keyField('Tone key', 'tone'),
     keyField('Horn key', 'horn'),
-    el('p', { class: 'hint' }, 'A key name: j, h, f2, kp_enter… Here on the page: Shift = lights (as in game), the tone key, the horn key held.'),
+    el('p', { class: 'hint' }, 'A key name as the game knows it: q, j, f2, kp_enter, lalt/ralt (alt = left)… Here on the page: Shift = lights (as in game), the tone key, the horn key held.'),
   )
 }
 function keyField(label, k) {
