@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Honk Studio</title>
+<style>
+  :root {
+    --bg: #111418; --panel: #1a1f25; --panel2: #222932; --line: #2f3843; --fg: #e6eaef; --dim: #8d99a6;
+    --accent: #4ea1ff; --red: #ff4b3a; --amber: #ffb03a; --green: #4cd18a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  #status { color: var(--dim); font-size: 12px; }
+  #status.err { color: var(--red); }
+  .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  button { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; user-select: none; }
+  button:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.small { padding: 2px 7px; font-size: 12px; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #honk { font-weight: 600; padding: 6px 16px; }
+  input, select, textarea { background: #0d1014; color: var(--fg); border: 1px solid var(--line); border-radius: 5px; font: inherit; padding: 3px 6px; }
+  input[type=number] { width: 78px; }
+  input[type=range] { flex: 1; min-width: 80px; accent-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); }
+  main { display: grid; grid-template-columns: 360px 1fr; gap: 14px; padding: 14px 16px 40px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+  section h2 { font-size: 13px; margin: 0 0 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  section h3 { font-size: 12px; margin: 14px 0 6px; color: var(--dim); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 5px 0; }
+  .row > label:first-child { width: 128px; flex: none; color: var(--dim); }
+  .row .unit { color: var(--dim); width: 34px; font-size: 12px; }
+  #globals .row > label:first-child { width: 112px; }
+  #globals input[type=number] { width: 64px; }
+  .hint { color: var(--dim); font-size: 12px; margin: 4px 0 8px; }
+  .horns { display: flex; flex-direction: column; gap: 4px; }
+  .horn { display: flex; justify-content: space-between; align-items: center; padding: 6px 9px; border-radius: 6px; background: var(--panel2); border: 1px solid transparent; cursor: pointer; }
+  .horn.sel { border-color: var(--accent); }
+  .horn .id { color: var(--dim); font-size: 11px; font-family: ui-monospace, Consolas, monospace; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 22px; }
+  @media (max-width: 1200px) { .grid2 { grid-template-columns: 1fr; } }
+  canvas { width: 100%; display: block; background: #0d1014; border: 1px solid var(--line); border-radius: 8px; }
+  #wave { height: 170px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+  th, td { padding: 3px 5px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: 500; font-size: 12px; }
+  td input[type=number] { width: 74px; }
+  .note { font-family: ui-monospace, Consolas, monospace; color: var(--amber); }
+  .harm { display: flex; gap: 4px; align-items: flex-end; height: 140px; margin-bottom: 6px; }
+  .harm div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; }
+  .harm input[type=range] { writing-mode: vertical-lr; direction: rtl; flex: 1 1 0; min-height: 0; height: calc(100% - 20px); width: 18px; min-width: 0; }
+  .harm span { font-size: 11px; color: var(--dim); }
+  .list { display: flex; flex-direction: column; gap: 3px; }
+  .list div { display: flex; align-items: center; gap: 6px; }
+  textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 11px; }
+  #sounding { font-weight: 600; min-width: 90px; color: var(--dim); }
+  #sounding.on { color: var(--green); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Honk Studio</h1>
+  <div class="bar">
+    <button id="honk" title="Hold to honk the selected horn">Honk (hold)</button>
+    <button id="beep" title="Two quick taps">Beep beep</button>
+    <label class="bar" style="gap:4px;color:var(--dim)">Monitor <input id="monitor" type="range" min="0" max="1" step="0.01" value="0.5" style="width:90px"></label>
+  </div>
+  <div class="sep"></div>
+  <div class="bar">
+    <span style="color:var(--dim)">Hold <kbd id="keyName">Alt</kbd> to honk, as in game</span>
+    <label class="bar" style="gap:4px;color:var(--dim)" title="Hear it as the driver and passengers do: muffled and quieter"><input id="inside" type="checkbox"> Inside the car</label>
+    <span id="sounding">silent</span>
+  </div>
+  <span id="status">Loading the synth…</span>
+</header>
+
+<main>
+  <div>
+    <section>
+      <h2>Horns <span class="bar"><button class="small" id="addHorn">New</button><button class="small" id="dupHorn">Duplicate</button><button class="small" id="delHorn">Delete</button></span></h2>
+      <div class="horns" id="hornList"></div>
+    </section>
+    <section>
+      <h2>In game</h2>
+      <div id="globals"></div>
+    </section>
+    <section>
+      <h2>Pass it back</h2>
+      <p class="hint">Copy the settings file and paste it to Claude: it replaces <code>lua/car_horn/sh_horn_config.lua</code>. Your edits are also kept in this browser.</p>
+      <div class="bar"><button id="copyLua">Copy settings file</button><button id="copyJson">Copy JSON</button><button id="reset">Reset to the file's settings</button></div>
+      <textarea id="exportLua" rows="10" readonly style="margin-top:8px"></textarea>
+      <h3>Load settings (JSON)</h3>
+      <textarea id="importJson" rows="3" placeholder="Paste JSON copied from this page"></textarea>
+      <div class="bar" style="margin-top:6px"><button id="loadJson">Load</button></div>
+    </section>
+  </div>
+
+  <div id="editor"></div>
+</main>
+
+<script id="src-wasmoon" type="text/plain">{{WASMOON}}</script>
+<script id="src-wasm" type="text/plain">{{WASM_B64}}</script>
+{{LUA_FILES}}
+
+<script id="src-host" type="text/plain">
+// runs in a worker (or on the page if workers are blocked): the horn's Lua, rendering horns
+function HornHost(post, wasmoonLib) {
+  let L = null, res = null, buf = null
+  function lua(v) {
+    if (v === null || v === undefined) return 'nil'
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '0'
+    if (typeof v === 'boolean') return v ? 'true' : 'false'
+    if (typeof v === 'string') return JSON.stringify(v)
+    if (Array.isArray(v)) return '{' + v.map(lua).join(',') + '}'
+    return '{' + Object.keys(v).filter((k) => v[k] !== undefined && v[k] !== null)
+      .map((k) => '[' + JSON.stringify(k) + ']=' + lua(v[k])).join(',') + '}'
+  }
+  async function init(files, wasm) {
+    globalThis.__WASMOON_BINARY = new Uint8Array(wasm)
+    L = await new wasmoonLib.LuaFactory().createEngine()
+    L.global.set('__result', (s) => { res = s })
+    L.global.set('__push', (...xs) => { for (let i = 0; i < xs.length; i++) buf.push(xs[i]) })
+    for (const f of files) {
+      try { await L.doString(f.src) } catch (e) { throw new Error(f.name + ': ' + e.message) }
+    }
+    res = null
+    await L.doString('STUDIO.defaults()')
+    post({ type: 'ready', defaults: JSON.parse(res) })
+  }
+  async function render(m) {
+    buf = []
+    res = null
+    const t0 = Date.now()
+    await L.doString('STUDIO.render(' + lua(m.horn) + ',' + lua(m.cfg) + ',' + (m.inside ? 'true' : 'false') + ')')
+    const data = Float32Array.from(buf)
+    buf = null
+    const info = JSON.parse(res)
+    post({ type: 'rendered', id: m.id, key: m.key, sr: info.sr, loopStart: info.loopStart, data, ms: Date.now() - t0 }, [data.buffer])
+  }
+  let queue = Promise.resolve()
+  return (m) => {
+    queue = queue.then(() => (m.type === 'init' ? init(m.files, m.wasm) : render(m)))
+      .catch((e) => post({ type: 'error', text: String((e && e.message) || e) }))
+  }
+}
+</script>
+
+<script>
+const CONFIG_HEADER = {{CONFIG_HEADER}}
+const $ = (id) => document.getElementById(id)
+const el = (tag, props, ...kids) => {
+  const e = document.createElement(tag)
+  if (props) for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v)
+    else if (k in e) e[k] = v
+    else e.setAttribute(k, v)
+  }
+  for (const k of kids) if (k !== null && k !== undefined) e.append(k)
+  return e
+}
+const clone = (x) => JSON.parse(JSON.stringify(x))
+const STORE = 'honk_studio_settings_v6'   // (v6: the BearCat's air horn, Doppler and fall-off: older saves are left behind)
+
+let DEFAULTS = null, CFG = null, SEL = null
+
+function status(t, cls) { $('status').textContent = t; $('status').className = cls || '' }
+
+// ---------------------------------------------------------------------------------------------
+// settings: the shape the Lua file has, filled in where an old save or an import lacks a field
+// ---------------------------------------------------------------------------------------------
+const HORN_SHAPE = {
+  name: 'Horn', level: 1, units: [{ f: 415, level: 1 }, { f: 520, level: 0.85 }],
+  harmonics: [0.5, 0.6, 0.75, 0.9, 1, 1, 0.85, 0.7, 0.55, 0.42, 0.32, 0.25, 0.19, 0.15, 0.11, 0.08],
+  rasp: 0.2, air: 0, jitter: { rate: 9, depth: 10 }, shimmer: 0.12, grille: 0.6, roughness: 0, growl: 0, flutter: { rate: 0, depth: 0 },
+  attack: { time: 0.025, pitch: 0.92, curve: 0.5 }, release: { time: 0.06, pitch: 0.94 },
+  speaker: { highpass: 250, lowpass: 6000, drive: 1.2, resonance: 2400, resonanceQ: 1.5, resonanceGain: 6 },
+}
+function fill(obj, shape) {
+  for (const [k, v] of Object.entries(shape)) {
+    if (obj[k] === undefined || obj[k] === null) obj[k] = clone(v)
+    else if (v && typeof v === 'object' && !Array.isArray(v)) fill(obj[k], v)
+  }
+  return obj
+}
+function normalize(c) {
+  const d = DEFAULTS
+  for (const k of ['volume', 'soundLevel', 'sampleRate', 'default', 'doppler']) if (c[k] === undefined) c[k] = d[k]
+  c.distance = Object.assign(clone(d.distance || { full: 0.1, at: 0.6, volume: 0.3, silent: 1 }), c.distance || {})
+  c.cabin = Object.assign(clone(d.cabin || { volume: 0.45, muffle: 1800 }), c.cabin || {})
+  c.keys = { honk: (c.keys && c.keys.honk) || (d.keys && d.keys.honk) || 'lalt' }
+  if (!c.horns || typeof c.horns !== 'object' || Array.isArray(c.horns) || !Object.keys(c.horns).length) c.horns = clone(d.horns)
+  // Lua doesn't keep the file's order: the default horn first, then the file's order where it has them
+  const fileOrder = Object.keys(d.horns || {})
+  const order = [c.default, ...Object.keys(c.horns).sort((a, b) => {
+    const ia = fileOrder.indexOf(a), ib = fileOrder.indexOf(b)
+    return (ia < 0 ? 1e9 : ia) - (ib < 0 ? 1e9 : ib)
+  })].filter((id, i, a) => c.horns[id] && a.indexOf(id) === i)
+  c.horns = Object.fromEntries(order.map((id) => [id, c.horns[id]]))
+  if (!c.horns[c.default]) c.default = Object.keys(c.horns)[0]
+  if (!c.models || typeof c.models !== 'object' || Array.isArray(c.models)) c.models = {}
+  for (const [m, id] of Object.entries(c.models)) if (!c.horns[id]) delete c.models[m]
+  for (const h of Object.values(c.horns)) {
+    fill(h, HORN_SHAPE)
+    if (!h.units.length) h.units = clone(HORN_SHAPE.units)
+    for (const u of h.units) { u.f = u.f || 400; if (u.level === undefined) u.level = 1 }
+  }
+  return c
+}
+function save() { try { localStorage.setItem(STORE, JSON.stringify(CFG)) } catch (e) { } }
+
+// ---------------------------------------------------------------------------------------------
+// the Lua side
+// ---------------------------------------------------------------------------------------------
+let host = null
+function startHost() {
+  const libSrc = $('src-wasmoon').textContent, hostSrc = $('src-host').textContent
+  const bin = Uint8Array.from(atob($('src-wasm').textContent.trim()), (c) => c.charCodeAt(0))
+  const files = [...document.querySelectorAll('script[type="text/x-lua"]')].map((s) => ({ name: s.dataset.name, src: s.textContent }))
+  const boot = '\nconst __h = HornHost((m, t) => postMessage(m, t || []), self.wasmoon)\nonmessage = (e) => __h(e.data)\n'
+  try {
+    const w = new Worker(URL.createObjectURL(new Blob([libSrc, '\n', hostSrc, boot], { type: 'text/javascript' })))
+    w.onmessage = (e) => onHost(e.data)
+    w.onerror = (e) => status('Worker error: ' + e.message, 'err')
+    host = (m, t) => w.postMessage(m, t || [])
+  } catch (e) {
+    // workers blocked (some browsers on file://): run on the page, it just pauses while rendering
+    ;(0, eval)(libSrc + '\n' + hostSrc + '\nwindow.HornHost = HornHost')
+    const h = window.HornHost((m) => setTimeout(() => onHost(m)), window.wasmoon)
+    host = (m) => setTimeout(() => h(m))
+  }
+  host({ type: 'init', files, wasm: bin.buffer }, [bin.buffer])
+}
+
+const rendered = {}   // id -> { key, data, sr, loopStart, buffer }
+const asked = {}      // id -> key last sent
+let inside = false
+// the release is played, not rendered: it isn't part of the key
+function renderKey(id) {
+  const h = Object.assign({}, CFG.horns[id])
+  delete h.release; delete h.level; delete h.name
+  return JSON.stringify([h, CFG.sampleRate, inside && CFG.cabin.muffle])
+}
+function requestRender(id) {
+  if (!CFG.horns[id]) return
+  const key = renderKey(id)
+  if ((rendered[id] && rendered[id].key === key) || asked[id] === key) return
+  asked[id] = key
+  host({ type: 'render', id, key, inside, horn: CFG.horns[id], cfg: { sampleRate: CFG.sampleRate, cabin: CFG.cabin } })
+}
+let renderTimer = null
+function scheduleRender(ids) {
+  clearTimeout(renderTimer)
+  renderTimer = setTimeout(() => { for (const id of ids) requestRender(id) }, 150)
+}
+
+function onHost(m) {
+  if (m.type === 'error') { status('Lua error: ' + m.text, 'err'); return }
+  if (m.type === 'ready') {
+    DEFAULTS = m.defaults
+    let saved = null
+    try { saved = JSON.parse(localStorage.getItem(STORE) || 'null') } catch (e) { }
+    CFG = normalize(saved || clone(DEFAULTS))
+    SEL = Object.keys(CFG.horns)[0] || null
+    status(saved ? 'Ready (your saved edits)' : 'Ready')
+    refreshAll()
+    if (SEL) requestRender(SEL)
+    for (const id of Object.keys(CFG.horns)) requestRender(id)
+    return
+  }
+  if (m.type === 'rendered') {
+    if (!CFG.horns[m.id] || renderKey(m.id) !== m.key) return
+    rendered[m.id] = { key: m.key, data: m.data, sr: m.sr, loopStart: m.loopStart, buffer: null }
+    if (m.id === SEL) {
+      status(`${CFG.horns[m.id].name}: attack ${(m.loopStart / m.sr).toFixed(3)} s, then a ${((m.data.length - m.loopStart) / m.sr).toFixed(2)} s loop, rendered in ${m.ms} ms`)
+      drawWave()
+    }
+    onRendered(m.id)
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// playback: the attack, the loop while held, a fade (with its pitch fall) on letting go
+// ---------------------------------------------------------------------------------------------
+let ctx = null, master = null
+let voice = null        // { id, src, gain } or { id, waiting: true }
+let wantHeld = false    // the honk key / button is down
+
+function audio() {
+  if (!ctx) {
+    ctx = new AudioContext()
+    master = ctx.createGain()
+    master.gain.value = +$('monitor').value
+    master.connect(ctx.destination)
+  }
+  if (ctx.state === 'suspended') ctx.resume()
+  return ctx
+}
+function bufferOf(id) {
+  const r = rendered[id]
+  if (!r) return null
+  if (!r.buffer) {
+    r.buffer = ctx.createBuffer(1, r.data.length, r.sr)
+    r.buffer.copyToChannel(r.data, 0)
+  }
+  return r.buffer
+}
+function levelOf(id) { const h = CFG.horns[id]; return CFG.volume * (h ? h.level : 1) * (inside ? CFG.cabin.volume : 1) }
+
+// fromLoop: start at the loop (a re-rendered horn swapped in while held), not the attack
+function startVoice(id, fromLoop) {
+  const buf = bufferOf(id)
+  if (!buf) { requestRender(id); return { id, waiting: true } }
+  const r = rendered[id]
+  const now = ctx.currentTime
+  const src = ctx.createBufferSource()
+  src.buffer = buf
+  src.loop = true
+  src.loopStart = r.loopStart / r.sr
+  src.loopEnd = buf.duration
+  const gain = ctx.createGain()
+  gain.gain.setValueAtTime(0, now)
+  gain.gain.linearRampToValueAtTime(levelOf(id), now + (fromLoop ? 0.03 : 0.003))
+  src.connect(gain).connect(master)
+  src.start(now, fromLoop ? src.loopStart : 0)
+  return { id, src, gain }
+}
+function releaseVoice(v, quick) {
+  if (!v || v.waiting) return
+  const h = CFG.horns[v.id] || HORN_SHAPE
+  const fade = quick ? 0.03 : Math.max(h.release.time, 0.005)
+  const now = ctx.currentTime
+  v.gain.gain.cancelScheduledValues(now)
+  v.gain.gain.setValueAtTime(v.gain.gain.value, now)
+  v.gain.gain.linearRampToValueAtTime(0, now + fade)
+  if (!quick && h.release.pitch !== 1) {
+    v.src.playbackRate.setValueAtTime(1, now)
+    v.src.playbackRate.linearRampToValueAtTime(Math.max(h.release.pitch, 0.05), now + fade)
+  }
+  v.src.stop(now + fade + 0.05)
+}
+function press() {
+  if (!SEL || wantHeld) return
+  wantHeld = true
+  audio()
+  releaseVoice(voice, true)
+  voice = startVoice(SEL)
+  showSounding()
+}
+function letGo() {
+  if (!wantHeld) return
+  wantHeld = false
+  releaseVoice(voice)
+  voice = null
+  showSounding()
+}
+// a horn re-rendered while held: swapped in at its loop
+function onRendered(id) {
+  if (!voice || voice.id !== id || !ctx || !wantHeld) return
+  const wasWaiting = voice.waiting
+  releaseVoice(voice, true)
+  voice = startVoice(id, !wasWaiting)
+  showSounding()
+}
+function retargetLevel() {
+  if (voice && !voice.waiting && wantHeld) voice.gain.gain.setTargetAtTime(levelOf(voice.id), ctx.currentTime, 0.02)
+}
+function showSounding() {
+  const s = $('sounding')
+  s.textContent = voice ? (CFG.horns[voice.id] ? CFG.horns[voice.id].name : voice.id) + (voice.waiting ? ' (rendering)' : '') : 'silent'
+  s.className = voice ? 'on' : ''
+  $('honk').className = voice ? 'on' : ''
+}
+
+$('honk').onpointerdown = (e) => { $('honk').setPointerCapture(e.pointerId); press() }
+$('honk').onpointerup = letGo
+$('honk').onpointercancel = letGo
+let beepTimers = []
+$('beep').onclick = () => {
+  for (const t of beepTimers) clearTimeout(t)
+  letGo()
+  beepTimers = [0, 260].flatMap((at) => [setTimeout(press, at), setTimeout(letGo, at + 130)])
+}
+$('inside').onchange = () => {
+  inside = $('inside').checked
+  retargetLevel()
+  for (const id of Object.keys(CFG.horns)) requestRender(id)
+}
+$('monitor').oninput = () => { if (master) master.gain.value = +$('monitor').value }
+window.addEventListener('blur', letGo)
+
+// keyboard, as in game: the honk key held down. The game's names (lalt, rshift, lcontrol...) are
+// matched to the browser's (Alt, Shift, Control)
+const GAME_TO_PAGE = { lalt: 'alt', ralt: 'alt', lshift: 'shift', rshift: 'shift', lcontrol: 'control', rcontrol: 'control', ctrl: 'control', enter: 'enter', space: ' ' }
+const pageKey = (name) => { const n = String(name).toLowerCase(); return GAME_TO_PAGE[n] || n }
+function typing() { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') }
+document.addEventListener('keydown', (e) => {
+  if (!CFG || e.key.toLowerCase() !== pageKey(CFG.keys.honk)) return
+  if (typing() && e.key.length === 1) return
+  e.preventDefault()   // (Alt alone would otherwise move focus to the browser's menu)
+  if (!e.repeat) press()
+})
+document.addEventListener('keyup', (e) => {
+  if (!CFG || e.key.toLowerCase() !== pageKey(CFG.keys.honk)) return
+  e.preventDefault()
+  letGo()
+})
+function showKey() {
+  const k = pageKey(CFG.keys.honk)
+  $('keyName').textContent = k === ' ' ? 'Space' : k.charAt(0).toUpperCase() + k.slice(1)
+}
+
+// ---------------------------------------------------------------------------------------------
+// controls
+// ---------------------------------------------------------------------------------------------
+function fmt(v, step) {
+  const d = step >= 1 ? 0 : Math.min(4, Math.ceil(-Math.log10(step)))
+  return (+v).toFixed(d)
+}
+// a slider + number box bound to obj[key]; o: { min, max, step, log, unit, change }
+function field(label, obj, key, o) {
+  const toSlider = (v) => o.log ? Math.log(v / o.min) / Math.log(o.max / o.min) * 1000 : v
+  const fromSlider = (s) => o.log ? o.min * Math.pow(o.max / o.min, s / 1000) : s
+  const range = el('input', { type: 'range', min: o.log ? 0 : o.min, max: o.log ? 1000 : o.max, step: o.log ? 1 : o.step, value: toSlider(obj[key]) })
+  const num = el('input', { type: 'number', min: o.min, max: o.max, step: o.step, value: fmt(obj[key], o.step) })
+  range.oninput = () => {
+    let v = +fromSlider(+range.value)
+    v = Math.round(v / o.step) * o.step
+    obj[key] = +fmt(v, o.step)
+    num.value = fmt(obj[key], o.step)
+    o.change()
+  }
+  num.oninput = () => {
+    const v = parseFloat(num.value)
+    if (!Number.isFinite(v)) return
+    obj[key] = v
+    range.value = toSlider(Math.min(Math.max(v, o.min), o.max))
+    o.change()
+  }
+  return el('div', { class: 'row' }, el('label', null, label), range, num, el('span', { class: 'unit' }, o.unit || ''))
+}
+function hornSelect(value, set) {
+  const s = el('select', { onchange: () => { set(s.value); onGlobal() } })
+  for (const [id, h] of Object.entries(CFG.horns)) s.append(el('option', { value: id, textContent: h.name }))
+  s.value = value
+  return s
+}
+
+function onHorn() { save(); updateExport(); if (SEL) scheduleRender([SEL]) }
+function onHornPlayed() { save(); updateExport(); retargetLevel() }   // level / release: played, not rendered
+function onGlobal() { save(); updateExport(); retargetLevel() }
+function onGlobalRender() { save(); updateExport(); scheduleRender(Object.keys(CFG.horns)) }
+// the fall-off in metres, for the engine's default range (250 m for an 85 dB car, scaled by the level as in game)
+function onFalloff() { onGlobal(); showFalloff() }
+function showFalloff() {
+  const hint = $('falloffHint')
+  if (!hint) return
+  const range = 250 * Math.max(CFG.soundLevel - 50, 1) / 35, d = CFG.distance
+  hint.textContent = `In shares of the engine's audible range (audio_engine_range, ${Math.round(range)} m at this sound level), on top of the game's own fade: `
+    + `full volume up to ${Math.round(d.full * range)} m, ${Math.round(d.volume * 100)}% at ${Math.round(d.at * range)} m and still falling, silent from ${Math.round(d.silent * range)} m.`
+}
+
+// ---------------------------------------------------------------------------------------------
+// left: horns and the in-game settings
+// ---------------------------------------------------------------------------------------------
+function refreshAll() { buildHornList(); buildGlobals(); buildEditor(); updateExport(); showKey() }
+
+function buildHornList() {
+  const list = $('hornList')
+  list.replaceChildren()
+  for (const [id, h] of Object.entries(CFG.horns)) {
+    list.append(el('div', { class: 'horn' + (id === SEL ? ' sel' : ''), onclick: () => select(id) },
+      el('span', null, h.name + (id === CFG.default ? '  (default)' : '')), el('span', { class: 'id' }, id)))
+  }
+}
+function select(id) {
+  SEL = id
+  buildHornList()
+  buildEditor()
+  requestRender(id)
+}
+function uniqueId(base) {
+  base = (base.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'horn').replace(/^(\d)/, 'h$1')
+  let id = base, i = 2
+  while (CFG.horns[id]) id = base + '_' + i++
+  return id
+}
+$('addHorn').onclick = () => {
+  const id = uniqueId('horn')
+  CFG.horns[id] = fill({ name: 'New horn' }, HORN_SHAPE)
+  save(); select(id); buildGlobals(); updateExport()
+}
+$('dupHorn').onclick = () => {
+  if (!SEL) return
+  const h = clone(CFG.horns[SEL])
+  h.name += ' copy'
+  const id = uniqueId(SEL + '_copy')
+  CFG.horns[id] = h
+  save(); select(id); buildGlobals(); updateExport()
+}
+$('delHorn').onclick = () => {
+  if (!SEL || Object.keys(CFG.horns).length <= 1) return
+  const id = SEL
+  delete CFG.horns[id]
+  for (const [m, h] of Object.entries(CFG.models)) if (h === id) delete CFG.models[m]
+  if (CFG.default === id) CFG.default = Object.keys(CFG.horns)[0]
+  if (voice && voice.id === id) letGo()
+  save()
+  SEL = Object.keys(CFG.horns)[0]
+  refreshAll()
+}
+
+function buildGlobals() {
+  const g = $('globals')
+  g.replaceChildren(
+    field('Volume', CFG, 'volume', { min: 0, max: 1, step: 0.01, change: onGlobal }),
+    field('Sound level', CFG, 'soundLevel', { min: 60, max: 140, step: 1, unit: 'dB', change: onFalloff }),
+    el('p', { class: 'hint' }, 'How far it carries in game (Source sound level). The engines play at 85, high-powered cars at 92.'),
+    field('Doppler', CFG, 'doppler', { min: 0, max: 2, step: 0.05, unit: '×', change: onGlobal }),
+    el('p', { class: 'hint' }, 'Pitch shift of passing cars: 0 = off, 1 = real (players scale it with car_horn_doppler).'),
+    el('h3', null, 'Fall-off with distance'),
+    field('Full volume to', CFG.distance, 'full', { min: 0.01, max: 0.5, step: 0.01, unit: 'range', change: onFalloff }),
+    field('Down to', CFG.distance, 'volume', { min: 0.05, max: 1, step: 0.01, unit: '×', change: onFalloff }),
+    field('at', CFG.distance, 'at', { min: 0.1, max: 1, step: 0.01, unit: 'range', change: onFalloff }),
+    field('Silent at', CFG.distance, 'silent', { min: 0.2, max: 2, step: 0.01, unit: 'range', change: onFalloff }),
+    el('p', { class: 'hint', id: 'falloffHint' }),
+    (() => {
+      const s = el('select', { onchange: () => { CFG.sampleRate = +s.value; onGlobalRender() } },
+        el('option', { value: 44100, textContent: '44100 Hz' }), el('option', { value: 22050, textContent: '22050 Hz (half the memory)' }))
+      s.value = CFG.sampleRate
+      return el('div', { class: 'row' }, el('label', null, 'Sample rate'), s)
+    })(),
+    el('h3', null, 'Which horn a car has'),
+    el('div', { class: 'row' }, el('label', null, 'Default'), hornSelect(CFG.default, (v) => { CFG.default = v; buildHornList() })),
+    buildModels(),
+    el('h3', null, 'Inside the car (driver and passengers)'),
+    field('Volume inside', CFG.cabin, 'volume', { min: 0, max: 1, step: 0.01, unit: '×', change: onGlobal }),
+    field('Muffled above', CFG.cabin, 'muffle', { min: 300, max: 8000, step: 10, log: true, unit: 'Hz', change: onGlobalRender }),
+    el('p', { class: 'hint' }, 'The car body between you and the horn. Tick "Inside the car" at the top to hear it.'),
+    el('h3', null, 'Key (players can rebind)'),
+    (() => {
+      const i = el('input', { type: 'text', value: CFG.keys.honk, style: 'width:80px', oninput: () => { CFG.keys.honk = i.value.trim().toLowerCase(); showKey(); onGlobal() } })
+      return el('div', { class: 'row' }, el('label', null, 'Honk key'), i)
+    })(),
+    el('p', { class: 'hint' }, 'A key name as the game knows it: lalt (left Alt), ralt, h, kp_enter… Held down to honk, here as in game.'),
+  )
+  showFalloff()
+}
+// the horn per car model (lower-case model path)
+function buildModels() {
+  const box = el('div', { class: 'list' })
+  const render = () => {
+    box.replaceChildren(el('div', { class: 'hint', style: 'margin:4px 0 0' }, 'Per car model (overrides the default):'))
+    for (const [model, id] of Object.entries(CFG.models)) {
+      const m = el('input', { type: 'text', value: model, style: 'flex:1;min-width:0', onchange: () => {
+        const v = m.value.trim().toLowerCase()
+        delete CFG.models[model]
+        if (v) CFG.models[v] = id
+        onGlobal(); render()
+      } })
+      box.append(el('div', null, m, hornSelect(id, (v) => { CFG.models[model] = v }),
+        el('button', { class: 'small', textContent: '×', onclick: () => { delete CFG.models[model]; onGlobal(); render() } })))
+    }
+    box.append(el('div', null, el('button', { class: 'small', textContent: '+ Car model', onclick: () => {
+      let k = 'models/tdmcars/new.mdl', i = 2
+      while (CFG.models[k]) k = 'models/tdmcars/new' + i++ + '.mdl'
+      CFG.models[k] = SEL || CFG.default; onGlobal(); render()
+    } })))
+  }
+  render()
+  return box
+}
+
+// ---------------------------------------------------------------------------------------------
+// right: the selected horn
+// ---------------------------------------------------------------------------------------------
+const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+function noteName(f) {
+  if (!(f > 0)) return ''
+  const m = 69 + 12 * Math.log2(f / 440)
+  const r = Math.round(m), cents = Math.round((m - r) * 100)
+  return NOTES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1) + (cents ? (cents > 0 ? ' +' : ' ') + cents + '¢' : '')
+}
+
+function buildEditor() {
+  const ed = $('editor')
+  ed.replaceChildren()
+  if (!SEL) return
+  const h = CFG.horns[SEL]
+  const name = el('input', { type: 'text', value: h.name, style: 'width:200px', oninput: () => { h.name = name.value; save(); buildHornList(); buildGlobals(); updateExport() } })
+
+  const unitsSec = el('section', null,
+    el('h2', null, 'Horn units'),
+    el('div', { class: 'row' }, el('label', null, 'Name'), name, el('span', { class: 'id' }, 'id: ' + SEL)),
+    el('div', { id: 'units' }),
+    el('div', { class: 'bar', style: 'margin-top:8px' },
+      el('button', { class: 'small', textContent: '+ Unit', onclick: () => {
+        const last = h.units[h.units.length - 1] || HORN_SHAPE.units[0]
+        h.units.push({ f: +(last.f * Math.pow(2, 4 / 12)).toFixed(1), level: last.level })
+        buildUnits(); onHorn()
+      } }),
+      el('span', { class: 'sep' }),
+      'Transpose', (() => { const i = el('input', { type: 'number', value: 1, step: 0.5, style: 'width:60px' }); return el('span', { class: 'bar' }, i,
+        el('button', { class: 'small', textContent: 'semitones up', onclick: () => { const k = Math.pow(2, +i.value / 12); for (const u of h.units) u.f = +(u.f * k).toFixed(1); buildUnits(); onHorn() } }),
+        el('button', { class: 'small', textContent: 'down', onclick: () => { const k = Math.pow(2, -i.value / 12); for (const u of h.units) u.f = +(u.f * k).toFixed(1); buildUnits(); onHorn() } })) })(),
+    ),
+    el('p', { class: 'hint' }, 'Each unit is one horn sounding its note. A car\'s pair is usually a major third apart (4 semitones: e.g. 415 + 520 Hz), a truck\'s air horn three bells in a chord. Detune a unit a few Hz for a beating, cheaper sound.'),
+  )
+
+  const harm = el('div', { class: 'harm' })
+  const harmSec = el('section', null,
+    el('h2', null, 'Tone colour (harmonics)', el('span', { class: 'bar' },
+      ...Object.entries(HARMONIC_PRESETS).map(([n, f]) => el('button', { class: 'small', textContent: n, onclick: () => { h.harmonics = f(); buildEditor(); onHorn() } })))),
+    harm,
+    el('p', { class: 'hint' }, 'Level of each harmonic of the note (1 = the note itself). A diaphragm horn is rich: all of them, falling slowly. Fewer = a smoother, more expensive horn.'),
+  )
+  while (h.harmonics.length < 16) h.harmonics.push(0)
+  h.harmonics.forEach((v, i) => {
+    const s = el('input', { type: 'range', min: 0, max: 1, step: 0.01, value: v, oninput: () => { h.harmonics[i] = +s.value; onHorn() } })
+    harm.append(el('div', null, s, el('span', null, i + 1)))
+  })
+
+  const grit = el('section', null,
+    el('h2', null, 'Grit, wobble, level'),
+    el('div', { class: 'grid2' },
+      el('div', null,
+        field('Rasp', h, 'rasp', { min: 0, max: 1.5, step: 0.01, change: onHorn }),
+        el('p', { class: 'hint' }, 'Noise each cycle where the diaphragm strikes its stop: 0 = clean, more = a cheap, raspy horn.'),
+        field('Air', h, 'air', { min: 0, max: 0.5, step: 0.005, change: onHorn }),
+        el('p', { class: 'hint' }, 'A rush of air under the tone, there from the moment it\'s pressed (an air horn).'),
+        field('Horn level', h, 'level', { min: 0, max: 1, step: 0.01, change: onHornPlayed }),
+      ),
+      el('div', null,
+        field('Flutter rate', h.flutter, 'rate', { min: 0, max: 30, step: 0.5, unit: 'Hz', change: onHorn }),
+        field('Flutter depth', h.flutter, 'depth', { min: 0, max: 60, step: 1, unit: '¢', change: onHorn }),
+        el('p', { class: 'hint' }, 'A regular pitch wobble (an air horn\'s reed). The rate is rounded to whole cycles of the 2 s loop.'),
+      ),
+    ),
+    el('h3', null, 'Life (what keeps it from sounding synthetic)'),
+    el('div', { class: 'grid2' },
+      el('div', null,
+        field('Jitter rate', h.jitter, 'rate', { min: 0, max: 30, step: 0.5, unit: 'Hz', change: onHorn }),
+        field('Jitter depth', h.jitter, 'depth', { min: 0, max: 50, step: 1, unit: '¢', change: onHorn }),
+        el('p', { class: 'hint' }, 'Each unit\'s pitch drifts on its own, at random: no real horn holds dead still.'),
+      ),
+      el('div', null,
+        field('Shimmer', h, 'shimmer', { min: 0, max: 0.5, step: 0.01, change: onHorn }),
+        field('Grille', h, 'grille', { min: 0, max: 1, step: 0.01, change: onHorn }),
+        el('p', { class: 'hint' }, 'Shimmer: each cycle a little louder or softer than the last. Grille: the bumper and grille in front of the horn colour it with short reflections (0 = in free air, as an air horn on the cab roof).'),
+      ),
+      el('div', null,
+        field('Roughness', h, 'roughness', { min: 0, max: 100, step: 1, unit: '¢', change: onHorn }),
+        el('p', { class: 'hint' }, 'Each cycle a little longer or shorter than the last: a hard-driven diaphragm\'s blat, what makes an air horn go "BRAAP" instead of sounding like a chord. Stronger at first while pressing (the ragged start).'),
+      ),
+      el('div', null,
+        field('Growl', h, 'growl', { min: 0, max: 0.8, step: 0.01, change: onHorn }),
+        el('p', { class: 'hint' }, 'Every other cycle stronger: a rumble an octave under the note.'),
+      ),
+    ),
+  )
+  const pressSec = el('section', null,
+    el('h2', null, 'Press and let go'),
+    el('div', { class: 'grid2' },
+      el('div', null,
+        field('Attack time', h.attack, 'time', { min: 0, max: 1, step: 0.005, unit: 's', change: onHorn }),
+        field('Starts at pitch', h.attack, 'pitch', { min: 0.3, max: 1.5, step: 0.01, unit: '×', change: onHorn }),
+        field('Attack curve', h.attack, 'curve', { min: 0.1, max: 4, step: 0.05, change: onHorn }),
+        el('p', { class: 'hint' }, 'On pressing: the horn rises to its level and scoops up to pitch. Curve 1 = even, below 1 = fast at first, above 1 = slow at first (a klaxon\'s "a-ooo").'),
+      ),
+      el('div', null,
+        field('Release time', h.release, 'time', { min: 0.005, max: 1, step: 0.005, unit: 's', change: onHornPlayed }),
+        field('Falls to pitch', h.release, 'pitch', { min: 0.3, max: 1, step: 0.01, unit: '×', change: onHornPlayed }),
+        el('p', { class: 'hint' }, 'On letting go: a fade while the pitch falls (the diaphragm winding down). Try "Beep beep" for taps.'),
+      ),
+    ),
+    el('canvas', { id: 'wave' }),
+    el('p', { class: 'hint' }, 'Left: the start of the sound (amber line = where the loop begins). Right: 25 ms of the loop, the waveform.'),
+  )
+  const sp = h.speaker
+  const speakerSec = el('section', null,
+    el('h2', null, 'Speaker'),
+    el('div', { class: 'grid2' },
+      el('div', null,
+        field('Low cut', sp, 'highpass', { min: 20, max: 3000, step: 1, log: true, unit: 'Hz', change: onHorn }),
+        field('High cut', sp, 'lowpass', { min: 500, max: 20000, step: 1, log: true, unit: 'Hz', change: onHorn }),
+        field('Drive', sp, 'drive', { min: 0, max: 10, step: 0.05, change: onHorn }),
+      ),
+      el('div', null,
+        field('Horn resonance', sp, 'resonance', { min: 100, max: 6000, step: 1, log: true, unit: 'Hz', change: onHorn }),
+        field('Resonance width (Q)', sp, 'resonanceQ', { min: 0.1, max: 10, step: 0.05, change: onHorn }),
+        field('Resonance boost', sp, 'resonanceGain', { min: -12, max: 24, step: 0.5, unit: 'dB', change: onHorn }),
+      ),
+    ),
+    el('p', { class: 'hint' }, 'Drive = how hard the horn is pushed (0 = clean, more = harsher). The resonance is the horn trumpet\'s own peak: around 2-3 kHz a disc horn\'s bark, lower a snail horn\'s warmth.'),
+  )
+  ed.append(unitsSec, harmSec, grit, pressSec, speakerSec)
+  buildUnits()
+  drawWave()
+}
+
+const HARMONIC_PRESETS = {
+  Disc: () => [0.5, 0.6, 0.75, 0.9, 1, 1, 0.85, 0.7, 0.55, 0.42, 0.32, 0.25, 0.19, 0.15, 0.11, 0.08],
+  Trumpet: () => [0.85, 1, 0.9, 0.75, 0.6, 0.5, 0.4, 0.32, 0.25, 0.2, 0.15, 0.12],
+  'Air horn': () => [0.8, 1, 0.95, 0.9, 0.82, 0.75, 0.68, 0.6, 0.53, 0.47, 0.42, 0.37, 0.33, 0.29, 0.26, 0.23, 0.2, 0.18, 0.16, 0.14, 0.12, 0.1, 0.09, 0.08],
+  Brass: () => Array.from({ length: 16 }, (_, i) => +(1 / (i + 1)).toFixed(3)),
+  Square: () => Array.from({ length: 16 }, (_, i) => ((i + 1) % 2 ? +(1 / (i + 1)).toFixed(3) : 0)),
+  Sine: () => [1],
+}
+
+function buildUnits() {
+  const h = CFG.horns[SEL]
+  const box = $('units')
+  if (!box) return
+  const n = h.units.length
+  const rows = h.units.map((u, i) => {
+    const prev = h.units[i - 1]
+    const iv = prev && prev.f > 0 && u.f > 0 ? 12 * Math.log2(u.f / prev.f) : 0
+    const f = el('input', { type: 'number', step: 1, min: 20, value: u.f, onchange: () => {
+      const v = parseFloat(f.value)
+      if (!Number.isFinite(v)) return
+      u.f = Math.max(20, v); buildUnits(); onHorn()
+    } })
+    const ivIn = el('input', { type: 'number', step: 0.5, value: iv.toFixed(2), disabled: !prev, onchange: () => {
+      const v = parseFloat(ivIn.value)
+      if (!Number.isFinite(v)) return
+      u.f = +(prev.f * Math.pow(2, v / 12)).toFixed(1); buildUnits(); onHorn()
+    } })
+    const lv = el('input', { type: 'range', min: 0, max: 1, step: 0.01, value: u.level, style: 'width:120px', oninput: () => { u.level = +lv.value; onHorn() } })
+    return el('tr', null,
+      el('td', null, String(i + 1)), el('td', null, f), el('td', { class: 'note' }, noteName(u.f)), el('td', null, ivIn),
+      el('td', null, lv),
+      el('td', null, el('button', { class: 'small', textContent: '×', disabled: n < 2, onclick: () => { h.units.splice(i, 1); buildUnits(); onHorn() } })))
+  })
+  box.replaceChildren(el('table', null,
+    el('tr', null, ...['#', 'Pitch (Hz)', 'Note', 'Interval from previous (st)', 'Level', ''].map((x) => el('th', null, x))),
+    ...rows))
+}
+
+// the rendered sound: its start (min/max per column) and a close-up of the loop's waveform
+function drawWave() {
+  const cv = $('wave')
+  if (!cv || !SEL) return
+  const dpr = window.devicePixelRatio || 1
+  cv.width = cv.clientWidth * dpr
+  cv.height = cv.clientHeight * dpr
+  const c = cv.getContext('2d')
+  c.setTransform(dpr, 0, 0, dpr, 0, 0)
+  const w = cv.clientWidth, hgt = cv.clientHeight, mid = hgt / 2, amp = hgt / 2 - 12
+  c.clearRect(0, 0, w, hgt)
+  c.font = '11px system-ui'
+  const r = rendered[SEL]
+  if (!r || r.key !== renderKey(SEL)) { c.fillStyle = '#8d99a6'; c.fillText('rendering…', 10, 18); return }
+  const d = r.data, sr = r.sr
+  const split = Math.round(w * 0.62)
+  // the start: 0.6 s or the attack + a bit, whichever is longer
+  const span = Math.min(d.length, Math.round(Math.max(0.6, r.loopStart / sr + 0.2) * sr))
+  c.fillStyle = '#4ea1ff'
+  for (let x = 0; x < split - 6; x++) {
+    const a = Math.floor(x / (split - 6) * span), b = Math.max(a + 1, Math.floor((x + 1) / (split - 6) * span))
+    let lo = 1, hi = -1
+    for (let i = a; i < b; i++) { lo = Math.min(lo, d[i]); hi = Math.max(hi, d[i]) }
+    c.fillRect(x, mid - hi * amp, 1, Math.max(1, (hi - lo) * amp))
+  }
+  const lx = r.loopStart / span * (split - 6)
+  c.strokeStyle = '#ffb03a'; c.beginPath(); c.moveTo(lx, 4); c.lineTo(lx, hgt - 4); c.stroke()
+  c.fillStyle = '#8d99a6'
+  c.fillText('0', 3, hgt - 4)
+  c.fillText((span / sr).toFixed(2) + ' s', split - 46, hgt - 4)
+  c.fillText('loop', lx + 4, 14)
+  // the close-up
+  c.strokeStyle = '#2f3843'; c.beginPath(); c.moveTo(split, 0); c.lineTo(split, hgt); c.stroke()
+  const from = r.loopStart + Math.round(0.5 * sr), count = Math.round(0.025 * sr)
+  c.strokeStyle = '#4cd18a'; c.lineWidth = 1.5; c.beginPath()
+  for (let k = 0; k < count; k++) {
+    const x = split + 6 + k / count * (w - split - 12), y = mid - d[(from + k) % d.length] * amp
+    k ? c.lineTo(x, y) : c.moveTo(x, y)
+  }
+  c.stroke(); c.lineWidth = 1
+  c.fillStyle = '#8d99a6'
+  c.fillText('25 ms', w - 40, hgt - 4)
+}
+window.addEventListener('resize', () => drawWave())
+
+// ---------------------------------------------------------------------------------------------
+// export: the settings file, written the way the Lua file is
+// ---------------------------------------------------------------------------------------------
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'sampleRate', 'doppler', 'distance', 'cabin', 'keys', 'default', 'models', 'horns']
+const HORN_ORDER = ['name', 'level', 'units', 'harmonics', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'attack', 'release', 'speaker']
+const SUB_ORDER = {
+  units: ['f', 'level'], flutter: ['rate', 'depth'], jitter: ['rate', 'depth'], attack: ['time', 'pitch', 'curve'], release: ['time', 'pitch'],
+  speaker: ['highpass', 'lowpass', 'drive', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['honk'], cabin: ['volume', 'muffle'], distance: ['full', 'at', 'volume', 'silent'],
+}
+const luaKey = (k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '[' + JSON.stringify(k) + ']')
+function luaNum(v) { return String(+(+v).toFixed(4)) }
+function luaScalar(v) {
+  if (typeof v === 'number') return luaNum(v)
+  if (typeof v === 'boolean') return String(v)
+  return JSON.stringify(String(v))
+}
+function luaInline(obj, order) {
+  const keys = order ? order.filter((k) => k in obj) : Object.keys(obj)
+  return '{ ' + keys.map((k) => luaKey(k) + ' = ' + luaScalar(obj[k])).join(', ') + ' }'
+}
+function exportLua() {
+  const tab = (n) => '\t'.repeat(n)
+  const out = ['CAR_HORN.CONFIG = {']
+  for (const k of GLOBAL_ORDER) {
+    const v = CFG[k]
+    if (k === 'horns') {
+      out.push(tab(1) + 'horns = {')
+      for (const [id, h] of Object.entries(CFG.horns)) {
+        out.push(tab(2) + luaKey(id) + ' = {')
+        for (const hk of HORN_ORDER) {
+          const hv = h[hk]
+          if (hk === 'units') {
+            out.push(tab(3) + 'units = {')
+            for (const u of hv) out.push(tab(4) + luaInline(u, SUB_ORDER.units) + ',')
+            out.push(tab(3) + '},')
+          } else if (hk === 'harmonics') {
+            const list = hv.slice()
+            while (list.length > 1 && !list[list.length - 1]) list.pop()
+            out.push(tab(3) + 'harmonics = { ' + list.map(luaNum).join(', ') + ' },')
+          } else if (hv && typeof hv === 'object') {
+            out.push(tab(3) + hk + ' = ' + luaInline(hv, SUB_ORDER[hk]) + ',')
+          } else {
+            out.push(tab(3) + hk + ' = ' + luaScalar(hv) + ',')
+          }
+        }
+        out.push(tab(2) + '},')
+      }
+      out.push(tab(1) + '},')
+    } else if (k === 'models') {
+      const models = Object.keys(v).sort()
+      if (!models.length) { out.push(tab(1) + 'models = {},'); continue }
+      out.push(tab(1) + 'models = {')
+      for (const m of models) out.push(tab(2) + luaKey(m) + ' = ' + luaScalar(v[m]) + ',')
+      out.push(tab(1) + '},')
+    } else if (v && typeof v === 'object') {
+      out.push(tab(1) + k + ' = ' + luaInline(v, SUB_ORDER[k]) + ',')
+    } else {
+      out.push(tab(1) + k + ' = ' + luaScalar(v) + ',')
+    }
+  }
+  out.push('}')
+  return CONFIG_HEADER + out.join('\n') + '\n'
+}
+function updateExport() { if (CFG) $('exportLua').value = exportLua() }
+async function copy(text, what) {
+  try { await navigator.clipboard.writeText(text); status(what + ' copied') } catch (e) {
+    $('exportLua').value = text; $('exportLua').select(); document.execCommand('copy'); status(what + ' copied')
+  }
+}
+$('copyLua').onclick = () => copy(exportLua(), 'Settings file')
+$('copyJson').onclick = () => copy(JSON.stringify(CFG), 'JSON')
+function loadSettings(c, what) {
+  CFG = normalize(c)
+  save()
+  SEL = Object.keys(CFG.horns)[0]
+  letGo()
+  refreshAll()
+  for (const id of Object.keys(CFG.horns)) requestRender(id)
+  status(what)
+}
+$('reset').onclick = () => { if (DEFAULTS) loadSettings(clone(DEFAULTS), "Back to the file's settings") }
+$('loadJson').onclick = () => {
+  try { loadSettings(JSON.parse($('importJson').value), 'Loaded') } catch (e) { status('Not valid JSON: ' + e.message, 'err') }
+}
+
+startHost()
+</script>
+</body>
+</html>
