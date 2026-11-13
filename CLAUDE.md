@@ -244,7 +244,10 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   sampleRate, `lightTones` { CODE 2, CODE 3 }, `cycle`, `schemes[name]` { lightTones, cycle } (fire, medical; the studio keeps them
   through its export but plays the police rules), `cabin` { volume, muffle Hz }, `keys` { tone }, `tones[id]` (pattern of
   points { f, glide, hold, curve }, logGlide, harmonics, voice2, vibrato, tremolo, speaker). Must stay plain Lua (the studio runs it).
-- `cl_siren_synth.lua`: plain Lua, game and studio. Wavetable of the harmonics (bandlimited to the tone's top pitch), second voice,
+- `cl_siren_synth.lua`: plain Lua, game and studio. Glide shape `Synth.GlideShape`: curve < 1 eases out (1 - (1 - p)^(1/curve)),
+  > 1 is p^curve. It was p^curve for both: the wail's 0.25 spin-up leapt 1.8 semitones in its first millisecond, a jump at the
+  bottom of every cycle the user heard as a bad loop (the seam test can't see a pitch jump: `--test` now also fails a tone whose
+  pitch moves over 0.75 semitones in a millisecond anywhere, across the seam too). The studio's pattern drawing mirrors it. Wavetable of the harmonics (bandlimited to the tone's top pitch), second voice,
   highpass -> tanh drive -> resonant peak -> lowpass (+ a 4-pole lowpass at cabin.muffle for the inside version). Seamless loops: each
   voice scaled to whole cycles per loop, vibrato/tremolo whole cycles, rendered twice and the second pass kept, peak 0.95.
 - `sh_siren.lua`: `PoliceSiren.SoundingTone(veh)`: the driver's pick (NW2 `siren_tone`, valid while NW2 `siren_at` = the light mode it was

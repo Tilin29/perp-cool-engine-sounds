@@ -66,6 +66,32 @@ async function selfTest() {
     if (Math.abs(n / sr - Math.max(T, 0.05)) > 2 / sr) fail(id + ': loop length is not the pattern length')
     if (peak < 0.9 || peak > 0.96) fail(id + ': not normalized')
     if (seam > near * 1.5 + 0.01) fail(id + ': the loop jumps at the seam')
+    // the pitch, a millisecond at a time and across the seam: a leap is heard as a cut (the wail's
+    // old spin-up curve jumped 1.8 semitones in its first millisecond)
+    await L.doString(`
+      local Synth = POLICE_SIREN.Synth
+      local tone = POLICE_SIREN.CONFIG.tones[${JSON.stringify(id)}]
+      local segments, loopSeconds = Synth.Segments(tone.pattern)
+      local function frequencyAt(time)
+        for _, segment in ipairs(segments) do
+          if time < segment.endTime or segment == segments[#segments] then
+            if segment.startHz == segment.endHz then return segment.startHz end
+            local progress = Synth.GlideShape((time - segment.startTime) / (segment.endTime - segment.startTime), segment.curve)
+            if tone.logGlide ~= false then return segment.startHz * (segment.endHz / segment.startHz) ^ progress end
+            return segment.startHz + (segment.endHz - segment.startHz) * progress
+          end
+        end
+      end
+      local worst, previous = 0, frequencyAt(loopSeconds - 0.001)
+      for step = 0, math.floor(loopSeconds * 1000) - 1 do
+        local frequency = frequencyAt(step / 1000)
+        worst = math.max(worst, math.abs(12 * math.log(frequency / previous, 2)))
+        previous = frequency
+      end
+      __result(worst)`)
+    const leap = res
+    console.log(`         pitch moves at most ${leap.toFixed(2)} semitones in a millisecond`)
+    if (leap > 0.75) fail(id + ': the pitch leaps (heard as a cut)')
   }
   console.log(bad ? `${bad} check(s) FAILED` : 'all tones loop cleanly')
   if (bad) process.exit(1)

@@ -63,10 +63,24 @@ function Synth.Segments(pattern)
 	return segments, time
 end
 
+--[[
+	A glide's shape: curve 1 = even; above 1 = slow at first (progress ^ curve); below 1 = fast at
+	first, easing out (1 - (1 - progress) ^ (1 / curve)), the way a siren's motor spins up. Fast at
+	first used to be progress ^ curve, whose slope at the start is infinite: the wail's rise (0.25)
+	leapt two semitones in its first millisecond, a jump at the bottom of every cycle, heard as a cut
+	at the loop's seam.
+]]
+function Synth.GlideShape(progress, curve)
+	curve = max(curve or 1, 0.05)
+	progress = min(max(progress, 0), 1)
+	if curve < 1 then return 1 - (1 - progress) ^ (1 / curve) end
+
+	return progress ^ curve
+end
+
 local function segmentFrequency(segment, time, logGlide)
 	if segment.startHz == segment.endHz then return segment.startHz end
-	local progress = (time - segment.startTime) / (segment.endTime - segment.startTime)
-	progress = min(max(progress, 0), 1) ^ max(segment.curve, 0.05)
+	local progress = Synth.GlideShape((time - segment.startTime) / (segment.endTime - segment.startTime), segment.curve)
 	if logGlide and segment.startHz > 0 and segment.endHz > 0 then return segment.startHz * (segment.endHz / segment.startHz) ^ progress end
 
 	return segment.startHz + (segment.endHz - segment.startHz) * progress

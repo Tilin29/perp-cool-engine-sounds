@@ -788,7 +788,7 @@ function buildPoints() {
   box.replaceChildren(el('table', null,
     el('tr', null, ...['#', 'Pitch (Hz)', 'Note', 'Interval from previous (st)', 'Glide in (s)', 'Hold (s)', 'Curve', ''].map((h) => el('th', null, h))),
     ...rows),
-    el('p', { class: 'hint' }, `Loop: ${total.toFixed(3)} s. Curve: 1 = even glide, below 1 = fast at first (a motor siren spinning up), above 1 = slow at first.`))
+    el('p', { class: 'hint' }, `Loop: ${total.toFixed(3)} s. Curve: 1 = even glide, below 1 = fast at first, easing out (a motor siren spinning up), above 1 = slow at first.`))
 }
 
 // the pitch pattern drawn over one loop (the same timing the synth uses), with draggable points
@@ -811,7 +811,9 @@ function freqAt(segs, time, logGlide) {
   const s = segs.find((x) => time < x.t1) || segs[segs.length - 1]
   if (!s) return 0
   if (s.f0 === s.f1) return s.f0
-  const u = Math.pow(Math.min(Math.max((time - s.t0) / (s.t1 - s.t0), 0), 1), Math.max(s.curve, 0.05))
+  // (as the synth's GlideShape: below 1 eases out, so the start has no infinite slope)
+  const p = Math.min(Math.max((time - s.t0) / (s.t1 - s.t0), 0), 1), k = Math.max(s.curve, 0.05)
+  const u = k < 1 ? 1 - Math.pow(1 - p, 1 / k) : Math.pow(p, k)
   return logGlide && s.f0 > 0 && s.f1 > 0 ? s.f0 * Math.pow(s.f1 / s.f0, u) : s.f0 + (s.f1 - s.f0) * u
 }
 function setupCanvas() {
