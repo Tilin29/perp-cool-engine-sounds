@@ -118,6 +118,13 @@ local function createPod(vehicle, seats, index)
 	pod:Spawn()
 	pod:Activate()
 	pod:SetPos(hips - (pod:LocalToWorld(podOffset(pod)) - pod:GetPos()))
+	-- held still: its physics would otherwise fall against the car it's parented to
+	local physicsObject = pod:GetPhysicsObject()
+	if IsValid(physicsObject) then
+		physicsObject:EnableMotion(false)
+		physicsObject:Sleep()
+	end
+	pod:SetCollisionGroup(COLLISION_GROUP_WORLD)
 	pod:SetParent(vehicle)
 	pod:SetNoDraw(true)
 	pod:SetNotSolid(true)
@@ -131,13 +138,49 @@ local function createPod(vehicle, seats, index)
 	return pod
 end
 
+local function removeIfEmpty(pod)
+	if IsValid(pod) and not IsValid(pod:GetDriver()) then pod:Remove() end
+end
+
+-- why a passenger wasn't seated, in their console (a gamemode or another addon can refuse a seat)
+local function reportFailure(player, reason)
+	player:PrintMessage(HUD_PRINTCONSOLE, "[Audio engine] couldn't seat you as a passenger: " .. reason .. "\n")
+end
+
+--[[
+	The pod is entered a tick after it's made: entered in the tick it was created, from inside the
+	use key's own handling, the view snapped to the floor and the player was never seated (the pod,
+	not yet set up, was then removed under them). Whether it worked is looked at a tick later still.
+]]
 local function enterSeat(player, vehicle, seats, index)
 	local pod = vehicle.audioSeats and vehicle.audioSeats[index]
 	if not IsValid(pod) then pod = createPod(vehicle, seats, index) end
-	if not pod then return end
-	player:EnterVehicle(pod)
-	-- turned away (CanPlayerEnterVehicle): no empty pod left behind
-	if player:GetVehicle() ~= pod then pod:Remove() end
+	if not pod then
+		reportFailure(player, "the seat could not be made")
+		return
+	end
+	timer.Simple(0, function()
+		if not IsValid(pod) then return end
+		if not IsValid(player) or not IsValid(vehicle) or player:InVehicle() or IsValid(pod:GetDriver()) then
+			removeIfEmpty(pod)
+			return
+		end
+		if hook.Run("CanPlayerEnterVehicle", player, pod, 0) == false then
+			reportFailure(player, "CanPlayerEnterVehicle refused it (the gamemode or another addon)")
+			removeIfEmpty(pod)
+			return
+		end
+		player:EnterVehicle(pod)
+		-- facing the way the car does (eye angles are the seat's own in a vehicle; the pod faces its +Y)
+		player:SetEyeAngles(Angle(0, 90, 0))
+		timer.Simple(0, function()
+			if not IsValid(pod) then return end
+			if IsValid(player) and player:GetVehicle() ~= pod then
+				reportFailure(player, "the game didn't put you in the seat")
+			end
+			removeIfEmpty(pod)
+		end)
+	end)
 end
 
 hook.Add("PlayerUse", "audio_engine_seats", function(player, entity)
