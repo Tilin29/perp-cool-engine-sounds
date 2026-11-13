@@ -33,15 +33,18 @@ end
 local passbyConVar = CreateClientConVar("audio_engine_passby", "1", true, false, "How much other cars swell in loudness as they pass close by (0 = off, 1 = default)", 0, 2)
 local tunnelConVar = CreateClientConVar("audio_engine_tunnel", "1", true, false,
 	"Source DSP preset for cars in a tunnel (0 = no tunnel effect, 1 = default, the map's own, 6 = medium tunnel, 7 = large tunnel)", 0, 133)
+local maxCarsConVar = CreateClientConVar("audio_engine_maxcars", "16", true, false,
+	"How many cars you hear at once, the nearest ones (0 = all): the game mixes only so many sounds", 0, 64)
 local rangeConVar = CreateClientConVar("audio_engine_range", "250", true, false,
 	"Metres past which a car's engine goes quiet and stops playing (for an ordinary car; louder ones carry further; 0 = no limit)", 0, 2000)
 
 -- the settings, read once a frame for every car (the Think hook below)
-local settings = { volume = 1, roadNoise = 1, windNoise = 1, doppler = 1, passby = 1, tunnel = 1, range = 250 }
+local settings = { volume = 1, roadNoise = 1, windNoise = 1, doppler = 1, passby = 1, tunnel = 1, range = 250, maxCars = 16 }
 local function readSettings()
 	settings.volume, settings.roadNoise, settings.windNoise = volumeConVar:GetFloat(), roadNoiseConVar:GetFloat(), windNoiseConVar:GetFloat()
 	settings.doppler, settings.passby = dopplerConVar:GetFloat(), passbyConVar:GetFloat()
 	settings.tunnel, settings.range = tunnelConVar:GetInt(), rangeConVar:GetFloat()
+	settings.maxCars = maxCarsConVar:GetInt()
 end
 readSettings()
 
@@ -190,11 +193,24 @@ local function glide(current, target, deltaTime)
 	return nextValue
 end
 
+--[[
+	A group that isn't playing starts only once it would be heard (GROUP_START_VOLUME, about -40 dB).
+	Starting at any trace of volume, a car sweeping its revs opened every band it passed, and each
+	stayed open while it faded: ~22 loops a car for a moment, and 40 cars setting off together
+	asked the game for ~900 sounds at once, more than it mixes (sirens and the game's own sounds
+	went missing). A group already playing still fades all the way out as before.
+]]
+local GROUP_START_VOLUME = 0.01
+-- ...and stops once it has been under GROUP_STOP_VOLUME (~-48 dB) for GROUP_STOP_HOLD: the gap to the
+-- start level keeps a band at the edge of the cross-fade from flickering on and off (it held 0.3 s
+-- under 0.002 before, so a fast rev sweep kept six or seven bands open as they faded)
+local GROUP_STOP_VOLUME, GROUP_STOP_HOLD = 0.004, 0.1
+
 local function setGroup(car, groupKey, names, targetVolumes, pitch, deltaTime)
 	local total = 0
 	for i = 1, #targetVolumes do total = total + targetVolumes[i] end
 	local currentVolumes = car.currentVolumes[groupKey]
-	if total > 0.0005 then
+	if total > 0.0005 and (car.activeGroups[groupKey] or total >= GROUP_START_VOLUME) then
 		car.silentTime[groupKey] = 0
 		if not car.activeGroups[groupKey] then
 			currentVolumes = {}
@@ -229,7 +245,7 @@ local function setGroup(car, groupKey, names, targetVolumes, pitch, deltaTime)
 			loudest = max(loudest, currentVolumes[i])
 			sendPatch(car, names[i], getPatch(car, names[i]), max(currentVolumes[i], 0.001), pitch)
 		end
-		if loudest < 0.002 and car.silentTime[groupKey] > 0.3 then
+		if loudest < GROUP_STOP_VOLUME and car.silentTime[groupKey] > GROUP_STOP_HOLD then
 			for i = 1, #names do
 				local patch = car.patches[names[i]]
 				if patch then patch:Stop() end
@@ -897,6 +913,9 @@ end
 	further out and gets a longer range. Back inside RANGE_BACK of it the sounds start again.
 ]]
 local RANGE_FADE, RANGE_BACK = 0.25, 0.95
+-- the sound budget (rankCars, below): looked at every BUDGET_EVERY s, a car past it fades over BUDGET_FADE s
+-- and comes back once it's BUDGET_MARGIN places inside it
+local BUDGET_EVERY, BUDGET_FADE, BUDGET_MARGIN = 0.25, 0.5, 2
 local function audibleRangeOf(car)
 	if settings.range <= 0 then return nil end
 	return settings.range / 0.0254 * ((car.currentSoundLevel or car.config.soundLevel or 85) - 50) / 35
@@ -976,6 +995,10 @@ local function updateCar(car, deltaTime)
 	else
 		car.rangeGain, car.outOfRange = 1, false
 	end
+	-- past the nearest audio_engine_maxcars: fades out, then silent like a car out of range (see rankCars)
+	car.budgetGain = approach(car.budgetGain or 1, car.overBudget and not isOwnCar and 0 or 1, deltaTime / BUDGET_FADE)
+	car.rangeGain = car.rangeGain * car.budgetGain
+	car.outOfRange = car.outOfRange or car.budgetGain <= 0
 	if car.outOfRange and not car.silencedByRange then stopAll(car) end
 	car.silencedByRange = car.outOfRange
 
@@ -1085,6 +1108,43 @@ local function needsUpdateNow(car, entity)
 		or entity:GetNW2Int("audio_in", 0) ~= 0
 end
 
+--[[
+	The sound budget. The game mixes only so many sounds at once for everything (a few hundred
+	channels, the siren's and the game's own included), and a car holds several loops: ~6 driving,
+	up to ~16 for a moment while its revs sweep through the bands. 40 cars setting off together
+	asked for far more than that, and sirens and the game's own sounds went missing. So only the
+	nearest audio_engine_maxcars cars with something to play are heard; one further out fades over
+	BUDGET_FADE and goes silent until it's among the nearest again (BUDGET_MARGIN places of slack, so
+	two cars at the edge don't take turns). In a crowd that big the far ones are drowned out anyway.
+]]
+local nextBudget = 0
+local ranked = {}
+
+local function rankCars()
+	if settings.maxCars <= 0 or not listener.valid then
+		for _, car in pairs(cars) do car.overBudget = false end
+		return
+	end
+	table.Empty(ranked)
+	for entity, car in pairs(cars) do
+		-- (asleep and dormant cars play nothing: they don't take a place)
+		if IsValid(entity) and not car.dormant and (car.engineState.on or anyActive(car)) then
+			car.budgetDistance = listener.position:DistToSqr(entity:GetPos())
+			ranked[#ranked + 1] = car
+		else
+			car.overBudget = false
+		end
+	end
+	table.sort(ranked, function(first, second) return first.budgetDistance < second.budgetDistance end)
+	for rank, car in ipairs(ranked) do
+		if car.overBudget then
+			car.overBudget = rank > settings.maxCars - BUDGET_MARGIN
+		else
+			car.overBudget = rank > settings.maxCars
+		end
+	end
+end
+
 ---------------------------------------------------------------------------
 -- tracking
 ---------------------------------------------------------------------------
@@ -1105,6 +1165,10 @@ hook.Add("Think", "audio_engine_cars", function()
 	if deltaTime > 0 then
 		readSettings()
 		updateListener(deltaTime)
+	end
+	if now >= nextBudget then
+		nextBudget = now + BUDGET_EVERY
+		rankCars()
 	end
 	-- AudioEngine.PerfCar(ent, seconds): set only while the debug module's profiler runs (audio_engine_perf)
 	local perfCallback = AudioEngine.PerfCar

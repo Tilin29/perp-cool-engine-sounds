@@ -8,6 +8,8 @@ local PoliceSiren = POLICE_SIREN
 local Synth = PoliceSiren.Synth
 
 local volumeConVar = CreateClientConVar("police_siren_volume", "1", true, false, "Police siren volume (0-1)", 0, 1)
+local maxSirensConVar = CreateClientConVar("police_siren_maxcars", "12", true, false,
+	"How many sirens you hear at once, the nearest ones (0 = all): the game mixes only so many sounds", 0, 64)
 -- (named with the engine's settings, where players look for it, but it belongs to the siren)
 local dopplerConVar = CreateClientConVar("audio_engine_police_doppler", "1", true, false,
 	"Doppler pitch shift of passing police sirens, x the siren's own setting (0 = off, 1 = default, 2 = double)", 0, 2)
@@ -15,6 +17,9 @@ local toneKeyConVar = CreateClientConVar("police_siren_tonekey", PoliceSiren.CON
 	"Key that steps the police siren of the car you drive to the next tone (a key name such as q; none = off)")
 
 local LIST_REFRESH = 0.5
+-- a siren past the nearest police_siren_maxcars is let go (with its release); it comes back once it's
+-- SIREN_BUDGET_MARGIN places inside, so two cars at the edge don't take turns
+local SIREN_BUDGET_MARGIN = 2
 local BUILD_BUDGET = 0.005
 local SWAP_FADE = 0.15
 -- Doppler: speeds from positions sampled at least SPEED_SAMPLE s apart (a frame-to-frame
@@ -32,6 +37,7 @@ local DOPPLER_RATE = 14
 local BASE_PITCH = 200
 local PITCH_MIN, PITCH_MAX = 150, 255
 local PITCH_GLIDE = 0.05
+local REVIVE_EVERY = 1   -- s between checks that the game still plays a siren
 
 -- sound.Generate names can't be reused: a lua refresh builds under a new serial
 PoliceSiren.Serial = (PoliceSiren.Serial or 0) + 1
@@ -98,6 +104,7 @@ end
 
 local cars = {}
 local fading = {}
+local overBudget = {}   -- vehicle -> true: past the nearest police_siren_maxcars sounding cars (rankSirens)
 
 -- a moving point's velocity, from its position now and then
 local function trackVelocity(track, position, now)
@@ -147,7 +154,10 @@ local function startTone(vehicle, toneId, inside, fadeTime)
 	patch:PlayEx(0, BASE_PITCH)
 	local volume = config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
 
-	return { toneId = toneId, inside = inside, patch = patch, fadeInVolume = volume, fadeTime = fadeTime, pitch = BASE_PITCH, dopplerRatio = 1, velocityTrack = {} }
+	return {
+		toneId = toneId, inside = inside, patch = patch, volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
+		pitch = BASE_PITCH, dopplerRatio = 1, velocityTrack = {}, nextReviveCheck = RealTime() + REVIVE_EVERY,
+	}
 end
 
 local function stopTone(state, fadeTime, pitchDrop)
@@ -160,7 +170,7 @@ end
 local function update(vehicle)
 	local config = PoliceSiren.CONFIG
 	local state = cars[vehicle]
-	local wantedTone = not vehicle:IsDormant() and PoliceSiren.SoundingTone(vehicle) or nil
+	local wantedTone = not vehicle:IsDormant() and not overBudget[vehicle] and PoliceSiren.SoundingTone(vehicle) or nil
 	if wantedTone and not soundNames[wantedTone] then
 		requestTone(wantedTone)
 		wantedTone = nil
@@ -171,6 +181,16 @@ local function update(vehicle)
 		if state.fadeInVolume then
 			state.patch:ChangeVolume(state.fadeInVolume, state.fadeTime)
 			state.fadeInVolume = nil
+		end
+		-- the game only mixes so many sounds: with many cars driving around it takes a channel back,
+		-- and a siren it dropped stayed silent. Started again at its full volume, it holds on to one
+		local now = RealTime()
+		if now >= state.nextReviveCheck then
+			state.nextReviveCheck = now + REVIVE_EVERY
+			if not state.patch:IsPlaying() then
+				state.patch:Stop()
+				state.patch:PlayEx(state.volume, state.pitch)
+			end
 		end
 		-- (inside the car you move with it: no Doppler)
 		local velocity = trackVelocity(state.velocityTrack, vehicle:GetPos(), RealTime())
@@ -190,6 +210,24 @@ local function update(vehicle)
 end
 
 local sirenCars = {}
+
+-- which sounding siren cars are past the budget (the nearest ones are heard)
+local function rankSirens()
+	local maxSirens = maxSirensConVar:GetInt()
+	local sounding = {}
+	for _, vehicle in ipairs(sirenCars) do
+		if IsValid(vehicle) and not vehicle:IsDormant() and PoliceSiren.SoundingTone(vehicle) then
+			sounding[#sounding + 1] = { vehicle = vehicle, distance = listenerPosition:DistToSqr(vehicle:GetPos()) }
+		end
+	end
+	table.sort(sounding, function(first, second) return first.distance < second.distance end)
+	local nextOverBudget = {}
+	for rank, entry in ipairs(sounding) do
+		local limit = overBudget[entry.vehicle] and maxSirens - SIREN_BUDGET_MARGIN or maxSirens
+		if maxSirens > 0 and rank > limit then nextOverBudget[entry.vehicle] = true end
+	end
+	overBudget = nextOverBudget
+end
 local nextRefresh = 0
 
 -- for profilers (the audio engine's debug module reads it when the siren is installed): what the
@@ -219,6 +257,7 @@ hook.Add("Think", "police_siren", function()
 		for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
 			if PoliceSiren.HasSiren(vehicle) then table.insert(sirenCars, vehicle) end
 		end
+		rankSirens()
 	end
 	for _, vehicle in ipairs(sirenCars) do
 		if IsValid(vehicle) then update(vehicle) end

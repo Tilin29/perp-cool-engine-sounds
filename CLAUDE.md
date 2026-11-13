@@ -132,6 +132,12 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     fading over the last 25%, back on inside 95%. Volume/pitch only sent on change (`sendPatch`: pitch by its whole number, volume over
     1% + 0.0005), tracked in `car.sentVolumes/sentPitches` (set by startPatch). setGroup's name/volume lists are reused (`singleNameList`, `namePairOf`, `volumeList`),
     silent inactive groups skipped, settings read once a frame (`settings`). Tunnel probes skip cars that moved under 1 m since their last one.
+  - sound budget (`rankCars`, `audio_engine_maxcars` client, default 16, 0 = all): only the nearest cars with something to play are
+    heard; one past it fades over `BUDGET_FADE` 0.5 s and goes silent like an out-of-range car, back at `BUDGET_MARGIN` 2 places inside.
+    The game mixes only so many sounds (a few hundred, the siren's and its own included): a car holds ~6 loops driving, up to ~16 while
+    its revs sweep the bands (the converter flare crosses 5 in ~0.3 s), and 40 cars setting off together (perf_spawn race) took them all:
+    sirens and the game's own sounds went missing. Groups also start only at `GROUP_START_VOLUME` 0.01 (~-40 dB; was any trace) and stop
+    once under `GROUP_STOP_VOLUME` 0.004 for `GROUP_STOP_HOLD` 0.1 s (was 0.002 for 0.3 s).
     Offline check: the scratchpad-style mock test (mocked client + real sh_config/sh_presets/sh_drivetrain/cl_engine) is not in the repo.
   - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out;
     the gearbox's speed (`car.driveSpeed`) moves at most `SPEED_SLEW` 40 m/s2. Dividing by the capped frame dt made stutters read as several times the real speed
@@ -235,7 +241,7 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   picked in), else `lightTones[mode]` of the car's scheme (`PoliceSiren.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle,
   then off), driver only, lights on.
 - `cl_siren.lua`: builds a tone twice (outside / inside) in a coroutine (5 ms/frame) the first time a car near sounds it (a failed one isn't retried); `sound.Generate`
-  names carry `PoliceSiren.Serial` (lua refresh); one CSoundPatch per car (fade-in a frame after PlayEx), swapped in 0.15 s on getting in/out
+  names carry `PoliceSiren.Serial` (lua refresh); one CSoundPatch per car (fade-in a frame after PlayEx; once a second it's checked with IsPlaying and restarted at full volume if the game dropped it; only the nearest `police_siren_maxcars` (12, 0 = all) sounding cars are heard, others released, back at 2 places inside: with many cars driving, the engines' loops took the channels and a siren, starting at volume 0, stayed silent), swapped in 0.15 s on getting in/out
   (driver or a seat parented to the car, and the view on the player: watching through a camera = outside, as the engine). Doppler from its own speed sampling (positions >= 0.05 s apart, gaps > 0.3 s and teleports
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on
@@ -265,7 +271,11 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   otherwise) go on only while a capture or the overlay runs and come off after; the server's poll timer exists only then; a Lua
   refresh takes the old wrappers off (`EngineDebug.PerfClient/PerfServer.Uninstall`). `audio_engine_perf [s] [client|server|both]` prints
   a console report; `audio_engine_perf_hud` live overlay (server figures once a second to subscribers); `audio_engine_perf_snapshot`
-  cars, patches, memory with no timing; `audio_engine_perf_spawn <n> [car|mixed] [lights]` / `_clear` stress grid.
+  cars, patches, memory with no timing; `audio_engine_perf_spawn <n> [car|mixed] [lights] [mph] [grid|race]` / `_clear` stress test.
+  race: a column 60 m down the road coming at you, 5 m to your right, zig-zag +-1.4 m, random 8-25 m gaps (`RACE` in sv_perf),
+  every car setting off together once all engines started, at 3x the grid's acceleration (21 m/s2): drive-by Doppler / pass-by.
+  With mph the cars drive off: handbrake released (a driverless jeep holds it on: it kept them standing) and pushed along their nose each tick (~7 m/s2 up to mph, then held, kept straight; a car still standing after 3 s, or not started after 8, is reported to the console; hook
+  `audio_dbg_perf_drive` only while any drive), sounding W held (NW2 audio_in 1) and at speed the limiter's hold (audio_limst 1).
   Memory: generated banks keep their samples in Lua tables (8 B each, held by the sound.Generate callbacks) + the engine's copy
   (~2 B); counted as `bank.samples` (cl_soundbank); baked banks = their WAV file sizes; the siren's `PoliceSiren.Stats()` (cl_siren).
   Smoke-tested in a mock (wrappers off after each run); not yet measured in game.

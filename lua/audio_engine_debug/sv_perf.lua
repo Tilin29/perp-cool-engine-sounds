@@ -7,8 +7,10 @@
 	  capture (audio_engine_perf on the client): times every hook of the addon and the siren for the
 	          requested seconds and prints a report to the requester's console
 	  live    (audio_engine_perf_hud 1): the same figures sent to the overlay once a second
-	  stress  audio_engine_perf_spawn <count> [car | mixed] [lights 0/1]: spawns PERP cars in a grid
-	          in front of you with their engines running (and the emergency lights on, if asked);
+	  stress  audio_engine_perf_spawn <count> [car | mixed] [lights 0/1] [mph] [grid | race]: spawns PERP
+	          cars with their engines running (and the emergency lights on, if asked). grid: in front of
+	          you, driving away at mph if given (accelerating there, then holding it). race: a zig-zag
+	          column with random gaps down the road, coming at you and passing on your right (drive-by).
 	          audio_engine_perf_clear removes them
 
 	Measured while on:
@@ -344,25 +346,156 @@ local function spawnEntries(choice)
 	return matches
 end
 
+--[[
+	Driving test cars: no one sits in them, so the game won't drive them. Each tick they're pushed
+	along their nose, gaining DRIVE_ACCELERATION up to their speed and then held there, kept straight.
+	For the sound they get what a driver holding W sends (NW2 audio_in), and at their speed the speed
+	limiter's holding state (audio_limst 1: steady part throttle in a cruising gear), as on a real
+	drive with the limiter set. The hook runs only while such cars exist.
+]]
+local DRIVE_ACCELERATION = 7 / 0.0254   -- inches/s per second (~7 m/s2: 0 to 30 mph in ~2 s)
+local DRIVE_HOLD_MARGIN = 0.5 * 17.6    -- inches/s (0.5 mph) under the speed: holding it
+local drivingCars = {}                  -- vehicle -> { targetSpeed (inches/s), acceleration, goAt, requester, startedAt, warned }
+
+--[[
+	The race formation: a column coming down the road at you and passing on your right, for the
+	drive-by (Doppler, pass-by swell). It starts RACE.startAhead in front of you, the cars zig-zag
+	RACE.zigzag either side of the lane's centre line, RACE.laneOffset to your right, with random
+	gaps of RACE.gapMin..gapMax between them. Every car sets off at the same moment (once all have
+	started their engines), so the gaps hold, at three times the grid's acceleration.
+]]
+local METRE = 1 / 0.0254   -- inches
+local RACE = {
+	startAhead = 60 * METRE, laneOffset = 5 * METRE, zigzag = 1.4 * METRE,
+	gapMin = 8 * METRE, gapMax = 25 * METRE,
+	acceleration = 3 * DRIVE_ACCELERATION,
+	startUp = 4.5,   -- s the engines need to start (catch, flare, settle) before the column sets off
+}
+hook.Remove("Tick", "audio_dbg_perf_drive")   -- (Lua refresh: the previous load's drivers stop)
+
+local function setDriveState(vehicle, inputBits, limiterState)
+	if vehicle.audioPerfInputBits ~= inputBits then
+		vehicle.audioPerfInputBits = inputBits
+		vehicle:SetNW2Int("audio_in", inputBits)
+	end
+	if vehicle.audioPerfLimiterState ~= limiterState then
+		vehicle.audioPerfLimiterState = limiterState
+		vehicle:SetNW2Int("audio_limst", limiterState)
+	end
+end
+
+local function noseDirection(vehicle)
+	local geometry = AudioEngine.CarGeometry and AudioEngine.CarGeometry(vehicle)
+	local localForward = geometry and geometry.forward or Vector(0, 1, 0)
+	local direction = vehicle:LocalToWorld(localForward) - vehicle:GetPos()
+	direction:Normalize()
+	return direction
+end
+
+local function driveCars()
+	local deltaTime = engine.TickInterval()
+	for vehicle, drive in pairs(drivingCars) do
+		local targetSpeed = drive.targetSpeed
+		local physics = IsValid(vehicle) and vehicle:GetPhysicsObject()
+		if not (physics and IsValid(physics)) then
+			drivingCars[vehicle] = nil
+		elseif IsValid(vehicle:GetDriver()) then
+			-- someone got in: they drive it now
+			drivingCars[vehicle] = nil
+			setDriveState(vehicle, 0, 0)
+		elseif vehicle:GetNW2Bool("audio_on", false) and vehicle.audioStart == nil and CurTime() >= drive.goAt then
+			local nose = noseDirection(vehicle)
+			local up = vehicle:GetUp()
+			local velocity = physics:GetVelocity()
+			local speed = velocity:Dot(nose)
+			local holding = speed >= targetSpeed - DRIVE_HOLD_MARGIN
+			local newSpeed = holding and targetSpeed or math.min(targetSpeed, speed + drive.acceleration * deltaTime)
+			-- a car without a driver has its handbrake on: its locked wheels held it where it stood
+			if vehicle.SetHandbrake then vehicle:SetHandbrake(false) end
+			physics:Wake()
+			physics:SetVelocity(nose * newSpeed + up * velocity:Dot(up))
+			physics:AddAngleVelocity(Vector(0, 0, -physics:GetAngleVelocity().z))
+			setDriveState(vehicle, 1, holding and 1 or 0)
+			-- still standing a while after it should have set off: say so once (something holds it)
+			drive.startedAt = drive.startedAt or CurTime()
+			if not drive.warned and CurTime() - drive.startedAt > 3 and speed < 17.6 then
+				drive.warned = true
+				if IsValid(drive.requester) then
+					drive.requester:PrintMessage(HUD_PRINTCONSOLE, string.format("[Audio Engine] %s isn't moving (%.1f mph after 3 s of pushing)",
+						tostring(vehicle.VehicleName or vehicle:GetModel()), speed / 17.6))
+				end
+			end
+		elseif not drive.warned and CurTime() - math.max(drive.queuedAt, drive.goAt) > 8 then
+			drive.warned = true
+			if IsValid(drive.requester) then
+				drive.requester:PrintMessage(HUD_PRINTCONSOLE, string.format("[Audio Engine] %s hasn't started its engine after 8 s (audio_on %s, starting %s)",
+					tostring(vehicle.VehicleName or vehicle:GetModel()), tostring(vehicle:GetNW2Bool("audio_on", false)), tostring(vehicle.audioStart ~= nil)))
+			end
+		end
+	end
+	if not next(drivingCars) then hook.Remove("Tick", "audio_dbg_perf_drive") end
+end
+
+local function startDriving(vehicle, mph, requester, acceleration, goAt)
+	drivingCars[vehicle] = {
+		targetSpeed = mph * 17.6, acceleration = acceleration or DRIVE_ACCELERATION, goAt = goAt or 0,
+		requester = requester, queuedAt = CurTime(),
+	}
+	hook.Add("Tick", "audio_dbg_perf_drive", driveCars)
+end
+
+-- where each car of a formation stands (world position) and the yaw it faces
+local function gridSpots(requester, count)
+	local yaw = requester:EyeAngles().y
+	local forward, right = Angle(0, yaw, 0):Forward(), Angle(0, yaw, 0):Right()
+	local origin = requester:GetPos() + forward * 400
+	local CARS_PER_ROW, ROW_SPACING, COLUMN_SPACING = 6, 170, 330
+	local spots = {}
+	for i = 1, count do
+		local row, column = math.floor((i - 1) / CARS_PER_ROW), (i - 1) % CARS_PER_ROW
+		spots[i] = {
+			position = origin + right * (column - (CARS_PER_ROW - 1) / 2) * ROW_SPACING + forward * row * COLUMN_SPACING,
+			yaw = yaw - 90,   -- (the cars' noses are +Y: facing away from you)
+		}
+	end
+	return spots
+end
+
+local function raceSpots(requester, count)
+	local yaw = requester:EyeAngles().y
+	local forward, right = Angle(0, yaw, 0):Forward(), Angle(0, yaw, 0):Right()
+	local spots = {}
+	local distance = RACE.startAhead
+	for i = 1, count do
+		local side = i % 2 == 0 and 1 or -1
+		spots[i] = {
+			position = requester:GetPos() + forward * distance + right * (RACE.laneOffset + side * RACE.zigzag),
+			yaw = yaw + 90,   -- facing you: they come down the road at you
+		}
+		distance = distance + RACE.gapMin + math.random() * (RACE.gapMax - RACE.gapMin)
+	end
+	return spots
+end
+
 concommand.Add("audio_engine_perf_spawn", function(requester, _, args)
 	if not EngineDebug.Allowed(requester) then return end
 	local count = math.Clamp(math.floor(tonumber(args[1]) or 10), 1, 64)
 	local entries = spawnEntries(args[2])
 	local lights = args[3] == "1"
+	local driveMph = math.Clamp(tonumber(args[4]) or 0, 0, 120)
+	local race = string.lower(args[5] or "") == "race"
 	if #entries == 0 then
 		requester:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] no PERP car matches '" .. tostring(args[2]) .. "'")
 		return
 	end
-	local yaw = requester:EyeAngles().y
-	local forward, right = Angle(0, yaw, 0):Forward(), Angle(0, yaw, 0):Right()
-	local origin = requester:GetPos() + forward * 400
-	local CARS_PER_ROW, ROW_SPACING, COLUMN_SPACING = 6, 170, 330
+	local spots = race and raceSpots(requester, count) or gridSpots(requester, count)
+	-- the race column sets off together, once the last car's engine has started
+	local raceGoAt = CurTime() + 0.5 + count * 0.05 + RACE.startUp
 	for i = 1, count do
 		-- mixed: spread over the list, so engines of every kind take part
 		local entry = entries[#entries == 1 and 1 or (math.floor((i - 1) * #entries / count) % #entries) + 1]
 		local vehicleTable = entry.vehicleTable
-		local row, column = math.floor((i - 1) / CARS_PER_ROW), (i - 1) % CARS_PER_ROW
-		local position = origin + right * (column - (CARS_PER_ROW - 1) / 2) * ROW_SPACING + forward * row * COLUMN_SPACING
+		local position = spots[i].position
 		local trace = util.TraceLine({ start = position + Vector(0, 0, 200), endpos = position - Vector(0, 0, 400) })
 		local vehicle = ents.Create(vehicleTable.Class or "prop_vehicle_jeep")
 		if IsValid(vehicle) then
@@ -371,7 +504,7 @@ concommand.Add("audio_engine_perf_spawn", function(requester, _, args)
 			vehicle.VehicleTable = vehicleTable
 			vehicle.VehicleName = entry.id
 			vehicle:SetPos(trace.HitPos + Vector(0, 0, 20))
-			vehicle:SetAngles(Angle(0, yaw - 90, 0))   -- (the cars' noses are +Y: facing away from you)
+			vehicle:SetAngles(Angle(0, spots[i].yaw, 0))
 			vehicle:Spawn()
 			vehicle:Activate()
 			hook.Run("PlayerSpawnedVehicle", requester, vehicle)
@@ -380,12 +513,27 @@ concommand.Add("audio_engine_perf_spawn", function(requester, _, args)
 				if not IsValid(vehicle) then return end
 				if AudioEngine.SetEngine then AudioEngine.SetEngine(vehicle, true) end
 				if lights and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then vehicle:SetNW2Int("audio_lights", 2) end
+				if driveMph > 0 then
+					if race then
+						startDriving(vehicle, driveMph, requester, RACE.acceleration, raceGoAt)
+					else
+						startDriving(vehicle, driveMph, requester)
+					end
+				end
 			end)
 		end
 	end
-	requester:PrintMessage(HUD_PRINTCONSOLE, string.format("[Audio Engine] spawned %d cars (%s)%s; audio_engine_perf_clear removes them",
-		count, #entries == 1 and entries[1].vt.Name or (#entries .. " kinds"), lights and ", lights on" or ""))
-end, nil, "Stress test (debug): audio_engine_perf_spawn <count> [car name | mixed] [lights 0/1] spawns running PERP cars in front of you")
+	local driving = ""
+	if driveMph > 0 then
+		driving = race and string.format(", a race column passing on your right at %g mph (sets off in %.0f s)", driveMph, raceGoAt - CurTime())
+			or string.format(", driving away at %g mph", driveMph)
+	elseif race then
+		driving = ", lined up as a race column (give a speed to make them drive)"
+	end
+	requester:PrintMessage(HUD_PRINTCONSOLE, string.format("[Audio Engine] spawned %d cars (%s)%s%s; audio_engine_perf_clear removes them",
+		count, #entries == 1 and entries[1].vehicleTable.Name or (#entries .. " kinds"), lights and ", lights on" or "", driving))
+end, nil, "Stress test (debug): audio_engine_perf_spawn <count> [car name | mixed] [lights 0/1] [drive mph, 0 = parked] [grid | race]"
+	.. " spawns running PERP cars in front of you (race: a zig-zag column with random gaps that drives past you)")
 
 concommand.Add("audio_engine_perf_clear", function(requester)
 	if IsValid(requester) and not EngineDebug.Allowed(requester) then return end
@@ -397,5 +545,7 @@ concommand.Add("audio_engine_perf_clear", function(requester)
 		end
 	end
 	spawned = {}
+	drivingCars = {}
+	hook.Remove("Tick", "audio_dbg_perf_drive")
 	if IsValid(requester) then requester:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] removed " .. removedCount .. " stress-test cars") end
 end, nil, "Removes the cars audio_engine_perf_spawn made")

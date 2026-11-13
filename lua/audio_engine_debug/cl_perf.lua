@@ -9,7 +9,7 @@
 	                                    measures for 10 s (default) and prints a report to the console
 	  audio_engine_perf_hud [0/1]       live overlay, client and server figures once a second
 	  audio_engine_perf_snapshot        what's loaded and playing right now (no timing)
-	  audio_engine_perf_spawn <count> [car | mixed] [lights 0/1], audio_engine_perf_clear
+	  audio_engine_perf_spawn <count> [car | mixed] [lights 0/1] [mph] [grid | race], audio_engine_perf_clear
 	                                    stress test: running PERP cars in front of you (sv_perf.lua)
 
 	Client figures:
