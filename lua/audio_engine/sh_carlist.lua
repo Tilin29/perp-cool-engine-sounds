@@ -401,6 +401,49 @@ AudioEngine.CAR_REV = {
 }
 
 --[[
+	Passenger seats (sv_seats.lua). None of the content packs define any: the models only carry the
+	driver's attachment (vehicle_feet_passenger0), so the seats are laid out from it. Unlisted = 4:
+	the front passenger mirrors the driver, the back row sits AudioEngine.SEAT_REAR_PITCH x wheelbase
+	behind them, AudioEngine.SEAT_REAR_RISE higher. 1 = driver only, 2 = driver and front passenger.
+	A list names every passenger seat: { side, back, up[, width] }: side 1 = the driver's side, -1 the
+	other; back / up = units behind / above the driver's hips (back nil = the usual back row); width =
+	units from the centre line (default: the driver's). Lists are estimates from the meshes:
+	nudge in game with lua_run (the seat is the passenger's GetVehicle(), parented to the car).
+]]
+local FRONT_PASSENGER = { -1, 0, 0 }
+AudioEngine.CAR_SEATS = {
+	["Mazda Furai"] = 1,
+	-- driver in the middle, a passenger either side, set back a little
+	["McLaren F1"] = { { 1, 12, 0, 22 }, { -1, 12, 0, 22 } },
+	-- vans, trucks and work vehicles: the seats in the back are further back than a car's
+	["Ambulance"] = { FRONT_PASSENGER, { 1, 100, 0 }, { -1, 100, 0 } },
+	["Dundreary Limousine"] = { FRONT_PASSENGER, { 1, 90, 0 }, { -1, 90, 0 }, { 1, 150, 0 }, { -1, 150, 0 } },
+	["Fire Truck"] = { FRONT_PASSENGER, { 1, 45, 4 }, { -1, 45, 4 } },
+	["Ford F450 Ambulance"] = { FRONT_PASSENGER, { 1, 85, 0 }, { -1, 85, 0 } },
+	["Ford Transit 2016 (Police)"] = { FRONT_PASSENGER, { 1, 84, 9 }, { -1, 84, 9 } },
+	["Ford Transit 2016 (Prisoner Transport)"] = { FRONT_PASSENGER, { 1, 84, 9 }, { -1, 84, 9 } },
+	["GMC Vandura"] = { FRONT_PASSENGER, { 1, 80, 0 }, { -1, 80, 0 } },
+	["Lenco BearCat"] = { FRONT_PASSENGER, { 1, 40, 4 }, { -1, 40, 4 }, { 1, 80, 4 }, { -1, 80, 4 } },
+	["SWAT Stockade"] = { FRONT_PASSENGER, { 1, 90, 0 }, { -1, 90, 0 }, { 1, 130, 0 }, { -1, 130, 0 } },
+	["Volkswagen Camper 1965"] = { FRONT_PASSENGER, { 1, 55, 2 }, { -1, 55, 2 } },
+}
+for _, name in ipairs({
+	-- two-seaters: sports cars, supercars, roadsters, single-cab pickups and small trucks
+	"Alfa Romeo 33 Stradale (1967)", "Aston Martin DBS", "Aston Martin V12 Vantage", "Audi R8 Plus", "Audi R8 Spyder",
+	"Audi R8 V10", "BMW 507", "BMW M1", "Bowler EXR-S", "Bugatti EB110", "Bugatti Veyron 16.4", "Bugatti Veyron SS",
+	"Chevrolet C10", "Chevrolet Corvette GSC", "Chevrolet Corvette Stingray 427", "Courier Truck", "DeLorean DMC-12",
+	"Dodge RAM SRT10", "Dodge Viper GTS", "Ferrari 250 GTO", "Ferrari 250GT", "Ferrari 458 Spider", "Ferrari 512 TR",
+	"Ferrari Enzo", "Ferrari F12 Berlinetta", "Ferrari F430", "Ferrari F50", "Ferrari LaFerrari", "Ford F100",
+	"Ford F350 Tow Truck", "Ford GT 05", "Ford Transit", "GMC Sierra", "GMC Syclone", "Honda CR-X SiR", "Honda S2000",
+	"Jaguar E-Type", "Jaguar F-Type", "Lamborghini Diablo", "Lamborghini Gallardo",
+	"Lamborghini Gallardo LP570-4 Spyder Performante", "Lamborghini Miura", "Lamborghini Murcielago",
+	"Lamborghini Murcielago LP670-4 SV", "Lamborghini Reventon Roadster", "Mazda MX-5 2007", "Mazda RX7", "McLaren P1",
+	"Mercedes 300SL Gullwing Coupe", "Mercedes McLaren SLR", "Mercedes SL65 AMG", "Mercedes SLS AMG", "Mini Coupe",
+	"Morgan Aero SS", "Nissan 350z", "Nissan 370Z", "Noble M600", "Pagani Zonda C12", "Pontiac Fiero GT",
+	"Porsche 911 GT3", "Porsche 918 Spyder", "Porsche 997 GT3", "Porsche Carrera GT", "Toyota MR2 GT",
+}) do AudioEngine.CAR_SEATS[name] = 2 end
+
+--[[
 	Rev flare on start-up (the "emotion start", audio_engine_emotionstart): only high-powered cars
 	blip their engine on start-up (sports cars, supercars, muscle cars, AMG/M/RS saloons, rally
 	homologation specials). Every other car starts with a short, gentle rise to just above idle.
@@ -571,6 +614,7 @@ function AudioEngine.RegisterCarNamed(model, carName, extra)
 		gearCount = AudioEngine.CAR_GEARS[carName],
 		gearing = AudioEngine.CAR_GEARING[carName],
 		rev = AudioEngine.CAR_REV[carName],
+		seats = AudioEngine.CAR_SEATS[carName],
 		topSpeed = "auto",
 		wheelRadius = 0.33,
 		soundLevel = AudioEngine.CAR_EMOTION[carName] and AudioEngine.EMOTION_SOUNDLEVEL or 85,

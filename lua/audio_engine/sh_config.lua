@@ -50,6 +50,15 @@ function AUDIO_ENGINE.GetCarConfig(entity)
 	return AUDIO_ENGINE.Cars[lowerModel]
 end
 
+-- the car a player sits in: driving it, or in a seat parented to it (passengers, sv_seats.lua)
+function AUDIO_ENGINE.RiddenCar(player)
+	local seat = player:GetVehicle()
+	if not IsValid(seat) then return nil end
+	local parent = seat:GetParent()
+	if IsValid(parent) and parent:IsVehicle() then return parent end
+	return seat
+end
+
 -- Mercedes-Benz SL65 AMG (R230): 6.0 L twin-turbo V12, 5-speed automatic.
 AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 	carId = "sl65",
@@ -76,6 +85,7 @@ AUDIO_ENGINE.RegisterCar("models/plpd/sl65amg_rtu.mdl", {
 		lugRpm = 0.40,     -- coasting: shift down below 2,400
 	},
 	wheelRadius = 0.376,
+	seats = 2,   -- passenger seats (sv_seats.lua): driver and front passenger
 	soundLevel = 85,
 	volume = 1.0,
 

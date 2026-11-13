@@ -20,6 +20,7 @@ if SERVER then
 	include(folder .. "sv_stability.lua")
 	include(folder .. "sv_cruise.lua")
 	include(folder .. "sv_police.lua")
+	include(folder .. "sv_seats.lua")
 else
 	for _, fileName in ipairs(clientFiles) do include(folder .. fileName) end
 end

@@ -979,7 +979,7 @@ local function updateCar(car, deltaTime)
 	local config = AudioEngine.GetEngineConfig(entity) or car.config
 	car.config = config
 	local player = LocalPlayer()
-	local isOwnCar = IsValid(player) and player:GetVehicle() == entity
+	local isOwnCar = IsValid(player) and AudioEngine.RiddenCar(player) == entity
 	local bank = Bank.Get(config, car.stockConfig, isOwnCar)
 	if bank ~= car.bank and bank.ready then
 		stopAll(car)
