@@ -121,7 +121,7 @@ POLICE_SIREN.CONFIG = {
 			name = "Fire wail",
 			level = 0.9,
 			pattern = {
-				{ f = 1200, glide = 1.8, hold = 0.1, curve = 0.4 },
+				{ f = 900, glide = 1.8, hold = 0.1, curve = 0.4 },
 				{ f = 560, glide = 2.6, hold = 0, curve = 1 },
 			},
 			logGlide = true,

@@ -228,7 +228,7 @@ Own loader `lua/autorun/police_siren_init.lua`, files in `lua/police_siren/`, st
 to drop it. Never referenced by the audio engine and never calls it (the user wants them kept apart); it only reads the lights'
 NW2 vars (`audio_lightbar`, `audio_lights`, `audio_lightscheme`: `PoliceSiren.LIGHTBAR_NW`/`PoliceSiren.LIGHTS_NW`/`PoliceSiren.SCHEME_NW`), so any car with a
 lightbar (or built-in lights) has a siren. Fire and medical cars get their own tones (`CONFIG.schemes`): fire = an electronic
-wail / yelp / phaser like a modern fire engine's (560 <-> 1200 Hz, wail 1.8 s up / 2.6 s down) with a brasher horn-speaker colour
+wail / yelp / phaser like a modern fire engine's (560 <-> 1200 Hz; the wail only to 900 Hz, the user's pick, 1.8 s up / 2.6 s down) with a brasher horn-speaker colour
 (odd harmonics, light drive, a 1.2 kHz peak); a Q-siren style spin-up / coast-down growl sounded like an air raid siren (the user said no), medical = a higher, brighter electronic wail (emswail 720 <-> 1480 Hz, emsyelp) and the hi-lo. Global `POLICE_SIREN` (PS).
 No horn (the user removed it). Tones copied from the reference recording the user picked (YouTube HKieGUH9pzg, "Police Siren Sound
 Effect"), measured with an analyser in the browser: wail 613 <-> 1190 Hz, rise 1.5 s (spin-up, curve 0.25), fall 3.15 s (even in
