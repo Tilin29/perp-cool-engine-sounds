@@ -2,19 +2,19 @@
 -- lua/police_siren/ and dev/siren_studio/
 POLICE_SIREN = POLICE_SIREN or {}
 
-local base = "police_siren/"
-local shared = { "sh_siren_config.lua", "sh_siren.lua" }
-local client = { "cl_siren_synth.lua", "cl_siren.lua" }
+local folder = "police_siren/"
+local sharedFiles = { "sh_siren_config.lua", "sh_siren.lua" }
+local clientFiles = { "cl_siren_synth.lua", "cl_siren.lua" }
 
 if SERVER then
-	for _, f in ipairs(shared) do AddCSLuaFile(base .. f) end
-	for _, f in ipairs(client) do AddCSLuaFile(base .. f) end
+	for _, fileName in ipairs(sharedFiles) do AddCSLuaFile(folder .. fileName) end
+	for _, fileName in ipairs(clientFiles) do AddCSLuaFile(folder .. fileName) end
 end
 
-for _, f in ipairs(shared) do include(base .. f) end
+for _, fileName in ipairs(sharedFiles) do include(folder .. fileName) end
 
 if SERVER then
-	include(base .. "sv_siren.lua")
+	include(folder .. "sv_siren.lua")
 else
-	for _, f in ipairs(client) do include(base .. f) end
+	for _, fileName in ipairs(clientFiles) do include(folder .. fileName) end
 end

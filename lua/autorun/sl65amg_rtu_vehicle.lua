@@ -1,6 +1,6 @@
 -- Spawn-menu entries (Vehicles > Police) for the RTU SL65 AMG, one per livery
 
-local function add(class, name, skin)
+local function addSpawnEntry(class, name, skin)
 	list.Set("Vehicles", class, {
 		Name = name,
 		Class = "prop_vehicle_jeep",
@@ -15,6 +15,6 @@ local function add(class, name, skin)
 	})
 end
 
-add("rtu_sl65amg", "SL65 AMG (Police)", 0)
-add("rtu_sl65amg_blue", "SL65 AMG (RTU Blue)", 1)
-add("rtu_sl65amg_yellow", "SL65 AMG (RTU Yellow)", 2)
+addSpawnEntry("rtu_sl65amg", "SL65 AMG (Police)", 0)
+addSpawnEntry("rtu_sl65amg_blue", "SL65 AMG (RTU Blue)", 1)
+addSpawnEntry("rtu_sl65amg_yellow", "SL65 AMG (RTU Yellow)", 2)

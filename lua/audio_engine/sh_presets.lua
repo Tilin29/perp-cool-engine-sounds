@@ -8,11 +8,11 @@
 ]]
 
 AUDIO_ENGINE = AUDIO_ENGINE or {}
-local E = AUDIO_ENGINE
+local AudioEngine = AUDIO_ENGINE
 
 local min, max, floor, pi = math.min, math.max, math.floor, math.pi
 
-E.LAYOUT_ORDER = {
+AudioEngine.LAYOUT_ORDER = {
 	{ "single", "1 · single (thumper)" },
 	{ "vtwin", "2 · V-twin, 45°" },
 	{ "ptwin", "2 · parallel twin, 270°" },
@@ -35,10 +35,10 @@ E.LAYOUT_ORDER = {
 	{ "electric", "Electric motor" },
 }
 -- firings per 720 degrees (for a Wankel, rotor firings: one per rotor per shaft turn)
-E.LAYOUT_CYL = { single = 1, vtwin = 2, ptwin = 2, triple = 3, i4 = 4, boxer = 4, i5 = 5, i6 = 6, v6odd = 6, v8cross = 8, v8flat = 8, v10 = 10, v12 = 12,
+AudioEngine.LAYOUT_CYL = { single = 1, vtwin = 2, ptwin = 2, triple = 3, i4 = 4, boxer = 4, i5 = 5, i6 = 6, v6odd = 6, v8cross = 8, v8flat = 8, v10 = 10, v12 = 12,
 	v6 = 6, flat6 = 6, flat12 = 12, w16 = 16, rotary2 = 4, rotary3 = 6, electric = 1 }
 
-E.GEAR_PRESETS = {
+AudioEngine.GEAR_PRESETS = {
 	{ id = "amg5",    name = "AMG 5-speed auto", gears = { 3.59, 2.19, 1.41, 1.00, 0.83 }, final = 2.82 },
 	{ id = "road",    name = "Road 6-speed",     gears = { 3.60, 2.10, 1.45, 1.10, 0.90, 0.76 }, final = 3.90 },
 	{ id = "close",   name = "Close-ratio 6",    gears = { 3.00, 2.10, 1.60, 1.30, 1.10, 0.95 }, final = 4.30 },
@@ -48,15 +48,15 @@ E.GEAR_PRESETS = {
 	{ id = "ev",      name = "Single-speed (electric)", gears = { 1.00 }, final = 9.00 },
 }
 local function gearPreset(id)
-	for _, g in ipairs(E.GEAR_PRESETS) do if g.id == id then return g end end
-	return E.GEAR_PRESETS[1]
+	for _, preset in ipairs(AudioEngine.GEAR_PRESETS) do if preset.id == id then return preset end end
+	return AudioEngine.GEAR_PRESETS[1]
 end
-E.GearPreset = gearPreset
+AudioEngine.GearPreset = gearPreset
 
 --[[ Engine presets. topSpeed: the gearing is fitted so top gear reaches redline there. ]]
 -- One preset per engine type in the game (see sh_carlist.lua for which car uses which),
 -- plus the SL65's own engine and the original Rev Bench sound.
-E.ENGINE_PRESETS = {
+AudioEngine.ENGINE_PRESETS = {
 	{ id = "sl65",   name = "SL65 AMG · 6.0 V12 biturbo",               layout = "v12",     pitch = 1.00, tone = 0.40, idle = 700,  redline = 6000,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.15, gearbox = "amg5" },
 	-- V12 / flat-12 / W16
 	{ id = "v12na",  name = "V12",                                      layout = "v12",     pitch = 1.00, tone = 0.60, idle = 1000, redline = 8000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.25, popTone = 0.3,  gearbox = "seven" },
@@ -68,7 +68,7 @@ E.ENGINE_PRESETS = {
 	{ id = "v10l",   name = "V10 · big-block (Viper, Ram SRT-10)",      layout = "v10",     pitch = 0.90, tone = 0.55, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.45, popTone = 0.3,  gearbox = "road" },
 	-- V8
 	{ id = "v8x",    name = "V8 · crossplane (heavy duty, trucks)",     layout = "v8cross", pitch = 0.95, tone = 0.65, idle = 700,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.6,  popTone = 0.25, gearbox = "road" },
-	-- own voices, tuned in Tone Studio; muffle = the car's silencer (cfg.muffle)
+	-- own voices, tuned in Tone Studio; muffle = the car's silencer (config.muffle)
 	{ id = "v8m",    name = "V8 · old muscle",                          layout = "v8cross", pitch = 0.90, tone = 0.85, idle = 800,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.85, popTone = 0.25, gearbox = "road",
 	  character = { f1 = 56, f2 = 340, f3 = 150, w = 1.25, o1 = 0.32, o05 = 0.45 } },
 	{ id = "v8p",    name = "V8 · modern performance",                  layout = "v8cross", pitch = 1.00, tone = 0.80, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.4,  popTone = 0.25, gearbox = "road",
@@ -115,23 +115,23 @@ E.ENGINE_PRESETS = {
 	-- the original page
 	{ id = "rb",     name = "Rev Bench classic (inline-4)",             layout = "i4",      pitch = 1.00, tone = 0.55, idle = 850,  redline = 7000,  realism = 0, turbo = false, bov = false, pops = 0.3,  gurgle = 0.0,  popTone = 0.25, gearbox = "road" },
 }
-function E.EnginePreset(id)
-	for _, p in ipairs(E.ENGINE_PRESETS) do if p.id == id then return p end end
+function AudioEngine.EnginePreset(id)
+	for _, preset in ipairs(AudioEngine.ENGINE_PRESETS) do if preset.id == id then return preset end end
 	return nil
 end
 
 -- a full, editable profile from a preset (performance at the car's stock values)
-function E.ProfileFromPreset(id)
-	local p = E.EnginePreset(id) or E.ENGINE_PRESETS[1]
-	local g = gearPreset(p.gearbox)
+function AudioEngine.ProfileFromPreset(id)
+	local preset = AudioEngine.EnginePreset(id) or AudioEngine.ENGINE_PRESETS[1]
+	local gearbox = gearPreset(preset.gearbox)
 	local gears = {}
-	for i, r in ipairs(g.gears) do gears[i] = r end
+	for index, ratio in ipairs(gearbox.gears) do gears[index] = ratio end
 	return {
-		preset = p.id, layout = p.layout, pitch = p.pitch, tone = p.tone, volume = 1,
-		idle = p.idle, redline = p.redline, realism = p.realism, turbo = p.turbo,
-		gears = gears, final = g.final, fit = 1,
-		accel = 1, vmax = 0, pops = p.pops or 0, bov = p.bov and true or false,
-		gurgle = p.gurgle or 0, popVol = 1, popTone = p.popTone or 0.2,
+		preset = preset.id, layout = preset.layout, pitch = preset.pitch, tone = preset.tone, volume = 1,
+		idle = preset.idle, redline = preset.redline, realism = preset.realism, turbo = preset.turbo,
+		gears = gears, final = gearbox.final, fit = 1,
+		accel = 1, vmax = 0, pops = preset.pops or 0, bov = preset.bov and true or false,
+		gurgle = preset.gurgle or 0, popVol = 1, popTone = preset.popTone or 0.2,
 		turboVol = 1, bovVol = 1,
 	}
 end
@@ -139,91 +139,91 @@ end
 ---------------------------------------------------------------------------
 -- validation (the server runs this on everything a client sends)
 ---------------------------------------------------------------------------
-local function clampRound(x, a, b, step)
-	x = tonumber(x) or a
-	x = min(b, max(a, x))
-	return floor(x / step + 0.5) * step
+local function clampAndRound(value, low, high, step)
+	value = tonumber(value) or low
+	value = min(high, max(low, value))
+	return floor(value / step + 0.5) * step
 end
 
-function E.SanitizeProfile(p)
-	local o = {}
-	o.preset = (type(p.preset) == "string" and p.preset:match("^[%w_]+$") and #p.preset <= 16) and p.preset or "custom"
-	o.layout = E.LAYOUT_CYL[p.layout] and p.layout or "i4"
-	o.pitch = clampRound(p.pitch, 0.5, 2, 0.05)
-	o.tone = clampRound(p.tone, 0, 1, 0.05)
-	o.volume = clampRound(p.volume, 0, 1.5, 0.05)
-	o.idle = clampRound(p.idle, 500, 1500, 25)
-	o.redline = clampRound(p.redline, max(3500, o.idle * 3), o.layout == "electric" and 16000 or 12000, 100)
-	o.realism = clampRound(p.realism, 0, 1, 0.1)
-	o.turbo = p.turbo and true or false
-	o.gears = {}
-	local src = type(p.gears) == "table" and p.gears or gearPreset("road").gears
-	for i = 1, min(8, #src) do o.gears[i] = clampRound(src[i], 0.3, 8, 0.01) end
-	if #o.gears < 1 then o.gears[1] = 1 end
-	o.final = clampRound(p.final, 2, 6, 0.01)
-	o.fit = (tonumber(p.fit) or 0) > 0 and 1 or 0
+function AudioEngine.SanitizeProfile(profile)
+	local clean = {}
+	clean.preset = (type(profile.preset) == "string" and profile.preset:match("^[%w_]+$") and #profile.preset <= 16) and profile.preset or "custom"
+	clean.layout = AudioEngine.LAYOUT_CYL[profile.layout] and profile.layout or "i4"
+	clean.pitch = clampAndRound(profile.pitch, 0.5, 2, 0.05)
+	clean.tone = clampAndRound(profile.tone, 0, 1, 0.05)
+	clean.volume = clampAndRound(profile.volume, 0, 1.5, 0.05)
+	clean.idle = clampAndRound(profile.idle, 500, 1500, 25)
+	clean.redline = clampAndRound(profile.redline, max(3500, clean.idle * 3), clean.layout == "electric" and 16000 or 12000, 100)
+	clean.realism = clampAndRound(profile.realism, 0, 1, 0.1)
+	clean.turbo = profile.turbo and true or false
+	clean.gears = {}
+	local sourceGears = type(profile.gears) == "table" and profile.gears or gearPreset("road").gears
+	for i = 1, min(8, #sourceGears) do clean.gears[i] = clampAndRound(sourceGears[i], 0.3, 8, 0.01) end
+	if #clean.gears < 1 then clean.gears[1] = 1 end
+	clean.final = clampAndRound(profile.final, 2, 6, 0.01)
+	clean.fit = (tonumber(profile.fit) or 0) > 0 and 1 or 0
 	-- performance: acceleration (engine power multiplier) and top speed (km/h, 0 = car's own)
-	o.accel = clampRound(p.accel or 1, 0.5, 2.5, 0.05)
-	o.vmax = (tonumber(p.vmax) or 0) > 0 and clampRound(p.vmax, 40, 450, 1) or 0   -- km/h (the menu sets it in whole mph)
+	clean.accel = clampAndRound(profile.accel or 1, 0.5, 2.5, 0.05)
+	clean.vmax = (tonumber(profile.vmax) or 0) > 0 and clampAndRound(profile.vmax, 40, 450, 1) or 0   -- km/h (the menu sets it in whole mph)
 	-- pops & bangs: how often (0 = off) and how loud; the turbo blow-off valve
-	o.pops = clampRound(p.pops or 0, 0, 1, 0.05)
-	o.popVol = clampRound(p.popVol or 1, 0, 2, 0.05)
-	o.bov = (p.bov == nil and o.turbo) or (p.bov and true or false)
+	clean.pops = clampAndRound(profile.pops or 0, 0, 1, 0.05)
+	clean.popVol = clampAndRound(profile.popVol or 1, 0, 2, 0.05)
+	clean.bov = (profile.bov == nil and clean.turbo) or (profile.bov and true or false)
 	-- turbo whistle and blow-off valve volume (1 = default, up to 200%)
-	o.turboVol = clampRound(p.turboVol or 1, 0, 2, 0.05)
-	o.bovVol = clampRound(p.bovVol or 1, 0, 2, 0.05)
+	clean.turboVol = clampAndRound(profile.turboVol or 1, 0, 2, 0.05)
+	clean.bovVol = clampAndRound(profile.bovVol or 1, 0, 2, 0.05)
 	-- gurgle: ragged, burbly combustion off throttle
-	o.gurgle = clampRound(p.gurgle or 0, 0, 1, 0.05)
-	o.popTone = clampRound(p.popTone or 0.2, 0, 1, 0.05)
+	clean.gurgle = clampAndRound(profile.gurgle or 0, 0, 1, 0.05)
+	clean.popTone = clampAndRound(profile.popTone or 0.2, 0, 1, 0.05)
 	-- an electric motor has no exhaust: no turbo, pops or burble
-	if o.layout == "electric" then
-		o.turbo, o.bov, o.pops, o.gurgle = false, false, 0, 0
-		o.idle = min(o.idle, 600)
+	if clean.layout == "electric" then
+		clean.turbo, clean.bov, clean.pops, clean.gurgle = false, false, 0, 0
+		clean.idle = min(clean.idle, 600)
 	end
-	return o
+	return clean
 end
 
 -- compact text form for networking:
 -- preset|layout|pitch|tone|vol|idle|red|realism|turbo|g1,g2,..|final|fit|accel|vmax|pops|bov|gurgle|popVol|popTone|turboVol|bovVol
-local function fmt(x) return (string.format("%.2f", x):gsub("0+$", ""):gsub("%.$", "")) end
-function E.EncodeProfile(p)
-	p = E.SanitizeProfile(p)
-	local g = {}
-	for i, r in ipairs(p.gears) do g[i] = fmt(r) end
+local function formatNumber(value) return (string.format("%.2f", value):gsub("0+$", ""):gsub("%.$", "")) end
+function AudioEngine.EncodeProfile(profile)
+	profile = AudioEngine.SanitizeProfile(profile)
+	local gearTexts = {}
+	for index, ratio in ipairs(profile.gears) do gearTexts[index] = formatNumber(ratio) end
 	return table.concat({
-		p.preset, p.layout, fmt(p.pitch), fmt(p.tone), fmt(p.volume), tostring(p.idle), tostring(p.redline),
-		fmt(p.realism), p.turbo and "1" or "0", table.concat(g, ","), fmt(p.final), tostring(p.fit),
-		fmt(p.accel), tostring(p.vmax), fmt(p.pops), p.bov and "1" or "0", fmt(p.gurgle), fmt(p.popVol), fmt(p.popTone),
-		fmt(p.turboVol), fmt(p.bovVol),
+		profile.preset, profile.layout, formatNumber(profile.pitch), formatNumber(profile.tone), formatNumber(profile.volume), tostring(profile.idle), tostring(profile.redline),
+		formatNumber(profile.realism), profile.turbo and "1" or "0", table.concat(gearTexts, ","), formatNumber(profile.final), tostring(profile.fit),
+		formatNumber(profile.accel), tostring(profile.vmax), formatNumber(profile.pops), profile.bov and "1" or "0", formatNumber(profile.gurgle), formatNumber(profile.popVol), formatNumber(profile.popTone),
+		formatNumber(profile.turboVol), formatNumber(profile.bovVol),
 	}, "|")
 end
 
-local function split(s, sep)
-	local t = {}
+local function split(text, separator)
+	local parts = {}
 	local start = 1
 	while true do
-		local i = string.find(s, sep, start, true)
-		if not i then t[#t + 1] = s:sub(start); break end
-		t[#t + 1] = s:sub(start, i - 1)
-		start = i + 1
+		local found = string.find(text, separator, start, true)
+		if not found then parts[#parts + 1] = text:sub(start); break end
+		parts[#parts + 1] = text:sub(start, found - 1)
+		start = found + 1
 	end
-	return t
+	return parts
 end
 
-function E.DecodeProfile(s)
-	if type(s) ~= "string" or s == "" or #s > 200 then return nil end
-	local f = split(s, "|")
-	if #f < 12 then return nil end
+function AudioEngine.DecodeProfile(text)
+	if type(text) ~= "string" or text == "" or #text > 200 then return nil end
+	local fields = split(text, "|")
+	if #fields < 12 then return nil end
 	local gears = {}
-	for _, v in ipairs(split(f[10], ",")) do gears[#gears + 1] = tonumber(v) end
+	for _, value in ipairs(split(fields[10], ",")) do gears[#gears + 1] = tonumber(value) end
 	-- blow-off valve: "0" must stay off (older strings without the field default to on with a turbo)
 	local bov = nil
-	if f[16] ~= nil and f[16] ~= "" then bov = (f[16] == "1") end
-	return E.SanitizeProfile({
-		preset = f[1], layout = f[2], pitch = f[3], tone = f[4], volume = f[5], idle = f[6], redline = f[7],
-		realism = f[8], turbo = f[9] == "1", gears = gears, final = f[11], fit = f[12],
-		accel = f[13], vmax = f[14], pops = f[15], bov = bov,
-		gurgle = f[17], popVol = f[18], popTone = f[19], turboVol = f[20], bovVol = f[21],
+	if fields[16] ~= nil and fields[16] ~= "" then bov = (fields[16] == "1") end
+	return AudioEngine.SanitizeProfile({
+		preset = fields[1], layout = fields[2], pitch = fields[3], tone = fields[4], volume = fields[5], idle = fields[6], redline = fields[7],
+		realism = fields[8], turbo = fields[9] == "1", gears = gears, final = fields[11], fit = fields[12],
+		accel = fields[13], vmax = fields[14], pops = fields[15], bov = bov,
+		gurgle = fields[17], popVol = fields[18], popTone = fields[19], turboVol = fields[20], bovVol = fields[21],
 	})
 end
 
@@ -233,31 +233,31 @@ end
 -- rpm points that get their own generated loop: ~1.26x apart from just above idle to redline
 -- (an electric motor's whine is a few tones that pitch-shift cleanly: fewer, wider bands, though
 -- not so wide that its body resonances move far)
-function E.MakeBands(idle, redline, step)
+function AudioEngine.MakeBands(idle, redline, step)
 	step = step or 1.26
-	local lo = idle * 1.07
-	local n = math.max(4, math.ceil(math.log(redline / lo) / math.log(step)) + 1)
-	local r = (redline / lo) ^ (1 / (n - 1))
-	local b = {}
-	for i = 1, n do b[i] = floor(lo * r ^ (i - 1) / 10 + 0.5) * 10 end
-	return b
+	local lowest = idle * 1.07
+	local bandCount = math.max(4, math.ceil(math.log(redline / lowest) / math.log(step)) + 1)
+	local bandRatio = (redline / lowest) ^ (1 / (bandCount - 1))
+	local bands = {}
+	for i = 1, bandCount do bands[i] = floor(lowest * bandRatio ^ (i - 1) / 10 + 0.5) * 10 end
+	return bands
 end
 
 -- final drive so top gear reaches redline at the given top speed
-function E.FitFinal(gears, redline, wheelRadius, topKmh, fit)
-	local K = 60 / (2 * pi * wheelRadius)
-	-- (with fitted gearing it turns E.TOP_GEAR_DROP under redline there, see E.FitGearCount)
-	return redline * (fit and E.TopGearShare(redline) or 0.97) / ((topKmh / 3.6) * K * gears[#gears])
+function AudioEngine.FitFinal(gears, redline, wheelRadius, topKmh, fit)
+	local rpmPerSpeed = 60 / (2 * pi * wheelRadius)
+	-- (with fitted gearing it turns AudioEngine.TOP_GEAR_DROP under redline there, see AudioEngine.FitGearCount)
+	return redline * (fit and AudioEngine.TopGearShare(redline) or 0.97) / ((topKmh / 3.6) * rpmPerSpeed * gears[#gears])
 end
 
 --[[
 	The top gear never reaches redline: at the top speed it turns TOP_GEAR_DROP rpm under redline
-	(E.FitFinal; at least TOP_GEAR_MIN of it, for the low-revving diesels), so the gears are spaced
+	(AudioEngine.FitFinal; at least TOP_GEAR_MIN of it, for the low-revving diesels), so the gears are spaced
 	up to the speed the top gear would reach at redline.
 ]]
-E.TOP_GEAR_DROP, E.TOP_GEAR_MIN = 1000, 0.6
-function E.TopGearShare(redline)
-	return max(E.TOP_GEAR_MIN, (redline - E.TOP_GEAR_DROP) / redline)
+AudioEngine.TOP_GEAR_DROP, AudioEngine.TOP_GEAR_MIN = 1000, 0.6
+function AudioEngine.TopGearShare(redline)
+	return max(AudioEngine.TOP_GEAR_MIN, (redline - AudioEngine.TOP_GEAR_DROP) / redline)
 end
 
 --[[
@@ -271,116 +271,116 @@ end
 	stepMax (few gears over a wide span) the spread is lowered until it fits.
 	upShare: where the debug module's gearing editor puts a gear's upshift (share of redline).
 ]]
-E.GEAR_FIT = { firstMin = 25, firstShare = 0.28, kmhPerGear = 40, stepMax = 2.3, spread = 2.2, maxCount = 5, upShare = 0.92 }
+AudioEngine.GEAR_FIT = { firstMin = 25, firstShare = 0.28, kmhPerGear = 40, stepMax = 2.3, spread = 2.2, maxCount = 5, upShare = 0.92 }
 
 --[[
-	A guess at the car's full-throttle acceleration (E.GearAccel), only for audio_engine_accel_log
+	A guess at the car's full-throttle acceleration (AudioEngine.GearAccel), only for audio_engine_accel_log
 	and the drive demo (not the gear spacing): a pull of GEAR_ACCEL.perWkg x its power-to-weight
 	(W/kg, NW2 audio_pwr), at most GEAR_ACCEL.max m/s2, fading as (v/top)^fade towards the top speed.
 ]]
-E.GEAR_ACCEL = { perWkg = 0.035, max = 5, fade = 3, defaultWkg = 60, floor = 0.02 }
+AudioEngine.GEAR_ACCEL = { perWkg = 0.035, max = 5, fade = 3, defaultWkg = 60, floor = 0.02 }
 
 -- the modelled full-throttle acceleration (m/s2) at v (m/s), for a car of wkg W/kg and top speed vmax (m/s)
-function E.GearAccel(v, vmax, wkg)
-	local A = E.GEAR_ACCEL
-	local a0 = min(A.max, A.perWkg * (wkg or A.defaultWkg))
-	return max(A.floor, a0 * (1 - (min(v, vmax * 0.999) / vmax) ^ A.fade))
+function AudioEngine.GearAccel(speed, topSpeed, powerToWeight)
+	local accelerationModel = AudioEngine.GEAR_ACCEL
+	local launchAcceleration = min(accelerationModel.max, accelerationModel.perWkg * (powerToWeight or accelerationModel.defaultWkg))
+	return max(accelerationModel.floor, launchAcceleration * (1 - (min(speed, topSpeed * 0.999) / topSpeed) ^ accelerationModel.fade))
 end
 
 -- the modelled time (s) from a standstill to share x top speed (audio_engine_accel_log compares it)
 local T_STEPS = 240
-function E.GearModelTime(topKmh, wkg, share)
-	local vmax = topKmh / 3.6
-	local dv = vmax * share / T_STEPS
-	local t = 0
-	for i = 1, T_STEPS do t = t + dv / E.GearAccel((i - 0.5) * dv, vmax, wkg) end
-	return t
+function AudioEngine.GearModelTime(topKmh, powerToWeight, share)
+	local topSpeed = topKmh / 3.6
+	local speedStep = topSpeed * share / T_STEPS
+	local elapsed = 0
+	for i = 1, T_STEPS do elapsed = elapsed + speedStep / AudioEngine.GearAccel((i - 0.5) * speedStep, topSpeed, powerToWeight) end
+	return elapsed
 end
 
 -- the speeds (km/h) where each gear reaches redline (`count`: sh_carlist.lua CAR_GEARS)
-function E.FitGearEnds(topKmh, maxCount, redline, wkg, count)
-	local F = E.GEAR_FIT
-	local v1 = max(F.firstMin, topKmh * F.firstShare)
-	local span = topKmh / E.TopGearShare(redline or 6000) / v1
-	local bySteps = 1 + math.ceil(math.log(span) / math.log(F.stepMax))
-	local n
-	if count then n = math.Clamp(count, 2, 8)
-	else n = math.Clamp(max(floor(topKmh / F.kmhPerGear + 0.5), bySteps), 2, min(maxCount or F.maxCount, F.maxCount)) end
+function AudioEngine.FitGearEnds(topKmh, maxCount, redline, powerToWeight, count)
+	local gearFit = AudioEngine.GEAR_FIT
+	local firstGearEnd = max(gearFit.firstMin, topKmh * gearFit.firstShare)
+	local speedSpan = topKmh / AudioEngine.TopGearShare(redline or 6000) / firstGearEnd
+	local countBySteps = 1 + math.ceil(math.log(speedSpan) / math.log(gearFit.stepMax))
+	local gearCount
+	if count then gearCount = math.Clamp(count, 2, 8)
+	else gearCount = math.Clamp(max(floor(topKmh / gearFit.kmhPerGear + 0.5), countBySteps), 2, min(maxCount or gearFit.maxCount, gearFit.maxCount)) end
 	-- the speed (as a share of 1st's) where gear i ends, for a spread p (p 0 = geometric)
-	local function ends(p)
-		local e = {}
-		for i = 1, n do
-			local t = (i - 1) / (n - 1)
-			e[i] = p < 0.05 and span ^ t or (1 + t * (span ^ p - 1)) ^ (1 / p)
+	local function gearEndsFor(spread)
+		local gearEnds = {}
+		for i = 1, gearCount do
+			local position = (i - 1) / (gearCount - 1)
+			gearEnds[i] = spread < 0.05 and speedSpan ^ position or (1 + position * (speedSpan ^ spread - 1)) ^ (1 / spread)
 		end
-		return e
+		return gearEnds
 	end
-	local p, e = F.spread
+	local spread, gearEnds = gearFit.spread
 	repeat
-		e = ends(p)
-		local ok = true
-		for i = 2, n do if e[i] / e[i - 1] > F.stepMax then ok = false end end
-		if ok then break end
-		p = p - 0.25
-	until p < 0.05
-	if p < 0.05 then e = ends(0) end
-	local kmh = {}
-	for i = 1, n do kmh[i] = e[i] * v1 end
-	return kmh
+		gearEnds = gearEndsFor(spread)
+		local withinStepMax = true
+		for i = 2, gearCount do if gearEnds[i] / gearEnds[i - 1] > gearFit.stepMax then withinStepMax = false end end
+		if withinStepMax then break end
+		spread = spread - 0.25
+	until spread < 0.05
+	if spread < 0.05 then gearEnds = gearEndsFor(0) end
+	local endSpeeds = {}
+	for i = 1, gearCount do endSpeeds[i] = gearEnds[i] * firstGearEnd end
+	return endSpeeds
 end
 
--- the box's ratios respaced for the car's top speed (E.FitFinal then sets the final drive)
-function E.FitGearCount(gears, topKmh, count, redline, wkg)
+-- the box's ratios respaced for the car's top speed (AudioEngine.FitFinal then sets the final drive)
+function AudioEngine.FitGearCount(gears, topKmh, count, redline, powerToWeight)
 	if #gears < 2 then return gears end
-	local e = E.FitGearEnds(topKmh, #gears, redline, wkg, count)
-	local g = {}
-	for i = 1, #e do g[i] = floor(gears[1] * e[1] / e[i] * 100 + 0.5) / 100 end
-	return g
+	local gearEnds = AudioEngine.FitGearEnds(topKmh, #gears, redline, powerToWeight, count)
+	local ratios = {}
+	for i = 1, #gearEnds do ratios[i] = floor(gears[1] * gearEnds[1] / gearEnds[i] * 100 + 0.5) / 100 end
+	return ratios
 end
 
 --[[
-	A car's own gearing (sh_carlist.lua E.CAR_GEARING, made with the debug module's gearing editor),
+	A car's own gearing (sh_carlist.lua AudioEngine.CAR_GEARING, made with the debug module's gearing editor),
 	set by shift speeds instead of ratios. One entry per gear, the last is the top gear:
 	  { mph = 24, rpm = 5500 }             changes up at 24 mph, where it turns 5,500 rpm (W held:
 	                                       gentler pulling changes up a little earlier)
 	  { mph = 42, rpm = 5600, down = 15 }  ... and changes down under 15 mph coasting or braking
 	                                       (no `down`: the default shift points)
 	  { down = 60 }                        the top gear: it turns topRpm at the car's top speed
-	  topRpm = 5200                        (default: E.TOP_GEAR_DROP under redline)
+	  topRpm = 5200                        (default: AudioEngine.TOP_GEAR_DROP under redline)
 	Each gear is at least GEAR_MIN_STEP taller than the one before, so every upshift drops the
 	revs far enough to hear it. Runtime only: no re-bake.
 ]]
-E.GEAR_MIN_STEP = 1.1
+AudioEngine.GEAR_MIN_STEP = 1.1
 local MS_PER_MPH = 0.44704
 
-function E.ApplyGearing(cfg, spec)
-	local n = #spec
-	if n < 1 then return cfg end
-	local K = 60 / (2 * pi * cfg.wheelRadius)
-	local red, idle = cfg.redline, cfg.idle
-	local ratios, up, down = {}, {}, {}
-	for i = 1, n do
-		local g = spec[i]
-		local r
-		if i < n then
-			up[i] = math.Clamp(tonumber(g.rpm) or red * 0.92, idle * 1.5, red * 0.99)
-			r = up[i] / (max(1, tonumber(g.mph) or 10) * MS_PER_MPH * K)
+function AudioEngine.ApplyGearing(config, spec)
+	local gearCount = #spec
+	if gearCount < 1 then return config end
+	local rpmPerSpeed = 60 / (2 * pi * config.wheelRadius)
+	local redline, idle = config.redline, config.idle
+	local ratios, upshiftRpms, downshiftSpeeds = {}, {}, {}
+	for i = 1, gearCount do
+		local gearSpec = spec[i]
+		local ratio
+		if i < gearCount then
+			upshiftRpms[i] = math.Clamp(tonumber(gearSpec.rpm) or redline * 0.92, idle * 1.5, redline * 0.99)
+			ratio = upshiftRpms[i] / (max(1, tonumber(gearSpec.mph) or 10) * MS_PER_MPH * rpmPerSpeed)
 		else
-			local top = math.Clamp(tonumber(spec.topRpm) or red * E.TopGearShare(red), idle * 1.5, red * 0.985)
-			r = top / (cfg.topSpeed / 3.6 * K)
+			local topRpm = math.Clamp(tonumber(spec.topRpm) or redline * AudioEngine.TopGearShare(redline), idle * 1.5, redline * 0.985)
+			ratio = topRpm / (config.topSpeed / 3.6 * rpmPerSpeed)
 		end
-		if i > 1 then r = min(r, ratios[i - 1] / E.GEAR_MIN_STEP) end
-		ratios[i] = r
-		local d = tonumber(g.down)
-		if i > 1 and d and d > 0 then
+		if i > 1 then ratio = min(ratio, ratios[i - 1] / AudioEngine.GEAR_MIN_STEP) end
+		ratios[i] = ratio
+		local downMph = tonumber(gearSpec.down)
+		if i > 1 and downMph and downMph > 0 then
 			-- under the speed where the gear below changes up (or it would change straight back)
-			local belowUp = (up[i - 1] or red * 0.92) / (ratios[i - 1] * K)
-			down[i] = min(d * MS_PER_MPH, belowUp * 0.9)
+			local belowUpshiftSpeed = (upshiftRpms[i - 1] or redline * 0.92) / (ratios[i - 1] * rpmPerSpeed)
+			downshiftSpeeds[i] = min(downMph * MS_PER_MPH, belowUpshiftSpeed * 0.9)
 		end
 	end
-	cfg.gears, cfg.final, cfg.reverse = ratios, 1, ratios[1] * 0.9
-	cfg.shiftPlan = { up = up, down = down }
-	return cfg
+	config.gears, config.final, config.reverse = ratios, 1, ratios[1] * 0.9
+	config.shiftPlan = { up = upshiftRpms, down = downshiftSpeeds }
+	return config
 end
 
 local resolveCache = setmetatable({}, { __mode = "k" })
@@ -390,114 +390,114 @@ local resolveCache = setmetatable({}, { __mode = "k" })
 	prof: a profile table, or nil for the car's stock preset
 ]]
 -- a car's stock profile: its preset plus any per-car changes (car.stock, see sh_carlist.lua)
-function E.CarStockProfile(car)
-	local p = E.ProfileFromPreset(car.preset or "sl65")
-	if type(car.stock) == "table" then
-		for k, v in pairs(car.stock) do p[k] = v end
-		p = E.SanitizeProfile(p)
+function AudioEngine.CarStockProfile(carConfig)
+	local profile = AudioEngine.ProfileFromPreset(carConfig.preset or "sl65")
+	if type(carConfig.stock) == "table" then
+		for key, value in pairs(carConfig.stock) do profile[key] = value end
+		profile = AudioEngine.SanitizeProfile(profile)
 	end
 	-- stock pops & bangs (sh_carlist.lua CAR_POPS): runtime only, so not part of the sound key
-	if car.stockPops then p.pops = math.Clamp(car.stockPops, 0, 1) end
-	if car.stockPopVol then p.popVol = math.Clamp(car.stockPopVol, 0, 2) end
+	if carConfig.stockPops then profile.pops = math.Clamp(carConfig.stockPops, 0, 1) end
+	if carConfig.stockPopVol then profile.popVol = math.Clamp(carConfig.stockPopVol, 0, 2) end
 	-- stock blow-off valve (CAR_BOV): only with a turbo
-	if car.stockBov ~= nil then p.bov = (car.stockBov and p.turbo) and true or false end
-	if car.stockBovVol then p.bovVol = math.Clamp(car.stockBovVol, 0, 2) end
+	if carConfig.stockBov ~= nil then profile.bov = (carConfig.stockBov and profile.turbo) and true or false end
+	if carConfig.stockBovVol then profile.bovVol = math.Clamp(carConfig.stockBovVol, 0, 2) end
 	-- a supercharged car (CAR_SUPERCHARGER) doesn't also get its preset's turbo
-	if car.supercharger then p.turbo, p.bov = false, false end
-	return p
+	if carConfig.supercharger then profile.turbo, profile.bov = false, false end
+	return profile
 end
 
-function E.ResolveProfile(car, prof)
-	prof = prof or E.CarStockProfile(car)
-	local r = prof.realism
-	local cfg = {}
-	for k, v in pairs(car) do cfg[k] = v end
-	cfg.profile = prof
-	cfg.layout, cfg.pitch, cfg.tone = prof.layout, prof.pitch, prof.tone
-	cfg.volume = prof.volume * (car.volume or 1)
-	cfg.idle, cfg.redline = prof.idle, prof.redline
-	cfg.bands = E.MakeBands(prof.idle, prof.redline, prof.layout == "electric" and 1.35 or nil)
-	cfg.realism = {
-		bankSpread = 1.0 * r, cylinderVar = 0.07 * r, cylinderTiming = 1.5 * r, combustionVar = 0.12 * r,
-		flowNoise = 1.0 * r, mufflerMode = 0.5 * r, mechanical = 1.0 * r, turboSoften = 0.6 * r,
-		tailpipe = 0.3 * r, reverb = 0.2 - 0.05 * r, voice = r,
+function AudioEngine.ResolveProfile(carConfig, profile)
+	profile = profile or AudioEngine.CarStockProfile(carConfig)
+	local realism = profile.realism
+	local config = {}
+	for key, value in pairs(carConfig) do config[key] = value end
+	config.profile = profile
+	config.layout, config.pitch, config.tone = profile.layout, profile.pitch, profile.tone
+	config.volume = profile.volume * (carConfig.volume or 1)
+	config.idle, config.redline = profile.idle, profile.redline
+	config.bands = AudioEngine.MakeBands(profile.idle, profile.redline, profile.layout == "electric" and 1.35 or nil)
+	config.realism = {
+		bankSpread = 1.0 * realism, cylinderVar = 0.07 * realism, cylinderTiming = 1.5 * realism, combustionVar = 0.12 * realism,
+		flowNoise = 1.0 * realism, mufflerMode = 0.5 * realism, mechanical = 1.0 * realism, turboSoften = 0.6 * realism,
+		tailpipe = 0.3 * realism, reverb = 0.2 - 0.05 * realism, voice = realism,
 	}
-	cfg.electric = prof.layout == "electric"
-	cfg.turbo = (prof.turbo and not cfg.electric) and { whine = 1.0, blowoff = 1.0 } or nil
-	cfg.gurgle = prof.gurgle
-	cfg.popTone = prof.popTone
+	config.electric = profile.layout == "electric"
+	config.turbo = (profile.turbo and not config.electric) and { whine = 1.0, blowoff = 1.0 } or nil
+	config.gurgle = profile.gurgle
+	config.popTone = profile.popTone
 	-- the speed the car will actually reach: the profile's top speed, else the car's own
-	cfg.topSpeed = prof.vmax > 0 and prof.vmax or (tonumber(car.topSpeed) or 250)
+	config.topSpeed = profile.vmax > 0 and profile.vmax or (tonumber(carConfig.topSpeed) or 250)
 	-- power to weight (W/kg): the car's own (server, NW2 audio_pwr), scaled by the tuned acceleration
-	cfg.powerKg = (tonumber(car.powerKg) or E.GEAR_ACCEL.defaultWkg) * (prof.accel or 1)
-	cfg.gears = prof.fit > 0 and E.FitGearCount(prof.gears, cfg.topSpeed, car.gearCount, prof.redline, cfg.powerKg) or prof.gears
-	cfg.final = prof.fit > 0 and E.FitFinal(cfg.gears, prof.redline, car.wheelRadius, cfg.topSpeed, true) or prof.final
-	cfg.reverse = prof.gears[1] * 0.9
+	config.powerKg = (tonumber(carConfig.powerKg) or AudioEngine.GEAR_ACCEL.defaultWkg) * (profile.accel or 1)
+	config.gears = profile.fit > 0 and AudioEngine.FitGearCount(profile.gears, config.topSpeed, carConfig.gearCount, profile.redline, config.powerKg) or profile.gears
+	config.final = profile.fit > 0 and AudioEngine.FitFinal(config.gears, profile.redline, carConfig.wheelRadius, config.topSpeed, true) or profile.final
+	config.reverse = profile.gears[1] * 0.9
 	-- torque converter stall speed (an electric motor is direct drive)
-	cfg.stallRpm = cfg.electric and prof.idle or (prof.idle + 0.27 * prof.redline)
-	-- the car's own gearing (E.CAR_GEARING), unless the profile sets its ratios by hand (fit 0)
-	if type(car.gearing) == "table" and prof.fit > 0 then E.ApplyGearing(cfg, car.gearing) end
-	-- how fast it revs up and drops back in neutral (E.CAR_REV; sh_drivetrain.lua DT.REV)
-	if type(car.rev) == "table" then cfg.revRise, cfg.revFall = tonumber(car.rev.rise), tonumber(car.rev.fall) end
-	local p = E.EnginePreset(prof.preset)
-	cfg.engineName = p and p.name or "Custom"
+	config.stallRpm = config.electric and profile.idle or (profile.idle + 0.27 * profile.redline)
+	-- the car's own gearing (AudioEngine.CAR_GEARING), unless the profile sets its ratios by hand (fit 0)
+	if type(carConfig.gearing) == "table" and profile.fit > 0 then AudioEngine.ApplyGearing(config, carConfig.gearing) end
+	-- how fast it revs up and drops back in neutral (AudioEngine.CAR_REV; sh_drivetrain.lua Drivetrain.REV)
+	if type(carConfig.rev) == "table" then config.revRise, config.revFall = tonumber(carConfig.rev.rise), tonumber(carConfig.rev.fall) end
+	local preset = AudioEngine.EnginePreset(profile.preset)
+	config.engineName = preset and preset.name or "Custom"
 	-- the exhaust voice: the car's own, else its preset's (sh_presets character), else the layout's
-	if type(car.character) ~= "table" and p and p.character then cfg.character = p.character end
+	if type(carConfig.character) ~= "table" and preset and preset.character then config.character = preset.character end
 	-- everything that changes the generated sound; cars with the same key share sounds.
 	-- The turbo, blow-off valve, volumes and how often pops happen are not in it: they are
 	-- played on top at runtime, so changing them never generates a new engine.
-	local key = { prof.layout, fmt(prof.pitch), fmt(prof.tone), prof.idle, prof.redline,
-		fmt(r), fmt(prof.gurgle), fmt(prof.popTone) }
+	local keyParts = { profile.layout, formatNumber(profile.pitch), formatNumber(profile.tone), profile.idle, profile.redline,
+		formatNumber(realism), formatNumber(profile.gurgle), formatNumber(profile.popTone) }
 	-- the car's silencer (economy cars); only in the key when set, so other keys stay as they were
-	if (car.muffle or 0) > 0 then key[#key + 1] = "m" .. fmt(car.muffle) end
+	if (carConfig.muffle or 0) > 0 then keyParts[#keyParts + 1] = "m" .. formatNumber(carConfig.muffle) end
 	-- the car's own exhaust voice (sh_carlist.lua character): likewise only when set
-	if type(cfg.character) == "table" then
-		local c = {}
-		for _, k in ipairs({ "f1", "f2", "f3", "w", "o1", "o05" }) do c[#c + 1] = cfg.character[k] and fmt(cfg.character[k]) or "" end
-		key[#key + 1] = "c" .. table.concat(c, ",")
+	if type(config.character) == "table" then
+		local characterParts = {}
+		for _, key in ipairs({ "f1", "f2", "f3", "w", "o1", "o05" }) do characterParts[#characterParts + 1] = config.character[key] and formatNumber(config.character[key]) or "" end
+		keyParts[#keyParts + 1] = "c" .. table.concat(characterParts, ",")
 	end
-	cfg.soundKey = table.concat(key, "_")
-	cfg.id = cfg.soundKey
+	config.soundKey = table.concat(keyParts, "_")
+	config.id = config.soundKey
 	-- the same engine at any redline: its rpm bands are the same sound, so a baked bank with a
 	-- higher redline serves it (see cl_soundbank). Not for electric motors: their whine level
 	-- follows rpm / redline.
-	if not cfg.electric then
-		table.remove(key, 5)
-		cfg.familyKey = table.concat(key, "_")
+	if not config.electric then
+		table.remove(keyParts, 5)
+		config.familyKey = table.concat(keyParts, "_")
 	end
-	return cfg
+	return config
 end
 
 -- the car's top speed in km/h: "auto" uses the vehicle script's MaxSpeed (sent by the server)
-function E.CarTopSpeed(ent, car)
-	car = car or E.GetCarConfig(ent)
-	local t = car and car.topSpeed
-	if t == "auto" or t == nil then
-		local v = IsValid(ent) and ent:GetNW2Float("audio_vmax", 0) or 0
-		return v > 0 and min(400, max(40, floor(v / 5 + 0.5) * 5)) or 250
+function AudioEngine.CarTopSpeed(entity, carConfig)
+	carConfig = carConfig or AudioEngine.GetCarConfig(entity)
+	local topSpeed = carConfig and carConfig.topSpeed
+	if topSpeed == "auto" or topSpeed == nil then
+		local scriptTopSpeed = IsValid(entity) and entity:GetNW2Float("audio_vmax", 0) or 0
+		return scriptTopSpeed > 0 and min(400, max(40, floor(scriptTopSpeed / 5 + 0.5) * 5)) or 250
 	end
-	return t
+	return topSpeed
 end
 
 -- the car's power to weight in W/kg (stock horsepower over mass, sent by the server), for the gear spacing
-function E.CarPower(ent, car)
-	local w = IsValid(ent) and ent:GetNW2Float("audio_pwr", 0) or 0
-	if w > 0 then return floor(w + 0.5) end
-	return car and tonumber(car.powerKg) or E.GEAR_ACCEL.defaultWkg
+function AudioEngine.CarPower(entity, carConfig)
+	local powerToWeight = IsValid(entity) and entity:GetNW2Float("audio_pwr", 0) or 0
+	if powerToWeight > 0 then return floor(powerToWeight + 0.5) end
+	return carConfig and tonumber(carConfig.powerKg) or AudioEngine.GEAR_ACCEL.defaultWkg
 end
 
 -- the resolved config for a car entity, following its networked profile
-function E.GetEngineConfig(ent)
-	local car = E.GetCarConfig(ent)
-	if not car then return nil end
-	local s = ent:GetNW2String("audio_prof", "")
-	local top, pwr = E.CarTopSpeed(ent, car), E.CarPower(ent, car)
-	local c = resolveCache[ent]
-	if c and c.str == s and c.car == car and c.top == top and c.pwr == pwr then return c.cfg end
-	local carEff = {}
-	for k, v in pairs(car) do carEff[k] = v end
-	carEff.topSpeed, carEff.powerKg = top, pwr
-	local cfg = E.ResolveProfile(carEff, E.DecodeProfile(s))
-	resolveCache[ent] = { str = s, car = car, top = top, pwr = pwr, cfg = cfg }
-	return cfg
+function AudioEngine.GetEngineConfig(entity)
+	local carConfig = AudioEngine.GetCarConfig(entity)
+	if not carConfig then return nil end
+	local profileString = entity:GetNW2String("audio_prof", "")
+	local topSpeed, powerToWeight = AudioEngine.CarTopSpeed(entity, carConfig), AudioEngine.CarPower(entity, carConfig)
+	local cached = resolveCache[entity]
+	if cached and cached.profileString == profileString and cached.carConfig == carConfig and cached.topSpeed == topSpeed and cached.powerToWeight == powerToWeight then return cached.config end
+	local effectiveCar = {}
+	for key, value in pairs(carConfig) do effectiveCar[key] = value end
+	effectiveCar.topSpeed, effectiveCar.powerKg = topSpeed, powerToWeight
+	local config = AudioEngine.ResolveProfile(effectiveCar, AudioEngine.DecodeProfile(profileString))
+	resolveCache[entity] = { profileString = profileString, carConfig = carConfig, topSpeed = topSpeed, powerToWeight = powerToWeight, config = config }
+	return config
 end

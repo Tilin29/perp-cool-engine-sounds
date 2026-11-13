@@ -28,31 +28,31 @@
 	on their own scripts and livery skins, for testing outside the PERP gamemode.
 ]]
 
-local E = AUDIO_ENGINE
+local AudioEngine = AUDIO_ENGINE
 
-local cvMute = CreateConVar("audio_engine_mutestock", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+local muteStockConVar = CreateConVar("audio_engine_mutestock", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"1 = silence the TDM engine recordings of cars that use the procedural engine")
-local cvSkid = CreateConVar("audio_engine_muteskid", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+local muteSkidConVar = CreateConVar("audio_engine_muteskid", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"1 = silence the TDM tyre screech when braking (shared by all TDM cars)")
-local cvScrape = CreateConVar("audio_engine_mutetyrescrape", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+local muteScrapeConVar = CreateConVar("audio_engine_mutetyrescrape", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"1 = silence the scrape of sliding tyres (glass bottle / dirt surface sounds; global)")
 
 -- the scrape sounds of the surface materials PERP's wheels slide and brake on
 -- (glassbottle; slidingrubbertire / brakingrubbertire / snow, which all scrape as dirt)
-E.TYRE_SCRAPE_SOUNDS = { "GlassBottle.ScrapeRough", "GlassBottle.ScrapeSmooth", "Dirt.Scrape" }
+AudioEngine.TYRE_SCRAPE_SOUNDS = { "GlassBottle.ScrapeRough", "GlassBottle.ScrapeSmooth", "Dirt.Scrape" }
 
-local PACKS = { "tdmcars", "jarheads", "perp2" }
-local TIERS = { "", "used/", "upgrade_1/", "upgrade_2/", "spiked/" }
+local CONTENT_PACKS = { "tdmcars", "jarheads", "perp2" }
+local SCRIPT_TIERS = { "", "used/", "upgrade_1/", "upgrade_2/", "spiked/" }
 
 -- variant scripts whose name doesn't start with their car's base script name
-E.PERP_SCRIPT_ALIASES = E.PERP_SCRIPT_ALIASES or {
+AudioEngine.PERP_SCRIPT_ALIASES = AudioEngine.PERP_SCRIPT_ALIASES or {
 	["tdmcars/charger_cop"] = "tdmcars/chargersrt8",
 }
 
 -- scripts with no model in PERP's content packs: nothing spawns on them, so the soundscripts
 -- they share don't keep a registered car's recording playing (the GTA IV tow truck's "bus_*"
 -- would keep the fire truck's)
-E.PERP_SCRIPT_UNUSED = E.PERP_SCRIPT_UNUSED or {
+AudioEngine.PERP_SCRIPT_UNUSED = AudioEngine.PERP_SCRIPT_UNUSED or {
 	["perp2/towtruck"] = true,
 	["tdmcars/lee"] = true,
 	["tdmcars/subimpreza"] = true,
@@ -60,173 +60,173 @@ E.PERP_SCRIPT_UNUSED = E.PERP_SCRIPT_UNUSED or {
 
 -- only soundscripts can be redefined; a raw path ("vehicles\...\x.wav") can't be. Door sounds
 -- (the GTA IV vehicles start up with "tdm_door_open") aren't the engine and may play elsewhere
-local function add(set, snd)
-	if snd and snd ~= "" and not snd:find("[%.\\/]") and not snd:lower():find("door", 1, true) then
-		set[snd:lower()] = snd
+local function addSoundName(soundSet, soundName)
+	if soundName and soundName ~= "" and not soundName:find("[%.\\/]") and not soundName:lower():find("door", 1, true) then
+		soundSet[soundName:lower()] = soundName
 	end
 end
 
 -- soundscript names of a vehicle script's engine states, into set[lower] = original spelling,
 -- and of its Skid_* sounds into skids
-local function stateSounds(path, set, skids)
-	local txt = file.Read(path, "GAME")
-	if not txt then return end
-	for block in txt:gmatch('"[Ss][Tt][Aa][Tt][Ee]"%s*(%b{})') do
-		add(set, block:match('"[Ss][Oo][Uu][Nn][Dd]"%s*"([^"]*)"'))
+local function collectStateSounds(path, soundSet, skidSounds)
+	local scriptText = file.Read(path, "GAME")
+	if not scriptText then return end
+	for block in scriptText:gmatch('"[Ss][Tt][Aa][Tt][Ee]"%s*(%b{})') do
+		addSoundName(soundSet, block:match('"[Ss][Oo][Uu][Nn][Dd]"%s*"([^"]*)"'))
 	end
-	if skids then
-		for snd in txt:gmatch('"[Ss][Kk][Ii][Dd]_%a+"%s*"([^"]*)"') do add(skids, snd) end
+	if skidSounds then
+		for soundName in scriptText:gmatch('"[Ss][Kk][Ii][Dd]_%a+"%s*"([^"]*)"') do addSoundName(skidSounds, soundName) end
 	end
 end
 
-local function collect()
+local function collectSoundNames()
 	local claimed = {}
 	local function claim(script)
-		local pk, base = (script or ""):lower():match("^scripts/vehicles/([^/]+)/([^/]+)%.txt$")
-		if pk then claimed[pk .. "/" .. base] = { pk = pk, base = base } end
+		local pack, base = (script or ""):lower():match("^scripts/vehicles/([^/]+)/([^/]+)%.txt$")
+		if pack then claimed[pack .. "/" .. base] = { pack = pack, base = base } end
 	end
-	for _, car in pairs(E.Cars) do claim(car.script) end
+	for _, carConfig in pairs(AudioEngine.Cars) do claim(carConfig.script) end
 	-- job variants not named <base>_something (dodgeramff)
-	for _, job in ipairs(E.JOB_VEHICLES or {}) do claim(job[3]) end
+	for _, job in ipairs(AudioEngine.JOB_VEHICLES or {}) do claim(job[3]) end
 	-- is this script one of a registered car's (its own name, or "<base>_something")?
-	local function ours(pk, name)
-		if E.PERP_SCRIPT_ALIASES[pk .. "/" .. name] or claimed[pk .. "/" .. name] then return true end
-		for _, c in pairs(claimed) do
-			if c.pk == pk and name:sub(1, #c.base + 1) == c.base .. "_" then return true end
+	local function isOurScript(pack, name)
+		if AudioEngine.PERP_SCRIPT_ALIASES[pack .. "/" .. name] or claimed[pack .. "/" .. name] then return true end
+		for _, claimedScript in pairs(claimed) do
+			if claimedScript.pack == pack and name:sub(1, #claimedScript.base + 1) == claimedScript.base .. "_" then return true end
 		end
 		return false
 	end
 
-	local mine, others, skids = {}, {}, {}
-	for _, pk in ipairs(PACKS) do
-		for _, tier in ipairs(TIERS) do
-			local dir = "scripts/vehicles/" .. pk .. "/" .. tier
-			for _, f in ipairs((file.Find(dir .. "*.txt", "GAME"))) do
-				local name = f:lower():gsub("%.txt$", "")
-				if not E.PERP_SCRIPT_UNUSED[pk .. "/" .. name] then
-					local own = ours(pk, name)
+	local ourSounds, otherSounds, skidSounds = {}, {}, {}
+	for _, pack in ipairs(CONTENT_PACKS) do
+		for _, tier in ipairs(SCRIPT_TIERS) do
+			local directory = "scripts/vehicles/" .. pack .. "/" .. tier
+			for _, fileName in ipairs((file.Find(directory .. "*.txt", "GAME"))) do
+				local name = fileName:lower():gsub("%.txt$", "")
+				if not AudioEngine.PERP_SCRIPT_UNUSED[pack .. "/" .. name] then
+					local isOurs = isOurScript(pack, name)
 					-- spiked scripts scrape on the rims: that one stays
-					stateSounds(dir .. f, own and mine or others, own and tier ~= "spiked/" and skids or nil)
+					collectStateSounds(directory .. fileName, isOurs and ourSounds or otherSounds, isOurs and tier ~= "spiked/" and skidSounds or nil)
 				end
 			end
 		end
 	end
 	-- registered cars whose script lives somewhere else (e.g. the example police car in scripts/vehicles/plpd/)
-	for _, car in pairs(E.Cars) do
-		if car.script then stateSounds(car.script, mine, skids) end
+	for _, carConfig in pairs(AudioEngine.Cars) do
+		if carConfig.script then collectStateSounds(carConfig.script, ourSounds, skidSounds) end
 	end
 
-	local muted, kept = {}, 0
-	for low, name in pairs(mine) do
-		if others[low] then kept = kept + 1 else muted[low] = name end
+	local muted, keptCount = {}, 0
+	for lowerName, name in pairs(ourSounds) do
+		if otherSounds[lowerName] then keptCount = keptCount + 1 else muted[lowerName] = name end
 	end
-	return muted, kept, skids
+	return muted, keptCount, skidSounds
 end
 
-E.PERP_SAVED = E.PERP_SAVED or {}
-local NULL = "common/null.wav"
+AudioEngine.PERP_SAVED = AudioEngine.PERP_SAVED or {}
+local SILENT_SOUND = "common/null.wav"
 
 -- point a soundscript at silence, or put the original back
-local function mute(name, on)
-	local saved = E.PERP_SAVED[name]
+local function muteSound(name, silence)
+	local saved = AudioEngine.PERP_SAVED[name]
 	if saved == nil then
-		local p = sound.GetProperties(name)
-		saved = (p and p.sound ~= NULL) and p or false
-		E.PERP_SAVED[name] = saved
+		local properties = sound.GetProperties(name)
+		saved = (properties and properties.sound ~= SILENT_SOUND) and properties or false
+		AudioEngine.PERP_SAVED[name] = saved
 	end
-	if on then
-		sound.Add({ name = name, channel = CHAN_STATIC, volume = 1, level = 0, pitch = 100, sound = NULL })
+	if silence then
+		sound.Add({ name = name, channel = CHAN_STATIC, volume = 1, level = 0, pitch = 100, sound = SILENT_SOUND })
 	elseif saved then
 		sound.Add(saved)
 	end
 end
 
-function E.ApplyStockMute()
-	local muted, kept, skids = collect()
-	E.PERP_MUTED, E.PERP_SKIDS = muted, skids
-	local on, skidOn = cvMute:GetBool(), cvSkid:GetBool()
-	local n, ns = 0, 0
-	for _, name in pairs(muted) do mute(name, on) n = n + 1 end
-	for low, name in pairs(skids) do
-		if not muted[low] then mute(name, skidOn) ns = ns + 1 end
+function AudioEngine.ApplyStockMute()
+	local muted, keptCount, skidSounds = collectSoundNames()
+	AudioEngine.PERP_MUTED, AudioEngine.PERP_SKIDS = muted, skidSounds
+	local muteEngines, muteSkids = muteStockConVar:GetBool(), muteSkidConVar:GetBool()
+	local mutedCount, mutedSkidCount = 0, 0
+	for _, name in pairs(muted) do muteSound(name, muteEngines) mutedCount = mutedCount + 1 end
+	for lowerName, name in pairs(skidSounds) do
+		if not muted[lowerName] then muteSound(name, muteSkids) mutedSkidCount = mutedSkidCount + 1 end
 	end
-	if on then
-		MsgN(string.format("[Audio Engine] muted %d TDM engine sounds of PERP cars (%d shared with other vehicles kept)", n, kept))
+	if muteEngines then
+		MsgN(string.format("[Audio Engine] muted %d TDM engine sounds of PERP cars (%d shared with other vehicles kept)", mutedCount, keptCount))
 	end
-	if skidOn and ns > 0 then
-		MsgN(string.format("[Audio Engine] muted %d TDM tyre screech sounds", ns))
+	if muteSkids and mutedSkidCount > 0 then
+		MsgN(string.format("[Audio Engine] muted %d TDM tyre screech sounds", mutedSkidCount))
 	end
-	local scrapeOn = cvScrape:GetBool()
-	for _, name in ipairs(E.TYRE_SCRAPE_SOUNDS) do mute(name, scrapeOn) end
+	local muteScrapes = muteScrapeConVar:GetBool()
+	for _, name in ipairs(AudioEngine.TYRE_SCRAPE_SOUNDS) do muteSound(name, muteScrapes) end
 end
 
 -- TDM / PERP define their soundscripts in their own autorun files, which may load after this
 -- one: (re)apply once everything is loaded, and once more a little later
 hook.Add("InitPostEntity", "audio_engine_perp", function()
-	E.ApplyStockMute()
-	timer.Simple(3, E.ApplyStockMute)
+	AudioEngine.ApplyStockMute()
+	timer.Simple(3, AudioEngine.ApplyStockMute)
 end)
-cvars.AddChangeCallback("audio_engine_mutestock", function() E.ApplyStockMute() end, "audio_engine_perp")
-cvars.AddChangeCallback("audio_engine_muteskid", function() E.ApplyStockMute() end, "audio_engine_perp")
-cvars.AddChangeCallback("audio_engine_mutetyrescrape", function() E.ApplyStockMute() end, "audio_engine_perp")
-if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then E.ApplyStockMute() end -- lua refresh
+cvars.AddChangeCallback("audio_engine_mutestock", function() AudioEngine.ApplyStockMute() end, "audio_engine_perp")
+cvars.AddChangeCallback("audio_engine_muteskid", function() AudioEngine.ApplyStockMute() end, "audio_engine_perp")
+cvars.AddChangeCallback("audio_engine_mutetyrescrape", function() AudioEngine.ApplyStockMute() end, "audio_engine_perp")
+if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then AudioEngine.ApplyStockMute() end -- lua refresh
 
 -- spawn menu entries (sandbox and derived gamemodes; PERP's own dealer ignores them).
 -- PERP's vehicle scripts come in a workshop pack (3792392486) that the PERP server sends, and
 -- Garry's Mod only mounts it while connected there. A jeep without its script has no physics
 -- and can't drive, so off the server the cars fall back to a generic test script.
--- Job vehicles (sh_carlist.lua E.JOB_VEHICLES) get a tab of their own, each on its own script and in
+-- Job vehicles (sh_carlist.lua AudioEngine.JOB_VEHICLES) get a tab of their own, each on its own script and in
 -- its livery skin; a car whose base script is a job's spawns from that tab only.
 -- AudioPerpScript tells sv_handling which script's physics to put on a car that fell back to the
 -- test script, AudioSkin is the skin (sandbox only passes whitelisted KeyValues on)
 local TEST_SCRIPT = "scripts/vehicles/audio_engine/test_car.txt"
-local fallback = 0
-local byName, jobOnly = {}, {}
-for _, car in pairs(E.Cars) do byName[car.name] = car end
-for _, job in ipairs(E.JOB_VEHICLES or {}) do
-	local car = byName[job[2]]
-	if car and car.script == job[3] then jobOnly[car.name] = true end
+local fallbackCount = 0
+local carsByName, jobOnlyCars = {}, {}
+for _, carConfig in pairs(AudioEngine.Cars) do carsByName[carConfig.name] = carConfig end
+for _, job in ipairs(AudioEngine.JOB_VEHICLES or {}) do
+	local carConfig = carsByName[job[2]]
+	if carConfig and carConfig.script == job[3] then jobOnlyCars[carConfig.name] = true end
 end
 
-local function addSpawn(id, name, car, perpScript, category, skin)
-	if not (car.perp and perpScript and file.Exists(car.model, "GAME")) then return end
+local function addSpawnEntry(entryId, name, carConfig, perpScript, category, skin)
+	if not (carConfig.perp and perpScript and file.Exists(carConfig.model, "GAME")) then return end
 	local script, info = perpScript, "PERP handling"
 	if not file.Exists(script, "GAME") then
 		script, info = TEST_SCRIPT, "generic test handling with PERP's values (PERP's vehicle scripts aren't mounted)"
-		fallback = fallback + 1
+		fallbackCount = fallbackCount + 1
 	end
-	list.Set("Vehicles", id, {
+	list.Set("Vehicles", entryId, {
 		Name = name,
 		Class = "prop_vehicle_jeep",
 		Category = category,
 		Author = "PERPHeads / TDM",
 		Information = name .. ": " .. info .. ", procedural engine sound.",
-		Model = car.model,
+		Model = carConfig.model,
 		KeyValues = { vehiclescript = script },
 		AudioPerpScript = perpScript,
 		AudioSkin = skin,
 	})
 end
 
-for _, car in pairs(E.Cars) do
-	if not jobOnly[car.name] then
-		addSpawn("perp_" .. car.carId, car.name, car, car.script, "PERP cars (Audio Engine)")
+for _, carConfig in pairs(AudioEngine.Cars) do
+	if not jobOnlyCars[carConfig.name] then
+		addSpawnEntry("perp_" .. carConfig.carId, carConfig.name, carConfig, carConfig.script, "PERP cars (Audio Engine)")
 	end
 end
-for _, job in ipairs(E.JOB_VEHICLES or {}) do
-	local car = byName[job[2]]
-	if car then
-		addSpawn("perp_job_" .. string.lower((job[1]:gsub("[^%w]+", "_"))), job[1], car, job[3],
+for _, job in ipairs(AudioEngine.JOB_VEHICLES or {}) do
+	local carConfig = carsByName[job[2]]
+	if carConfig then
+		addSpawnEntry("perp_job_" .. string.lower((job[1]:gsub("[^%w]+", "_"))), job[1], carConfig, job[3],
 			"PERP job vehicles (Audio Engine)", job[4])
 	end
 end
-if fallback > 0 then
-	MsgN(string.format("[Audio Engine] %d PERP spawn entries use the generic test handling: their PERP vehicle scripts aren't mounted", fallback))
+if fallbackCount > 0 then
+	MsgN(string.format("[Audio Engine] %d PERP spawn entries use the generic test handling: their PERP vehicle scripts aren't mounted", fallbackCount))
 end
 
 if SERVER then
-	hook.Add("PlayerSpawnedVehicle", "audio_engine_jobskin", function(ply, veh)
-		local vt = veh.VehicleTable
-		if istable(vt) and vt.AudioSkin and vt.AudioSkin > 0 then veh:SetSkin(vt.AudioSkin) end
+	hook.Add("PlayerSpawnedVehicle", "audio_engine_jobskin", function(spawner, vehicle)
+		local vehicleTable = vehicle.VehicleTable
+		if istable(vehicleTable) and vehicleTable.AudioSkin and vehicleTable.AudioSkin > 0 then vehicle:SetSkin(vehicleTable.AudioSkin) end
 	end)
 end

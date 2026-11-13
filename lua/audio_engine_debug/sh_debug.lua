@@ -7,31 +7,31 @@
 	only superadmins (or the host of a listen / single-player game) may use them.
 
 	What it changes live goes through the core's own data paths, so a result can be pasted back:
-	  gearing         NW2 audio_dbg_gear on the car  -> sh_carlist.lua E.CAR_GEARING (E.ApplyGearing)
+	  gearing         NW2 audio_dbg_gear on the car  -> sh_carlist.lua AudioEngine.CAR_GEARING (AudioEngine.ApplyGearing)
 	  rev response    NW2 audio_dbg_rev on the car, or Global2 audio_dbg_rev for every car
-	                                                 -> E.CAR_REV / sh_drivetrain.lua DT.REV
+	                                                 -> AudioEngine.CAR_REV / sh_drivetrain.lua Drivetrain.REV
 	  handling script the car's params (server)      -> the vehicle script txt (copied out)
-	  assists/tables  server convars and E.TRACTION / E.ANTI_SPIN / E.STABILITY_DEFAULTS values
+	  assists/tables  server convars and AudioEngine.TRACTION / AudioEngine.ANTI_SPIN / AudioEngine.STABILITY_DEFAULTS values
 ]]
 
-local E = AUDIO_ENGINE
-local DBG = E.Debug or {}
-E.Debug = DBG
+local AudioEngine = AUDIO_ENGINE
+local EngineDebug = AudioEngine.Debug or {}
+AudioEngine.Debug = EngineDebug
 
-DBG.cvDebug = CreateConVar("audio_engine_debug", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+EngineDebug.debugConVar = CreateConVar("audio_engine_debug", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"1 = the Audio Engine debug tools (audio_engine_debug_menu, !enginedebug) for superadmins (default); 0 = off")
 
-function DBG.Enabled() return DBG.cvDebug:GetBool() end
+function EngineDebug.Enabled() return EngineDebug.debugConVar:GetBool() end
 
-function DBG.Allowed(ply)
-	if not DBG.Enabled() or not IsValid(ply) then return false end
-	return ply:IsSuperAdmin() or game.SinglePlayer() or (ply.IsListenServerHost and ply:IsListenServerHost())
+function EngineDebug.Allowed(requester)
+	if not EngineDebug.Enabled() or not IsValid(requester) then return false end
+	return requester:IsSuperAdmin() or game.SinglePlayer() or (requester.IsListenServerHost and requester:IsListenServerHost())
 end
 
 ---------------------------------------------------------------------------
 -- server convars the debug menu shows as controls (the client asks the server to set them)
 ---------------------------------------------------------------------------
-DBG.SERVER_CVARS = {
+EngineDebug.SERVER_CVARS = {
 	{ "audio_engine_editor", "bool", "Engine editor (Rev Bench menu, !engine)" },
 	{ "audio_engine_handling", "bool", "Anti-spin setup (brake bias, power cut cap, lower centre, lock at speed)" },
 	{ "audio_engine_traction", "bool", "Traction control (launch slip + slide power cut)" },
@@ -46,17 +46,17 @@ DBG.SERVER_CVARS = {
 	{ "audio_engine_tuneaccess", "int", "Who may use the engine editor (0 driver, 1 admins, 2 superadmins)", 0, 2 },
 	{ "audio_engine_tunecooldown", "float", "Seconds between engine editor changes", 0, 30 },
 }
-DBG.SERVER_CVAR_SET = {}
-for _, c in ipairs(DBG.SERVER_CVARS) do DBG.SERVER_CVAR_SET[c[1]] = c end
+EngineDebug.SERVER_CVAR_SET = {}
+for _, cvarEntry in ipairs(EngineDebug.SERVER_CVARS) do EngineDebug.SERVER_CVAR_SET[cvarEntry[1]] = cvarEntry end
 
 -- the convars that are the addon's handling changes: all 0 = PERP's own handling
-DBG.HANDLING_CVARS = { "audio_engine_handling", "audio_engine_traction", "audio_engine_stability" }
+EngineDebug.HANDLING_CVARS = { "audio_engine_handling", "audio_engine_traction", "audio_engine_stability" }
 
 --[[
 	Server tables tuned live: { table in E, key, min, max, decimals, label }. They reset to the
 	file's values on a map change / restart: copy the changed lines out with the menu's button.
 ]]
-DBG.TUNABLES = {
+EngineDebug.TUNABLES = {
 	{ "TRACTION", "slideFloor", 0, 1, 2, "Slide: least power left while sliding" },
 	{ "TRACTION", "slideCut", 0, 10, 1, "Slide: how fast the power goes (per s)" },
 	{ "TRACTION", "slideMaxTime", 0, 5, 1, "Slide: longest power cut (s)" },
@@ -81,86 +81,86 @@ DBG.TUNABLES = {
 }
 
 ---------------------------------------------------------------------------
--- gearing by shift speeds (sh_presets.lua E.ApplyGearing), as text for the network
+-- gearing by shift speeds (sh_presets.lua AudioEngine.ApplyGearing), as text for the network
 -- "topRpm;mph,rpm,down;mph,rpm,down;...;,,down"
 ---------------------------------------------------------------------------
-local function num(x, lo, hi, dec)
-	x = tonumber(x)
-	if not x then return nil end
-	x = math.Clamp(x, lo, hi)
-	local m = 10 ^ (dec or 0)
-	return math.floor(x * m + 0.5) / m
+local function clampNumber(value, low, high, decimals)
+	value = tonumber(value)
+	if not value then return nil end
+	value = math.Clamp(value, low, high)
+	local rounding = 10 ^ (decimals or 0)
+	return math.floor(value * rounding + 0.5) / rounding
 end
 
-function DBG.SanitizeGearing(spec)
+function EngineDebug.SanitizeGearing(spec)
 	if type(spec) ~= "table" then return nil end
-	local n = math.min(8, #spec)
-	if n < 1 then return nil end
-	local o = { topRpm = num(spec.topRpm, 500, 20000, 0) }
-	for i = 1, n do
-		local g = type(spec[i]) == "table" and spec[i] or {}
-		local d = num(g.down, 0, 300, 1)
-		o[i] = {
-			mph = i < n and (num(g.mph, 1, 300, 1) or 10) or nil,
-			rpm = i < n and (num(g.rpm, 500, 20000, 0) or 5000) or nil,
-			down = (i > 1 and d and d > 0) and d or nil,
+	local gearCount = math.min(8, #spec)
+	if gearCount < 1 then return nil end
+	local clean = { topRpm = clampNumber(spec.topRpm, 500, 20000, 0) }
+	for i = 1, gearCount do
+		local gearSpec = type(spec[i]) == "table" and spec[i] or {}
+		local downMph = clampNumber(gearSpec.down, 0, 300, 1)
+		clean[i] = {
+			mph = i < gearCount and (clampNumber(gearSpec.mph, 1, 300, 1) or 10) or nil,
+			rpm = i < gearCount and (clampNumber(gearSpec.rpm, 500, 20000, 0) or 5000) or nil,
+			down = (i > 1 and downMph and downMph > 0) and downMph or nil,
 		}
 	end
-	return o
+	return clean
 end
 
-function DBG.EncodeGearing(spec)
-	spec = DBG.SanitizeGearing(spec)
+function EngineDebug.EncodeGearing(spec)
+	spec = EngineDebug.SanitizeGearing(spec)
 	if not spec then return "" end
 	local parts = { spec.topRpm and tostring(spec.topRpm) or "" }
-	for i, g in ipairs(spec) do
-		parts[i + 1] = (g.mph and tostring(g.mph) or "") .. "," .. (g.rpm and tostring(g.rpm) or "") .. "," .. (g.down and tostring(g.down) or "")
+	for i, gearSpec in ipairs(spec) do
+		parts[i + 1] = (gearSpec.mph and tostring(gearSpec.mph) or "") .. "," .. (gearSpec.rpm and tostring(gearSpec.rpm) or "") .. "," .. (gearSpec.down and tostring(gearSpec.down) or "")
 	end
 	return table.concat(parts, ";")
 end
 
-function DBG.DecodeGearing(s)
-	if type(s) ~= "string" or s == "" or #s > 400 then return nil end
-	local parts = string.Explode(";", s)
+function EngineDebug.DecodeGearing(text)
+	if type(text) ~= "string" or text == "" or #text > 400 then return nil end
+	local parts = string.Explode(";", text)
 	local spec = { topRpm = tonumber(parts[1]) }
 	for i = 2, #parts do
-		local f = string.Explode(",", parts[i])
-		spec[i - 1] = { mph = tonumber(f[1]), rpm = tonumber(f[2]), down = tonumber(f[3]) }
+		local fields = string.Explode(",", parts[i])
+		spec[i - 1] = { mph = tonumber(fields[1]), rpm = tonumber(fields[2]), down = tonumber(fields[3]) }
 	end
-	return DBG.SanitizeGearing(spec)
+	return EngineDebug.SanitizeGearing(spec)
 end
 
 -- the gearing a resolved config drives with, as shift speeds (what the editor starts from)
-function DBG.GearingFromConfig(cfg)
-	local DT = E.Drivetrain
-	local SH = cfg.shift and DT.ShiftPoints(cfg.shift) or DT.SHIFT
-	local K = 60 / (2 * math.pi * cfg.wheelRadius)
-	local plan = cfg.shiftPlan
-	local n = #cfg.gears
+function EngineDebug.GearingFromConfig(config)
+	local Drivetrain = AudioEngine.Drivetrain
+	local shiftPoints = config.shift and Drivetrain.ShiftPoints(config.shift) or Drivetrain.SHIFT
+	local rpmPerSpeed = 60 / (2 * math.pi * config.wheelRadius)
+	local shiftPlan = config.shiftPlan
+	local gearCount = #config.gears
 	local spec = {}
-	for i = 1, n do
-		local ratio = cfg.gears[i] * cfg.final
-		local g = {}
-		if i < n then
-			g.rpm = math.floor((plan and plan.up[i] or cfg.redline * SH.upRpm) + 0.5)
-			g.mph = math.floor(g.rpm / (K * ratio) / 0.44704 * 10 + 0.5) / 10
+	for i = 1, gearCount do
+		local ratio = config.gears[i] * config.final
+		local gearSpec = {}
+		if i < gearCount then
+			gearSpec.rpm = math.floor((shiftPlan and shiftPlan.up[i] or config.redline * shiftPoints.upRpm) + 0.5)
+			gearSpec.mph = math.floor(gearSpec.rpm / (rpmPerSpeed * ratio) / 0.44704 * 10 + 0.5) / 10
 		end
-		if plan and plan.down[i] then g.down = math.floor(plan.down[i] / 0.44704 * 10 + 0.5) / 10 end
-		spec[i] = g
+		if shiftPlan and shiftPlan.down[i] then gearSpec.down = math.floor(shiftPlan.down[i] / 0.44704 * 10 + 0.5) / 10 end
+		spec[i] = gearSpec
 	end
-	spec.topRpm = math.floor(cfg.topSpeed / 3.6 * K * cfg.gears[n] * cfg.final + 0.5)
+	spec.topRpm = math.floor(config.topSpeed / 3.6 * rpmPerSpeed * config.gears[gearCount] * config.final + 0.5)
 	return spec
 end
 
--- as an entry for sh_carlist.lua E.CAR_GEARING
-function DBG.GearingLua(name, spec)
+-- as an entry for sh_carlist.lua AudioEngine.CAR_GEARING
+function EngineDebug.GearingLua(name, spec)
 	local parts = {}
-	for i, g in ipairs(spec) do
-		local f = {}
-		if g.mph then f[#f + 1] = "mph = " .. g.mph end
-		if g.rpm then f[#f + 1] = "rpm = " .. g.rpm end
-		if g.down then f[#f + 1] = "down = " .. g.down end
-		parts[i] = "{ " .. table.concat(f, ", ") .. " }"
+	for i, gearSpec in ipairs(spec) do
+		local fields = {}
+		if gearSpec.mph then fields[#fields + 1] = "mph = " .. gearSpec.mph end
+		if gearSpec.rpm then fields[#fields + 1] = "rpm = " .. gearSpec.rpm end
+		if gearSpec.down then fields[#fields + 1] = "down = " .. gearSpec.down end
+		parts[i] = "{ " .. table.concat(fields, ", ") .. " }"
 	end
 	return string.format('["%s"] = { topRpm = %d, %s },', name, spec.topRpm or 0, table.concat(parts, ", "))
 end
@@ -168,63 +168,63 @@ end
 ---------------------------------------------------------------------------
 -- rev response: "rise,fall"
 ---------------------------------------------------------------------------
-DBG.REV_RANGE = { 100, 1500 }
-function DBG.DecodeRev(s)
-	if type(s) ~= "string" or s == "" then return nil end
-	local r, f = s:match("^([%d%.]+),([%d%.]+)$")
-	r, f = tonumber(r), tonumber(f)
-	if not (r and f) then return nil end
-	local lo, hi = DBG.REV_RANGE[1], DBG.REV_RANGE[2]
-	return math.Clamp(math.floor(r + 0.5), lo, hi), math.Clamp(math.floor(f + 0.5), lo, hi)
+EngineDebug.REV_RANGE = { 100, 1500 }
+function EngineDebug.DecodeRev(text)
+	if type(text) ~= "string" or text == "" then return nil end
+	local rise, fall = text:match("^([%d%.]+),([%d%.]+)$")
+	rise, fall = tonumber(rise), tonumber(fall)
+	if not (rise and fall) then return nil end
+	local low, high = EngineDebug.REV_RANGE[1], EngineDebug.REV_RANGE[2]
+	return math.Clamp(math.floor(rise + 0.5), low, high), math.Clamp(math.floor(fall + 0.5), low, high)
 end
-function DBG.EncodeRev(r, f) return string.format("%d,%d", r, f) end
+function EngineDebug.EncodeRev(rise, fall) return string.format("%d,%d", rise, fall) end
 
 ---------------------------------------------------------------------------
 -- the live overrides, on top of the core's config (every client and the server)
 ---------------------------------------------------------------------------
-local DT = E.Drivetrain
-DBG.REV_DEFAULT = DBG.REV_DEFAULT or { rise = DT.REV.rise, fall = DT.REV.fall }
+local Drivetrain = AudioEngine.Drivetrain
+EngineDebug.REV_DEFAULT = EngineDebug.REV_DEFAULT or { rise = Drivetrain.REV.rise, fall = Drivetrain.REV.fall }
 local lastGlobalRev
 
--- the global rev response (Global2 audio_dbg_rev) onto DT.REV, back to the file's values when cleared
+-- the global rev response (Global2 audio_dbg_rev) onto Drivetrain.REV, back to the file's values when cleared
 local function followGlobalRev()
-	local g = GetGlobal2String("audio_dbg_rev", "")
-	if g == lastGlobalRev then return end
-	lastGlobalRev = g
-	local r, f = DBG.DecodeRev(g)
-	DT.REV.rise, DT.REV.fall = r or DBG.REV_DEFAULT.rise, f or DBG.REV_DEFAULT.fall
+	local globalRev = GetGlobal2String("audio_dbg_rev", "")
+	if globalRev == lastGlobalRev then return end
+	lastGlobalRev = globalRev
+	local rise, fall = EngineDebug.DecodeRev(globalRev)
+	Drivetrain.REV.rise, Drivetrain.REV.fall = rise or EngineDebug.REV_DEFAULT.rise, fall or EngineDebug.REV_DEFAULT.fall
 end
 
-local cache = setmetatable({}, { __mode = "k" })
+local overrideCache = setmetatable({}, { __mode = "k" })
 
-function DBG.Install()
-	if not E.GetEngineConfig or E.GetEngineConfig == DBG.wrapper then return end
-	local base = E.GetEngineConfig
-	DBG.baseGetEngineConfig = base
-	-- cl_engine and sv_engine call E.GetEngineConfig every frame: the overrides ride on it
-	DBG.wrapper = function(ent)
-		local cfg = base(ent)
-		if not cfg then return cfg end
+function EngineDebug.Install()
+	if not AudioEngine.GetEngineConfig or AudioEngine.GetEngineConfig == EngineDebug.wrapper then return end
+	local base = AudioEngine.GetEngineConfig
+	EngineDebug.baseGetEngineConfig = base
+	-- cl_engine and sv_engine call AudioEngine.GetEngineConfig every frame: the overrides ride on it
+	EngineDebug.wrapper = function(ent)
+		local config = base(ent)
+		if not config then return config end
 		followGlobalRev()
-		local gs, rs = ent:GetNW2String("audio_dbg_gear", ""), ent:GetNW2String("audio_dbg_rev", "")
-		if gs == "" and rs == "" then return cfg end
-		local c = cache[ent]
-		if c and c.base == cfg and c.gs == gs and c.rs == rs then return c.cfg end
-		local o = {}
-		for k, v in pairs(cfg) do o[k] = v end
-		local spec = DBG.DecodeGearing(gs)
-		if spec then E.ApplyGearing(o, spec) end
-		local r, f = DBG.DecodeRev(rs)
-		if r then o.revRise, o.revFall = r, f end
-		cache[ent] = { base = cfg, gs = gs, rs = rs, cfg = o }
-		return o
+		local gearingString, revString = ent:GetNW2String("audio_dbg_gear", ""), ent:GetNW2String("audio_dbg_rev", "")
+		if gearingString == "" and revString == "" then return config end
+		local cached = overrideCache[ent]
+		if cached and cached.baseConfig == config and cached.gearingString == gearingString and cached.revString == revString then return cached.config end
+		local overridden = {}
+		for key, value in pairs(config) do overridden[key] = value end
+		local spec = EngineDebug.DecodeGearing(gearingString)
+		if spec then AudioEngine.ApplyGearing(overridden, spec) end
+		local rise, f = EngineDebug.DecodeRev(revString)
+		if rise then overridden.revRise, overridden.revFall = rise, f end
+		overrideCache[ent] = { baseConfig = config, gearingString = gearingString, revString = revString, config = overridden }
+		return overridden
 	end
-	E.GetEngineConfig = DBG.wrapper
+	AudioEngine.GetEngineConfig = EngineDebug.wrapper
 end
 
 -- the core's own config (without the debug overrides)
-function DBG.BaseConfig(ent)
-	return (DBG.baseGetEngineConfig or E.GetEngineConfig)(ent)
+function EngineDebug.BaseConfig(ent)
+	return (EngineDebug.baseGetEngineConfig or AudioEngine.GetEngineConfig)(ent)
 end
 
-DBG.Install()
+EngineDebug.Install()

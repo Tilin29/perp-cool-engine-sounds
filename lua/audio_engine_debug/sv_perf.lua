@@ -20,27 +20,27 @@
 	  cars    tracked vehicles, engines on, drivers, lights on; Lua memory of the server
 ]]
 
-local E = AUDIO_ENGINE
-local DBG = E.Debug
+local AudioEngine = AUDIO_ENGINE
+local EngineDebug = AudioEngine.Debug
 
 util.AddNetworkString("audio_dbg_perf_sub")
 util.AddNetworkString("audio_dbg_perf_cap")
 util.AddNetworkString("audio_dbg_perf_stats")
 
 -- (Lua refresh: take the previous load's wrappers off before this one starts)
-if DBG.PerfServer and DBG.PerfServer.Uninstall then DBG.PerfServer.Uninstall() end
+if EngineDebug.PerfServer and EngineDebug.PerfServer.Uninstall then EngineDebug.PerfServer.Uninstall() end
 local PERF = {}
-DBG.PerfServer = PERF
+EngineDebug.PerfServer = PERF
 
-local OURS = { "^audio_engine", "^police_siren" }
+local OUR_HOOK_PATTERNS = { "^audio_engine", "^police_siren" }
 local NW_KEYS = { "^audio_", "^siren_" }
 local NET_NAMES = { "^audio_", "^police_siren" }
 local SEND_EVERY = 1
 
-local function ours(name, patterns)
+local function matchesAny(name, patterns)
 	if not isstring(name) then return false end
-	for _, p in ipairs(patterns) do
-		if string.find(name, p) then return true end
+	for _, pattern in ipairs(patterns) do
+		if string.find(name, pattern) then return true end
 	end
 
 	return false
@@ -56,36 +56,36 @@ local stats           -- the figures since the last reset
 local inHook = 0
 
 local function resetStats()
-	stats = { t0 = SysTime(), ticks = 0, hooks = {}, traces = 0, nw = {}, net = {}, netBytes = 0 }
+	stats = { startTime = SysTime(), ticks = 0, hooks = {}, traces = 0, nw = {}, net = {}, netBytes = 0 }
 end
 
-local function addHook(key, dt)
-	local h = stats.hooks[key]
-	if not h then
-		h = { calls = 0, total = 0, max = 0 }
-		stats.hooks[key] = h
+local function addHook(key, seconds)
+	local entry = stats.hooks[key]
+	if not entry then
+		entry = { calls = 0, total = 0, max = 0 }
+		stats.hooks[key] = entry
 	end
-	h.calls = h.calls + 1
-	h.total = h.total + dt
-	if dt > h.max then h.max = dt end
+	entry.calls = entry.calls + 1
+	entry.total = entry.total + seconds
+	if seconds > entry.max then entry.max = seconds end
 end
 
 local function wrapHooks()
-	for event, list in pairs(hook.GetTable()) do
+	for event, hooks in pairs(hook.GetTable()) do
 		if not string.find(event, "/", 1, true) then
-			for name, fn in pairs(list) do
-				if ours(name, OURS) and isfunction(fn) then
+			for name, hookFunction in pairs(hooks) do
+				if matchesAny(name, OUR_HOOK_PATTERNS) and isfunction(hookFunction) then
 					local key = event .. " / " .. name
 					local function wrapper(...)
 						inHook = inHook + 1
-						local t0 = SysTime()
-						local a, b, c, d, e, f = fn(...)
-						addHook(key, SysTime() - t0)
+						local startTime = SysTime()
+						local result1, result2, result3, result4, result5, result6 = hookFunction(...)
+						addHook(key, SysTime() - startTime)
 						inHook = inHook - 1
-						return a, b, c, d, e, f
+						return result1, result2, result3, result4, result5, result6
 					end
 					hook.Add(event, name, wrapper)
-					table.insert(wrapped, { event, name, fn, wrapper })
+					table.insert(wrapped, { event, name, hookFunction, wrapper })
 				end
 			end
 		end
@@ -107,46 +107,46 @@ local function install()
 	timer.Create("audio_dbg_perf", 0.25, 0, function() poll() end)
 
 	-- traces made inside the addon's hooks
-	for _, fname in ipairs({ "TraceLine", "TraceHull" }) do
-		local orig = util[fname]
-		saved["util." .. fname] = orig
-		util[fname] = function(...)
+	for _, functionName in ipairs({ "TraceLine", "TraceHull" }) do
+		local original = util[functionName]
+		saved["util." .. functionName] = original
+		util[functionName] = function(...)
 			if inHook > 0 then stats.traces = stats.traces + 1 end
-			return orig(...)
+			return original(...)
 		end
 	end
 	-- the addon's NW2 vars: changes only (an unchanged value isn't sent)
-	local meta = FindMetaTable("Entity")
+	local entityMeta = FindMetaTable("Entity")
 	for _, setter in ipairs(NW_SETTERS) do
-		local orig, getter = meta[setter], meta[NW_GETTERS[setter]]
-		saved["Entity." .. setter] = orig
-		meta[setter] = function(ent, key, value, ...)
-			if ours(key, NW_KEYS) and getter(ent, key) ~= value then
+		local original, getValue = entityMeta[setter], entityMeta[NW_GETTERS[setter]]
+		saved["Entity." .. setter] = original
+		entityMeta[setter] = function(entity, key, value, ...)
+			if matchesAny(key, NW_KEYS) and getValue(entity, key) ~= value then
 				stats.nw[key] = (stats.nw[key] or 0) + 1
 			end
-			return orig(ent, key, value, ...)
+			return original(entity, key, value, ...)
 		end
 	end
 	-- the addon's net messages and their size when sent
-	local start = net.Start
-	saved["net.Start"] = start
-	local current
+	local originalStart = net.Start
+	saved["net.Start"] = originalStart
+	local currentMessage
 	net.Start = function(name, ...)
-		current = ours(name, NET_NAMES) and name or nil
-		return start(name, ...)
+		currentMessage = matchesAny(name, NET_NAMES) and name or nil
+		return originalStart(name, ...)
 	end
-	for _, fname in ipairs({ "Send", "Broadcast", "SendPVS", "SendPAS", "SendOmit" }) do
-		local orig = net[fname]
-		saved["net." .. fname] = orig
-		net[fname] = function(...)
-			if current then
+	for _, functionName in ipairs({ "Send", "Broadcast", "SendPVS", "SendPAS", "SendOmit" }) do
+		local original = net[functionName]
+		saved["net." .. functionName] = original
+		net[functionName] = function(...)
+			if currentMessage then
 				local bytes = net.BytesWritten() or 0
-				local n = stats.net[current] or { count = 0, bytes = 0 }
-				n.count, n.bytes = n.count + 1, n.bytes + bytes
-				stats.net[current] = n
-				current = nil
+				local counts = stats.net[currentMessage] or { count = 0, bytes = 0 }
+				counts.count, counts.bytes = counts.count + 1, counts.bytes + bytes
+				stats.net[currentMessage] = counts
+				currentMessage = nil
 			end
-			return orig(...)
+			return original(...)
 		end
 	end
 end
@@ -154,20 +154,20 @@ end
 local function uninstall()
 	if not installed then return end
 	installed = false
-	for _, w in ipairs(wrapped) do
-		local list = hook.GetTable()[w[1]]
+	for _, wrap in ipairs(wrapped) do
+		local hooks = hook.GetTable()[wrap[1]]
 		-- (a Lua refresh may have replaced the hook since: leave the new one alone)
-		if list and list[w[2]] == w[4] then hook.Add(w[1], w[2], w[3]) end
+		if hooks and hooks[wrap[2]] == wrap[4] then hook.Add(wrap[1], wrap[2], wrap[3]) end
 	end
 	wrapped = {}
 	hook.Remove("Tick", "audio_dbg_perf_tick")
 	timer.Remove("audio_dbg_perf")
-	local meta = FindMetaTable("Entity")
-	for key, orig in pairs(saved) do
-		local lib, fname = string.match(key, "^(%w+)%.(%w+)$")
-		if lib == "util" then util[fname] = orig
-		elseif lib == "net" then net[fname] = orig
-		elseif lib == "Entity" then meta[fname] = orig end
+	local entityMeta = FindMetaTable("Entity")
+	for key, original in pairs(saved) do
+		local library, functionName = string.match(key, "^(%w+)%.(%w+)$")
+		if library == "util" then util[functionName] = original
+		elseif library == "net" then net[functionName] = original
+		elseif library == "Entity" then entityMeta[functionName] = original end
 	end
 	saved = {}
 end
@@ -177,85 +177,85 @@ PERF.Uninstall = uninstall
 -- the figures
 ---------------------------------------------------------------------------
 local function carCounts()
-	local c = { tracked = 0, on = 0, driven = 0, lights = 0, cruise = 0, all = #ents.FindByClass("prop_vehicle_jeep*") }
-	for veh in pairs(E.TrackedVehicles or {}) do
-		if IsValid(veh) then
-			c.tracked = c.tracked + 1
-			if veh:GetNW2Bool("audio_on", false) then c.on = c.on + 1 end
-			if IsValid(veh:GetDriver()) then c.driven = c.driven + 1 end
-			if veh:GetNW2Int("audio_lights", 0) > 0 then c.lights = c.lights + 1 end
-			if veh:GetNW2Float("audio_cruise", 0) > 0 then c.cruise = c.cruise + 1 end
+	local counts = { tracked = 0, on = 0, driven = 0, lights = 0, cruise = 0, all = #ents.FindByClass("prop_vehicle_jeep*") }
+	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
+		if IsValid(vehicle) then
+			counts.tracked = counts.tracked + 1
+			if vehicle:GetNW2Bool("audio_on", false) then counts.on = counts.on + 1 end
+			if IsValid(vehicle:GetDriver()) then counts.driven = counts.driven + 1 end
+			if vehicle:GetNW2Int("audio_lights", 0) > 0 then counts.lights = counts.lights + 1 end
+			if vehicle:GetNW2Float("audio_cruise", 0) > 0 then counts.cruise = counts.cruise + 1 end
 		end
 	end
 
-	return c
+	return counts
 end
 
 -- the stats since the last reset, per tick / per second
 local function summary()
-	local secs = math.max(SysTime() - stats.t0, 0.001)
+	local seconds = math.max(SysTime() - stats.startTime, 0.001)
 	local ticks = math.max(stats.ticks, 1)
 	local hooks, total = {}, 0
-	for key, h in pairs(stats.hooks) do
-		table.insert(hooks, { key = key, msTick = h.total * 1000 / ticks, maxMs = h.max * 1000, calls = h.calls / ticks })
-		total = total + h.total
+	for key, hookTiming in pairs(stats.hooks) do
+		table.insert(hooks, { key = key, msTick = hookTiming.total * 1000 / ticks, maxMs = hookTiming.max * 1000, calls = hookTiming.calls / ticks })
+		total = total + hookTiming.total
 	end
-	table.sort(hooks, function(a, b) return a.msTick > b.msTick end)
+	table.sort(hooks, function(first, second) return first.msTick > second.msTick end)
 	local nw, nwTotal = {}, 0
-	for key, n in pairs(stats.nw) do
-		table.insert(nw, { key = key, perSec = n / secs })
-		nwTotal = nwTotal + n
+	for key, changeCount in pairs(stats.nw) do
+		table.insert(nw, { key = key, perSec = changeCount / seconds })
+		nwTotal = nwTotal + changeCount
 	end
-	table.sort(nw, function(a, b) return a.perSec > b.perSec end)
+	table.sort(nw, function(first, second) return first.perSec > second.perSec end)
 	local netList, netCount, netBytes = {}, 0, 0
-	for name, n in pairs(stats.net) do
-		table.insert(netList, { name = name, perSec = n.count / secs, bytesSec = n.bytes / secs })
-		netCount, netBytes = netCount + n.count, netBytes + n.bytes
+	for name, counts in pairs(stats.net) do
+		table.insert(netList, { name = name, perSec = counts.count / seconds, bytesSec = counts.bytes / seconds })
+		netCount, netBytes = netCount + counts.count, netBytes + counts.bytes
 	end
 
 	return {
-		secs = secs, tickMs = engine.TickInterval() * 1000, tickRate = 1 / engine.TickInterval(),
+		seconds = seconds, tickMs = engine.TickInterval() * 1000, tickRate = 1 / engine.TickInterval(),
 		hooks = hooks, totalMsTick = total * 1000 / ticks, tracesTick = stats.traces / ticks,
-		nw = nw, nwSec = nwTotal / secs, net = netList, netSec = netCount / secs, netBytesSec = netBytes / secs,
+		nw = nw, nwSec = nwTotal / seconds, net = netList, netSec = netCount / seconds, netBytesSec = netBytes / seconds,
 		cars = carCounts(), luaKB = collectgarbage("count"), players = player.GetCount(),
 	}
 end
 PERF.Summary = summary
 
-local function report(ply, s)
-	local function out(line)
-		if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, line) else MsgN(line) end
+local function report(requester, summaryData)
+	local function printLine(line)
+		if IsValid(requester) then requester:PrintMessage(HUD_PRINTCONSOLE, line) else MsgN(line) end
 	end
-	local c = s.cars
-	out(string.format("==== Audio Engine performance, SERVER: %.1f s, %d players, %.0f ticks/s (%.2f ms budget per tick) ====",
-		s.secs, s.players, s.tickRate, s.tickMs))
-	out(string.format("Cars: %d vehicles, %d with the procedural engine, %d running, %d driven, %d lights on, %d on the speed limiter",
-		c.all, c.tracked, c.on, c.driven, c.lights, c.cruise))
-	out(string.format("Addon Lua: %.3f ms per tick (%.1f%% of the tick budget)%s, %.1f traces per tick",
-		s.totalMsTick, s.totalMsTick / s.tickMs * 100,
-		c.tracked > 0 and string.format(", %.4f ms per tracked car", s.totalMsTick / c.tracked) or "", s.tracesTick))
-	out("  hook (event / name)                               ms/tick   worst ms  calls/tick")
-	for _, h in ipairs(s.hooks) do
-		out(string.format("  %-48s %8.4f %10.3f %10.2f", h.key, h.msTick, h.maxMs, h.calls))
+	local counts = summaryData.cars
+	printLine(string.format("==== Audio Engine performance, SERVER: %.1f s, %d players, %.0f ticks/s (%.2f ms budget per tick) ====",
+		summaryData.seconds, summaryData.players, summaryData.tickRate, summaryData.tickMs))
+	printLine(string.format("Cars: %d vehicles, %d with the procedural engine, %d running, %d driven, %d lights on, %d on the speed limiter",
+		counts.all, counts.tracked, counts.on, counts.driven, counts.lights, counts.cruise))
+	printLine(string.format("Addon Lua: %.3f ms per tick (%.1f%% of the tick budget)%s, %.1f traces per tick",
+		summaryData.totalMsTick, summaryData.totalMsTick / summaryData.tickMs * 100,
+		counts.tracked > 0 and string.format(", %.4f ms per tracked car", summaryData.totalMsTick / counts.tracked) or "", summaryData.tracesTick))
+	printLine("  hook (event / name)                               ms/tick   worst ms  calls/tick")
+	for _, hookTiming in ipairs(summaryData.hooks) do
+		printLine(string.format("  %-48s %8.4f %10.3f %10.2f", hookTiming.key, hookTiming.msTick, hookTiming.maxMs, hookTiming.calls))
 	end
-	out(string.format("NW2 changes (sent to every player who sees the car): %.1f /s", s.nwSec))
-	for _, n in ipairs(s.nw) do out(string.format("  %-28s %8.1f /s", n.key, n.perSec)) end
-	out(string.format("Net messages: %.1f /s, %.0f bytes/s", s.netSec, s.netBytesSec))
-	for _, n in ipairs(s.net) do out(string.format("  %-28s %8.1f /s %10.0f bytes/s", n.name, n.perSec, n.bytesSec)) end
-	out(string.format("Server Lua memory (all addons): %.1f MB", s.luaKB / 1024))
+	printLine(string.format("NW2 changes (sent to every player who sees the car): %.1f /s", summaryData.nwSec))
+	for _, entry in ipairs(summaryData.nw) do printLine(string.format("  %-28s %8.1f /s", entry.key, entry.perSec)) end
+	printLine(string.format("Net messages: %.1f /s, %.0f bytes/s", summaryData.netSec, summaryData.netBytesSec))
+	for _, entry in ipairs(summaryData.net) do printLine(string.format("  %-28s %8.1f /s %10.0f bytes/s", entry.name, entry.perSec, entry.bytesSec)) end
+	printLine(string.format("Server Lua memory (all addons): %.1f MB", summaryData.luaKB / 1024))
 end
 
 ---------------------------------------------------------------------------
 -- who is measuring: a capture, and the players with the overlay open
 ---------------------------------------------------------------------------
 local subscribers = {}
-local capture   -- { ply, untilT }
+local capture   -- { ply, endsAt }
 
 local function needed()
 	if capture then return true end
-	for ply in pairs(subscribers) do
-		if IsValid(ply) then return true end
-		subscribers[ply] = nil
+	for requester in pairs(subscribers) do
+		if IsValid(requester) then return true end
+		subscribers[requester] = nil
 	end
 
 	return false
@@ -265,21 +265,21 @@ local function refresh()
 	if needed() then install() else uninstall() end
 end
 
-net.Receive("audio_dbg_perf_sub", function(_, ply)
-	local on = net.ReadBool()
-	if on and not DBG.Allowed(ply) then return end
-	subscribers[ply] = on or nil
+net.Receive("audio_dbg_perf_sub", function(_, requester)
+	local subscribe = net.ReadBool()
+	if subscribe and not EngineDebug.Allowed(requester) then return end
+	subscribers[requester] = subscribe or nil
 	refresh()
 end)
 
-net.Receive("audio_dbg_perf_cap", function(_, ply)
-	if not DBG.Allowed(ply) then return end
-	local secs = math.Clamp(net.ReadFloat(), 1, 120)
+net.Receive("audio_dbg_perf_cap", function(_, requester)
+	if not EngineDebug.Allowed(requester) then return end
+	local seconds = math.Clamp(net.ReadFloat(), 1, 120)
 	if capture then
-		ply:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] a server capture is already running")
+		requester:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] a server capture is already running")
 		return
 	end
-	capture = { ply = ply, untilT = SysTime() + secs }
+	capture = { requester = requester, endsAt = SysTime() + seconds }
 	install()
 	resetStats()
 end)
@@ -293,8 +293,8 @@ poll = function()
 		return
 	end
 	local now = SysTime()
-	if capture and now >= capture.untilT then
-		report(capture.ply, summary())
+	if capture and now >= capture.endsAt then
+		report(capture.requester, summary())
 		capture = nil
 		resetStats()
 		refresh()
@@ -302,20 +302,20 @@ poll = function()
 	end
 	if capture or now < nextSend then return end
 	nextSend = now + SEND_EVERY
-	local s = summary()
+	local summaryData = summary()
 	resetStats()
-	local to = {}
-	for ply in pairs(subscribers) do
-		if IsValid(ply) then table.insert(to, ply) end
+	local recipients = {}
+	for requester in pairs(subscribers) do
+		if IsValid(requester) then table.insert(recipients, requester) end
 	end
-	if #to == 0 then return end
+	if #recipients == 0 then return end
 	net.Start("audio_dbg_perf_stats")
 	net.WriteTable({
-		tickMs = s.tickMs, totalMsTick = s.totalMsTick, tracesTick = s.tracesTick, nwSec = s.nwSec,
-		netSec = s.netSec, netBytesSec = s.netBytesSec, luaKB = s.luaKB, cars = s.cars,
-		hooks = { s.hooks[1], s.hooks[2], s.hooks[3], s.hooks[4], s.hooks[5] },
+		tickMs = summaryData.tickMs, totalMsTick = summaryData.totalMsTick, tracesTick = summaryData.tracesTick, nwSec = summaryData.nwSec,
+		netSec = summaryData.netSec, netBytesSec = summaryData.netBytesSec, luaKB = summaryData.luaKB, cars = summaryData.cars,
+		hooks = { summaryData.hooks[1], summaryData.hooks[2], summaryData.hooks[3], summaryData.hooks[4], summaryData.hooks[5] },
 	})
-	net.Send(to)
+	net.Send(recipients)
 end
 
 ---------------------------------------------------------------------------
@@ -323,79 +323,79 @@ end
 ---------------------------------------------------------------------------
 local spawned = {}
 
-local function spawnEntries(which)
-	local all = {}
-	for id, vt in pairs(list.Get("Vehicles")) do
-		if isstring(vt.Category) and string.find(vt.Category, "(Audio Engine)", 1, true) then
-			table.insert(all, { id = id, vt = vt })
+local function spawnEntries(choice)
+	local entries = {}
+	for entryId, vehicleTable in pairs(list.Get("Vehicles")) do
+		if isstring(vehicleTable.Category) and string.find(vehicleTable.Category, "(Audio Engine)", 1, true) then
+			table.insert(entries, { id = entryId, vehicleTable = vehicleTable })
 		end
 	end
-	table.sort(all, function(a, b) return a.vt.Name < b.vt.Name end)
-	if not which or which == "" or which == "mixed" then return all end
-	local want = string.lower(which)
-	for _, e in ipairs(all) do
-		if string.lower(e.id) == want or string.lower(e.vt.Name) == want then return { e } end
+	table.sort(entries, function(first, second) return first.vehicleTable.Name < second.vehicleTable.Name end)
+	if not choice or choice == "" or choice == "mixed" then return entries end
+	local wanted = string.lower(choice)
+	for _, entry in ipairs(entries) do
+		if string.lower(entry.id) == wanted or string.lower(entry.vehicleTable.Name) == wanted then return { entry } end
 	end
-	local found = {}
-	for _, e in ipairs(all) do
-		if string.find(string.lower(e.vt.Name), want, 1, true) then table.insert(found, e) end
+	local matches = {}
+	for _, entry in ipairs(entries) do
+		if string.find(string.lower(entry.vehicleTable.Name), wanted, 1, true) then table.insert(matches, entry) end
 	end
 
-	return found
+	return matches
 end
 
-concommand.Add("audio_engine_perf_spawn", function(ply, _, args)
-	if not DBG.Allowed(ply) then return end
+concommand.Add("audio_engine_perf_spawn", function(requester, _, args)
+	if not EngineDebug.Allowed(requester) then return end
 	local count = math.Clamp(math.floor(tonumber(args[1]) or 10), 1, 64)
 	local entries = spawnEntries(args[2])
 	local lights = args[3] == "1"
 	if #entries == 0 then
-		ply:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] no PERP car matches '" .. tostring(args[2]) .. "'")
+		requester:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] no PERP car matches '" .. tostring(args[2]) .. "'")
 		return
 	end
-	local yaw = ply:EyeAngles().y
-	local fwd, right = Angle(0, yaw, 0):Forward(), Angle(0, yaw, 0):Right()
-	local origin = ply:GetPos() + fwd * 400
-	local PER_ROW, SIDE, DEPTH = 6, 170, 330
+	local yaw = requester:EyeAngles().y
+	local forward, right = Angle(0, yaw, 0):Forward(), Angle(0, yaw, 0):Right()
+	local origin = requester:GetPos() + forward * 400
+	local CARS_PER_ROW, ROW_SPACING, COLUMN_SPACING = 6, 170, 330
 	for i = 1, count do
 		-- mixed: spread over the list, so engines of every kind take part
-		local e = entries[#entries == 1 and 1 or (math.floor((i - 1) * #entries / count) % #entries) + 1]
-		local vt = e.vt
-		local row, col = math.floor((i - 1) / PER_ROW), (i - 1) % PER_ROW
-		local pos = origin + right * (col - (PER_ROW - 1) / 2) * SIDE + fwd * row * DEPTH
-		local tr = util.TraceLine({ start = pos + Vector(0, 0, 200), endpos = pos - Vector(0, 0, 400) })
-		local veh = ents.Create(vt.Class or "prop_vehicle_jeep")
-		if IsValid(veh) then
-			veh:SetModel(vt.Model)
-			for k, v in pairs(vt.KeyValues or {}) do veh:SetKeyValue(k, v) end
-			veh.VehicleTable = vt
-			veh.VehicleName = e.id
-			veh:SetPos(tr.HitPos + Vector(0, 0, 20))
-			veh:SetAngles(Angle(0, yaw - 90, 0))   -- (the cars' noses are +Y: facing away from you)
-			veh:Spawn()
-			veh:Activate()
-			hook.Run("PlayerSpawnedVehicle", ply, veh)
-			table.insert(spawned, veh)
+		local entry = entries[#entries == 1 and 1 or (math.floor((i - 1) * #entries / count) % #entries) + 1]
+		local vehicleTable = entry.vehicleTable
+		local row, column = math.floor((i - 1) / CARS_PER_ROW), (i - 1) % CARS_PER_ROW
+		local position = origin + right * (column - (CARS_PER_ROW - 1) / 2) * ROW_SPACING + forward * row * COLUMN_SPACING
+		local trace = util.TraceLine({ start = position + Vector(0, 0, 200), endpos = position - Vector(0, 0, 400) })
+		local vehicle = ents.Create(vehicleTable.Class or "prop_vehicle_jeep")
+		if IsValid(vehicle) then
+			vehicle:SetModel(vehicleTable.Model)
+			for key, value in pairs(vehicleTable.KeyValues or {}) do vehicle:SetKeyValue(key, value) end
+			vehicle.VehicleTable = vehicleTable
+			vehicle.VehicleName = entry.id
+			vehicle:SetPos(trace.HitPos + Vector(0, 0, 20))
+			vehicle:SetAngles(Angle(0, yaw - 90, 0))   -- (the cars' noses are +Y: facing away from you)
+			vehicle:Spawn()
+			vehicle:Activate()
+			hook.Run("PlayerSpawnedVehicle", requester, vehicle)
+			table.insert(spawned, vehicle)
 			timer.Simple(0.5 + i * 0.05, function()
-				if not IsValid(veh) then return end
-				if E.SetEngine then E.SetEngine(veh, true) end
-				if lights and IsValid(veh:GetNW2Entity("audio_lightbar")) then veh:SetNW2Int("audio_lights", 2) end
+				if not IsValid(vehicle) then return end
+				if AudioEngine.SetEngine then AudioEngine.SetEngine(vehicle, true) end
+				if lights and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then vehicle:SetNW2Int("audio_lights", 2) end
 			end)
 		end
 	end
-	ply:PrintMessage(HUD_PRINTCONSOLE, string.format("[Audio Engine] spawned %d cars (%s)%s; audio_engine_perf_clear removes them",
+	requester:PrintMessage(HUD_PRINTCONSOLE, string.format("[Audio Engine] spawned %d cars (%s)%s; audio_engine_perf_clear removes them",
 		count, #entries == 1 and entries[1].vt.Name or (#entries .. " kinds"), lights and ", lights on" or ""))
 end, nil, "Stress test (debug): audio_engine_perf_spawn <count> [car name | mixed] [lights 0/1] spawns running PERP cars in front of you")
 
-concommand.Add("audio_engine_perf_clear", function(ply)
-	if IsValid(ply) and not DBG.Allowed(ply) then return end
-	local n = 0
-	for _, veh in ipairs(spawned) do
-		if IsValid(veh) then
-			veh:Remove()
-			n = n + 1
+concommand.Add("audio_engine_perf_clear", function(requester)
+	if IsValid(requester) and not EngineDebug.Allowed(requester) then return end
+	local removedCount = 0
+	for _, vehicle in ipairs(spawned) do
+		if IsValid(vehicle) then
+			vehicle:Remove()
+			removedCount = removedCount + 1
 		end
 	end
 	spawned = {}
-	if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] removed " .. n .. " stress-test cars") end
+	if IsValid(requester) then requester:PrintMessage(HUD_PRINTCONSOLE, "[Audio Engine] removed " .. removedCount .. " stress-test cars") end
 end, nil, "Removes the cars audio_engine_perf_spawn made")

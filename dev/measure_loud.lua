@@ -121,7 +121,7 @@ local car = E.Cars["models/plpd/sl65amg_rtu.mdl"]
 for _, id in ipairs(ids) do
   local cfg = E.ResolveProfile(car, E.ProfileFromPreset(id))
   local b = E.Bank.Build(cfg)
-  while b.co do run("Think") end
+  while b.buildCoroutine do run("Think") end
   local n = #b.layers
   local function L(i, k) return generated[b.layers[i][k]].buf end
   local mid = math.max(1, math.floor(n * 0.6))

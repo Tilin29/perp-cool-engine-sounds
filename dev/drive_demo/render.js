@@ -51,21 +51,21 @@ local vmax = cfg.topSpeed / 3.6
 -- the drive: start-up, idle, full throttle to ~93% of top speed (at most 26 s), lift and coast, brake to a stop, idle
 local stage, stageT, pullT = "start", 0, 0
 while t < 60 do
-	local inp = { v = v }
+	local inp = { speed = v }
 	if stage == "start" then if st.phase == "run" then stageT = stageT + dt end if stageT > 1.2 then stage, stageT = "pull", 0 end
-	elseif stage == "pull" then inp.fwd = true; pullT = pullT + dt
+	elseif stage == "pull" then inp.forward = true; pullT = pullT + dt
 		if v > vmax * 0.93 or pullT > 26 then stage, stageT = "coast", 0 end
 	elseif stage == "coast" then stageT = stageT + dt; if stageT > 3 then stage, stageT = "brake", 0 end
-	elseif stage == "brake" then inp.back = v > 0.3; if v < 0.05 then stage, stageT = "idle", 0 end
+	elseif stage == "brake" then inp.backward = v > 0.3; if v < 0.05 then stage, stageT = "idle", 0 end
 	elseif stage == "idle" then stageT = stageT + dt; if stageT > 2 then break end end
 	DT.Step(st, cfg, dt, inp)
 	local drive = st.phase == "run" and st.on
-	if inp.fwd and drive then v = v + E.GearAccel(v, vmax, cfg.powerKg) * dt * (st.shiftT > 0 and 0.3 or 1)
-	elseif inp.back then v = math.max(0, v - 7 * dt)
+	if inp.forward and drive then v = v + E.GearAccel(v, vmax, cfg.powerKg) * dt * (st.shiftTimer > 0 and 0.3 or 1)
+	elseif inp.backward then v = math.max(0, v - 7 * dt)
 	else v = math.max(0, v - (0.4 + 0.0006 * v * v) * dt) end
-	local limTarget = (drive and st.gear == 0 and st.limHold > 0 and st.lastPedal and st.rpm > cfg.redline * 0.9) and 1 or 0
-	out[#out + 1] = string.format("%.1f,%.3f,%d,%.3f,%d,%.3f,%.3f,%d,%.3f", st.rpm, st.soundThr, st.gear, v, limTarget,
-		st.boost or 0, st.bovEvent or 0, (st.phase == "run") and 1 or 0, st.cut and 1 or 0)
+	local limTarget = (drive and st.gear == 0 and st.limiterHoldTimer > 0 and st.lastPedal and st.rpm > cfg.redline * 0.9) and 1 or 0
+	out[#out + 1] = string.format("%.1f,%.3f,%d,%.3f,%d,%.3f,%.3f,%d,%.3f", st.rpm, st.soundThrottle, st.gear, v, limTarget,
+		st.boost or 0, st.blowOffEvent or 0, (st.phase == "run") and 1 or 0, st.fuelCut and 1 or 0)
 	t = t + dt
 end
 local L = {} for i, r in ipairs(bk.layers) do L[i] = r end

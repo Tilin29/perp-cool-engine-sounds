@@ -17,37 +17,37 @@
 	  soundLevel   dB, how far the engine carries
 	  volume       overall loudness for this car
 	  stability    the drift-friendly handling assist (false = off for this car)
-	  gearing      the car's own shift speeds per gear (sh_presets.lua E.ApplyGearing)
-	  rev          { rise, fall }: how quickly it revs in neutral (sh_drivetrain.lua DT.REV)
+	  gearing      the car's own shift speeds per gear (sh_presets.lua AudioEngine.ApplyGearing)
+	  rev          { rise, fall }: how quickly it revs in neutral (sh_drivetrain.lua Drivetrain.REV)
 ]]
 
 AUDIO_ENGINE = AUDIO_ENGINE or {}
 AUDIO_ENGINE.Cars = AUDIO_ENGINE.Cars or {}
 
 -- the in-game engine editor (the Rev Bench tuning menu): off unless the server turns it on
-AUDIO_ENGINE.cvEditor = CreateConVar("audio_engine_editor", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+AUDIO_ENGINE.editorConVar = CreateConVar("audio_engine_editor", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"1 = the in-game engine editor (Rev Bench menu: !engine, audio_engine_menu, context menu) is available; 0 = off")
-function AUDIO_ENGINE.EditorEnabled() return AUDIO_ENGINE.cvEditor:GetBool() end
+function AUDIO_ENGINE.EditorEnabled() return AUDIO_ENGINE.editorConVar:GetBool() end
 
-function AUDIO_ENGINE.RegisterCar(model, cfg)
-	cfg.model = string.lower(model)
-	AUDIO_ENGINE.Cars[cfg.model] = cfg
-	return cfg
+function AUDIO_ENGINE.RegisterCar(model, carConfig)
+	carConfig.model = string.lower(model)
+	AUDIO_ENGINE.Cars[carConfig.model] = carConfig
+	return carConfig
 end
 
 -- model path -> lower case, kept: this runs for every car every tick / frame, and lowering the
 -- same few paths again each time was most of its cost
 local lowered = {}
-function AUDIO_ENGINE.GetCarConfig(ent)
-	if not ent or not ent.GetModel then return nil end
-	local mdl = ent:GetModel()
-	if not mdl then return nil end
-	local key = lowered[mdl]
-	if not key then
-		key = string.lower(mdl)
-		lowered[mdl] = key
+function AUDIO_ENGINE.GetCarConfig(entity)
+	if not entity or not entity.GetModel then return nil end
+	local modelPath = entity:GetModel()
+	if not modelPath then return nil end
+	local lowerModel = lowered[modelPath]
+	if not lowerModel then
+		lowerModel = string.lower(modelPath)
+		lowered[modelPath] = lowerModel
 	end
-	return AUDIO_ENGINE.Cars[key]
+	return AUDIO_ENGINE.Cars[lowerModel]
 end
 
 -- Mercedes-Benz SL65 AMG (R230): 6.0 L twin-turbo V12, 5-speed automatic.

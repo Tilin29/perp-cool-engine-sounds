@@ -73,10 +73,10 @@ function BR.tick(dt, t, f, b, h, inCar, px, py, pz, yaw, ex, ey, ez)
 	local cfg = E.GetEngineConfig(CAR)
 	local bank = E.Bank.list[cfg.id]
 	if c then
-		local st = c.st
-		__state(st.rpm, st.gear, st.on and 1 or 0, st.phase or "", st.thr or 0, c.v or 0, st.limHold or 0,
+		local st = c.engineState
+		__state(st.rpm, st.gear, st.on and 1 or 0, st.phase or "", st.throttle or 0, c.speedAlongNose or 0, st.limiterHoldTimer or 0,
 			cfg.redline, (bank and bank.ready) and 1 or 0, (c.bank and c.bank.ready) and 1 or 0, name, prog,
-			c.dop or 1, c.bus or 1, c.busPeak or 0, cfg.engineName or "", (CAR.pose.vehicle_guage or 0))
+			c.dopplerRatio or 1, c.headroomGain or 1, c.mixPeak or 0, cfg.engineName or "", (CAR.pose.vehicle_guage or 0))
 	else
 		__state(0, 0, 0, "", 0, 0, 0, cfg.redline, (bank and bank.ready) and 1 or 0, 0, name, prog, 1, 1, 0, cfg.engineName or "", 0)
 	end

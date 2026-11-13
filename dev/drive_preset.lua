@@ -128,7 +128,7 @@ for f = 1, 60 * 12 do
   if f % 120 == 0 then
     local c = E.ClientCars[car]
     local s2 = 0 for i = #out - SR + 1, #out do s2 = s2 + out[i] ^ 2 end
-    print(string.format("%s t=%2ds v=%3.0f km/h rpm=%5.0f gear=%d rms %.1f dB", id, f / 60, c.v * 3.6, c.st.rpm, c.st.gear, 10 * math.log10(s2 / SR)))
+    print(string.format("%s t=%2ds v=%3.0f km/h rpm=%5.0f gear=%d rms %.1f dB", id, f / 60, c.speedAlongNose * 3.6, c.engineState.rpm, c.engineState.gear, 10 * math.log10(s2 / SR)))
   end
 end
 W.write("/home/claude/tools/out/drive_" .. id .. ".wav", out, SR, 0.5)

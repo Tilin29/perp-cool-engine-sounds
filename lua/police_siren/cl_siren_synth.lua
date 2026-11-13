@@ -25,94 +25,94 @@ local TWO_PI = math.pi * 2
 
 local floor, sin, cos, exp, max, min, abs = math.floor, math.sin, math.cos, math.exp, math.max, math.min, math.abs
 
-local function round(x)
-	return floor(x + 0.5)
+local function round(value)
+	return floor(value + 0.5)
 end
 
-local function tanh(x)
-	if x > 15 then return 1 end
-	if x < -15 then return -1 end
-	local e = exp(2 * x)
+local function tanh(value)
+	if value > 15 then return 1 end
+	if value < -15 then return -1 end
+	local exponential = exp(2 * value)
 
-	return (e - 1) / (e + 1)
+	return (exponential - 1) / (exponential + 1)
 end
 
 -- the pattern as timed segments over one loop: a glide into each point, then its hold
 function Synth.Segments(pattern)
-	local segs, t = {}, 0
-	local n = #pattern
-	for i = 1, n do
-		local p = pattern[i]
-		local prev = pattern[i == 1 and n or i - 1]
-		local glide, hold = max(p.glide or 0, 0), max(p.hold or 0, 0)
+	local segments, time = {}, 0
+	local pointCount = #pattern
+	for i = 1, pointCount do
+		local point = pattern[i]
+		local previousPoint = pattern[i == 1 and pointCount or i - 1]
+		local glide, hold = max(point.glide or 0, 0), max(point.hold or 0, 0)
 		if glide > 0 then
-			segs[#segs + 1] = { t0 = t, t1 = t + glide, f0 = prev.f, f1 = p.f, curve = p.curve or 1 }
-			t = t + glide
+			segments[#segments + 1] = { startTime = time, endTime = time + glide, startHz = previousPoint.f, endHz = point.f, curve = point.curve or 1 }
+			time = time + glide
 		end
 		if hold > 0 then
-			segs[#segs + 1] = { t0 = t, t1 = t + hold, f0 = p.f, f1 = p.f, curve = 1 }
-			t = t + hold
+			segments[#segments + 1] = { startTime = time, endTime = time + hold, startHz = point.f, endHz = point.f, curve = 1 }
+			time = time + hold
 		end
 	end
-	if t < MIN_LOOP then
-		local f = n > 0 and pattern[1].f or 440
-		segs = { { t0 = 0, t1 = MIN_LOOP, f0 = f, f1 = f, curve = 1 } }
-		t = MIN_LOOP
+	if time < MIN_LOOP then
+		local frequency = pointCount > 0 and pattern[1].f or 440
+		segments = { { startTime = 0, endTime = MIN_LOOP, startHz = frequency, endHz = frequency, curve = 1 } }
+		time = MIN_LOOP
 	end
 
-	return segs, t
+	return segments, time
 end
 
-local function segmentFreq(s, t, logGlide)
-	if s.f0 == s.f1 then return s.f0 end
-	local u = (t - s.t0) / (s.t1 - s.t0)
-	u = min(max(u, 0), 1) ^ max(s.curve, 0.05)
-	if logGlide and s.f0 > 0 and s.f1 > 0 then return s.f0 * (s.f1 / s.f0) ^ u end
+local function segmentFrequency(segment, time, logGlide)
+	if segment.startHz == segment.endHz then return segment.startHz end
+	local progress = (time - segment.startTime) / (segment.endTime - segment.startTime)
+	progress = min(max(progress, 0), 1) ^ max(segment.curve, 0.05)
+	if logGlide and segment.startHz > 0 and segment.endHz > 0 then return segment.startHz * (segment.endHz / segment.startHz) ^ progress end
 
-	return s.f0 + (s.f1 - s.f0) * u
+	return segment.startHz + (segment.endHz - segment.startHz) * progress
 end
 
 -- the pattern's frequency at every sample of the loop
-local function patternFreqs(tone, pitch, sr)
-	local segs, T = Synth.Segments(tone.pattern or {})
-	local n = round(T * sr)
-	local f, k = {}, 1
-	for i = 0, n - 1 do
-		local t = i / sr
-		while k < #segs and t >= segs[k].t1 do k = k + 1 end
-		f[i] = segmentFreq(segs[k], t, tone.logGlide ~= false) * pitch
+local function patternFrequencies(tone, pitch, sampleRate)
+	local segments, loopSeconds = Synth.Segments(tone.pattern or {})
+	local sampleCount = round(loopSeconds * sampleRate)
+	local frequencies, segmentIndex = {}, 1
+	for i = 0, sampleCount - 1 do
+		local time = i / sampleRate
+		while segmentIndex < #segments and time >= segments[segmentIndex].endTime do segmentIndex = segmentIndex + 1 end
+		frequencies[i] = segmentFrequency(segments[segmentIndex], time, tone.logGlide ~= false) * pitch
 	end
 
-	return f, n, T
+	return frequencies, sampleCount, loopSeconds
 end
 
 -- a single cycle holding the harmonics that stay under the Nyquist limit at this top frequency
-local function wavetable(harmonics, topFreq, sr)
-	local tbl, peak = {}, 0
-	local limit = sr * NYQUIST_SHARE
+local function wavetable(harmonics, topFreq, sampleRate)
+	local waveTable, peak = {}, 0
+	local limit = sampleRate * NYQUIST_SHARE
 	for i = 0, TABLE_SIZE - 1 do
-		local x, ph = 0, TWO_PI * i / TABLE_SIZE
-		for h = 1, #harmonics do
-			local a = harmonics[h] or 0
-			if a ~= 0 and h * topFreq < limit then x = x + a * sin(h * ph) end
+		local sample, phase = 0, TWO_PI * i / TABLE_SIZE
+		for harmonic = 1, #harmonics do
+			local amplitude = harmonics[harmonic] or 0
+			if amplitude ~= 0 and harmonic * topFreq < limit then sample = sample + amplitude * sin(harmonic * phase) end
 		end
-		tbl[i] = x
-		peak = max(peak, abs(x))
+		waveTable[i] = sample
+		peak = max(peak, abs(sample))
 	end
 	if peak > 0 then
-		for i = 0, TABLE_SIZE - 1 do tbl[i] = tbl[i] / peak end
+		for i = 0, TABLE_SIZE - 1 do waveTable[i] = waveTable[i] / peak end
 	end
-	tbl[TABLE_SIZE] = tbl[0]
+	waveTable[TABLE_SIZE] = waveTable[0]
 
-	return tbl
+	return waveTable
 end
 
 -- RBJ biquad coefficients: "hp", "lp" or "peak"
-local function biquad(kind, f, q, gainDb, sr)
-	f = min(max(f, 10), sr * NYQUIST_SHARE)
+local function biquad(kind, frequency, q, gainDb, sampleRate)
+	frequency = min(max(frequency, 10), sampleRate * NYQUIST_SHARE)
 	q = max(q, 0.1)
-	local w = TWO_PI * f / sr
-	local cw, alpha = cos(w), sin(w) / (2 * q)
+	local omega = TWO_PI * frequency / sampleRate
+	local cw, alpha = cos(omega), sin(omega) / (2 * q)
 	local b0, b1, b2, a0, a1, a2
 	if kind == "hp" then
 		b0, b1, b2 = (1 + cw) / 2, -(1 + cw), (1 + cw) / 2
@@ -121,119 +121,119 @@ local function biquad(kind, f, q, gainDb, sr)
 		b0, b1, b2 = (1 - cw) / 2, 1 - cw, (1 - cw) / 2
 		a0, a1, a2 = 1 + alpha, -2 * cw, 1 - alpha
 	else
-		local a = 10 ^ (gainDb / 40)
-		b0, b1, b2 = 1 + alpha * a, -2 * cw, 1 - alpha * a
-		a0, a1, a2 = 1 + alpha / a, -2 * cw, 1 - alpha / a
+		local gainFactor = 10 ^ (gainDb / 40)
+		b0, b1, b2 = 1 + alpha * gainFactor, -2 * cw, 1 - alpha * gainFactor
+		a0, a1, a2 = 1 + alpha / gainFactor, -2 * cw, 1 - alpha / gainFactor
 	end
 
 	return { b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0, 0, 0, 0, 0 }
 end
 
-local function runBiquad(c, x)
-	local y = c[1] * x + c[2] * c[6] + c[3] * c[7] - c[4] * c[8] - c[5] * c[9]
-	c[7], c[6] = c[6], x
-	c[9], c[8] = c[8], y
+local function runBiquad(filter, input)
+	local output = filter[1] * input + filter[2] * filter[6] + filter[3] * filter[7] - filter[4] * filter[8] - filter[5] * filter[9]
+	filter[7], filter[6] = filter[6], input
+	filter[9], filter[8] = filter[8], output
 
-	return y
+	return output
 end
 
 -- scales a voice's frequencies so the loop holds a whole number of its cycles
-local function wholeCycles(f, n, sr)
+local function wholeCycles(frequencies, sampleCount, sampleRate)
 	local cycles = 0
-	for i = 0, n - 1 do cycles = cycles + f[i] end
-	cycles = cycles / sr
+	for i = 0, sampleCount - 1 do cycles = cycles + frequencies[i] end
+	cycles = cycles / sampleRate
 	if cycles <= 0 then return end
-	local k = max(1, round(cycles)) / cycles
-	for i = 0, n - 1 do f[i] = f[i] * k end
+	local scale = max(1, round(cycles)) / cycles
+	for i = 0, sampleCount - 1 do frequencies[i] = frequencies[i] * scale end
 end
 
-local function wholeRate(rate, T)
+local function wholeRate(rate, loopSeconds)
 	if not rate or rate <= 0 then return 0 end
 
-	return max(1, round(rate * T))
+	return max(1, round(rate * loopSeconds))
 end
 
 --[[
 	Renders tone `tone` with the settings `cfg` (POLICE_SIREN.CONFIG's pitch/sampleRate/cabin).
 	Returns the samples (1-based, peak PEAK), the sample rate and the loop length in samples.
 	`yield`, if given, is called every few thousand samples (the game renders in a coroutine).
-	`inside`: the version heard inside the car, muffled at cfg.cabin.muffle Hz.
+	`inside`: the version heard inside the car, muffled at config.cabin.muffle Hz.
 ]]
-function Synth.Render(tone, cfg, yield, inside)
-	local sr = cfg.sampleRate or 44100
-	local f1, n, T = patternFreqs(tone, cfg.pitch or 1, sr)
+function Synth.Render(tone, config, yield, inside)
+	local sampleRate = config.sampleRate or 44100
+	local mainFrequencies, sampleCount, loopSeconds = patternFrequencies(tone, config.pitch or 1, sampleRate)
 
-	local vib = tone.vibrato or {}
-	local vibCycles, vibDepth = wholeRate(vib.rate, T), (vib.depth or 0) / 1200
-	if vibCycles > 0 and vibDepth ~= 0 then
-		for i = 0, n - 1 do f1[i] = f1[i] * 2 ^ (vibDepth * sin(TWO_PI * vibCycles * i / n)) end
+	local vibrato = tone.vibrato or {}
+	local vibratoCycles, vibratoDepth = wholeRate(vibrato.rate, loopSeconds), (vibrato.depth or 0) / 1200
+	if vibratoCycles > 0 and vibratoDepth ~= 0 then
+		for i = 0, sampleCount - 1 do mainFrequencies[i] = mainFrequencies[i] * 2 ^ (vibratoDepth * sin(TWO_PI * vibratoCycles * i / sampleCount)) end
 	end
 
-	local v2 = tone.voice2 or {}
-	local f2
-	if v2.on then
-		local ratio = 2 ^ (((v2.semitones or 0) + (v2.cents or 0) / 100) / 12)
-		local shift = round((v2.offset or 0) * n) % n
-		f2 = {}
-		for i = 0, n - 1 do f2[i] = f1[(i + shift) % n] * ratio end
-		wholeCycles(f2, n, sr)
+	local voice2 = tone.voice2 or {}
+	local secondFrequencies
+	if voice2.on then
+		local ratio = 2 ^ (((voice2.semitones or 0) + (voice2.cents or 0) / 100) / 12)
+		local shift = round((voice2.offset or 0) * sampleCount) % sampleCount
+		secondFrequencies = {}
+		for i = 0, sampleCount - 1 do secondFrequencies[i] = mainFrequencies[(i + shift) % sampleCount] * ratio end
+		wholeCycles(secondFrequencies, sampleCount, sampleRate)
 	end
-	wholeCycles(f1, n, sr)
+	wholeCycles(mainFrequencies, sampleCount, sampleRate)
 
-	local top1, top2 = 0, 0
-	for i = 0, n - 1 do
-		top1 = max(top1, f1[i])
-		if f2 then top2 = max(top2, f2[i]) end
+	local mainTop, secondTop = 0, 0
+	for i = 0, sampleCount - 1 do
+		mainTop = max(mainTop, mainFrequencies[i])
+		if secondFrequencies then secondTop = max(secondTop, secondFrequencies[i]) end
 	end
 	local harmonics = tone.harmonics or { 1 }
-	local tbl1 = wavetable(harmonics, top1, sr)
-	local tbl2 = f2 and wavetable(harmonics, top2, sr)
-	local level2 = v2.level or 0
+	local mainTable = wavetable(harmonics, mainTop, sampleRate)
+	local secondTable = secondFrequencies and wavetable(harmonics, secondTop, sampleRate)
+	local secondLevel = voice2.level or 0
 
-	local trem = tone.tremolo or {}
-	local tremCycles, tremDepth = wholeRate(trem.rate, T), min(max(trem.depth or 0, 0), 1)
+	local tremolo = tone.tremolo or {}
+	local tremoloCycles, tremoloDepth = wholeRate(tremolo.rate, loopSeconds), min(max(tremolo.depth or 0, 0), 1)
 
-	local sp = tone.speaker or {}
-	local hp = biquad("hp", sp.highpass or 20, 0.707, 0, sr)
-	local lp = biquad("lp", sp.lowpass or 20000, 0.707, 0, sr)
-	local peak = biquad("peak", sp.resonance or 1000, sp.resonanceQ or 1, sp.resonanceGain or 0, sr)
-	local drive = max(sp.drive or 0, 0)
+	local speaker = tone.speaker or {}
+	local highpass = biquad("hp", speaker.highpass or 20, 0.707, 0, sampleRate)
+	local lowpass = biquad("lp", speaker.lowpass or 20000, 0.707, 0, sampleRate)
+	local resonance = biquad("peak", speaker.resonance or 1000, speaker.resonanceQ or 1, speaker.resonanceGain or 0, sampleRate)
+	local drive = max(speaker.drive or 0, 0)
 	local driveNorm = drive > 0 and 1 / tanh(drive) or 1
-	local muffleHz = inside and cfg.cabin and cfg.cabin.muffle
-	local muffleA = muffleHz and biquad("lp", muffleHz, 0.707, 0, sr)
-	local muffleB = muffleHz and biquad("lp", muffleHz, 0.707, 0, sr)
+	local muffleHz = inside and config.cabin and config.cabin.muffle
+	local muffleLowpassA = muffleHz and biquad("lp", muffleHz, 0.707, 0, sampleRate)
+	local muffleLowpassB = muffleHz and biquad("lp", muffleHz, 0.707, 0, sampleRate)
 
 	local out, outPeak = {}, 0
-	local ph1, ph2 = 0, 0
+	local mainPhase, secondPhase = 0, 0
 	for pass = 1, 2 do
-		for i = 0, n - 1 do
-			ph1 = (ph1 + f1[i] / sr) % 1
-			local p = ph1 * TABLE_SIZE
-			local j = floor(p)
-			local x = tbl1[j] + (tbl1[j + 1] - tbl1[j]) * (p - j)
-			if f2 then
-				ph2 = (ph2 + f2[i] / sr) % 1
-				p = ph2 * TABLE_SIZE
-				j = floor(p)
-				x = x + level2 * (tbl2[j] + (tbl2[j + 1] - tbl2[j]) * (p - j))
+		for i = 0, sampleCount - 1 do
+			mainPhase = (mainPhase + mainFrequencies[i] / sampleRate) % 1
+			local tablePosition = mainPhase * TABLE_SIZE
+			local tableIndex = floor(tablePosition)
+			local sample = mainTable[tableIndex] + (mainTable[tableIndex + 1] - mainTable[tableIndex]) * (tablePosition - tableIndex)
+			if secondFrequencies then
+				secondPhase = (secondPhase + secondFrequencies[i] / sampleRate) % 1
+				tablePosition = secondPhase * TABLE_SIZE
+				tableIndex = floor(tablePosition)
+				sample = sample + secondLevel * (secondTable[tableIndex] + (secondTable[tableIndex + 1] - secondTable[tableIndex]) * (tablePosition - tableIndex))
 			end
-			if tremCycles > 0 then
-				x = x * (1 - tremDepth * (0.5 - 0.5 * cos(TWO_PI * tremCycles * i / n)))
+			if tremoloCycles > 0 then
+				sample = sample * (1 - tremoloDepth * (0.5 - 0.5 * cos(TWO_PI * tremoloCycles * i / sampleCount)))
 			end
-			x = runBiquad(hp, x)
-			if drive > 0 then x = tanh(x * drive) * driveNorm end
-			x = runBiquad(lp, runBiquad(peak, x))
-			if muffleA then x = runBiquad(muffleB, runBiquad(muffleA, x)) end
+			sample = runBiquad(highpass, sample)
+			if drive > 0 then sample = tanh(sample * drive) * driveNorm end
+			sample = runBiquad(lowpass, runBiquad(resonance, sample))
+			if muffleLowpassA then sample = runBiquad(muffleLowpassB, runBiquad(muffleLowpassA, sample)) end
 			if pass == 2 then
-				out[i + 1] = x
-				outPeak = max(outPeak, abs(x))
+				out[i + 1] = sample
+				outPeak = max(outPeak, abs(sample))
 			end
 			if yield and i % YIELD_EVERY == 0 then yield() end
 		end
 	end
 
-	local g = outPeak > 0 and PEAK / outPeak or 0
-	for i = 1, n do out[i] = out[i] * g end
+	local normalizeGain = outPeak > 0 and PEAK / outPeak or 0
+	for i = 1, sampleCount do out[i] = out[i] * normalizeGain end
 
-	return out, sr, n
+	return out, sampleRate, sampleCount
 end

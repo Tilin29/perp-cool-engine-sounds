@@ -9,26 +9,26 @@
 ]]
 
 AUDIO_ENGINE = AUDIO_ENGINE or {}
-local DT = {}
-AUDIO_ENGINE.Drivetrain = DT
+local Drivetrain = {}
+AUDIO_ENGINE.Drivetrain = Drivetrain
 
 local min, max, abs, cos, pi = math.min, math.max, math.abs, math.cos, math.pi
-local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
-DT.clamp = clamp
+local function clamp(value, low, high) if value < low then return low elseif value > high then return high end return value end
+Drivetrain.clamp = clamp
 
-DT.TMAX = 320 -- Rev Bench reference torque (the baked limiter loops and start-ups: changing it needs a re-bake)
+Drivetrain.TMAX = 320 -- Rev Bench reference torque (the baked limiter loops and start-ups: changing it needs a re-bake)
 
 --[[
 	Free-revving in neutral in game (the Space+W rev at a standstill), in the same torque units as
 	TMAX: `rise` pushes the revs up with the throttle, `fall` is the engine's drag that brings them
 	back down when you let go. At TMAX's 320 for both, a rev took ~4 s to fall back to idle, so a
 	second blip had to wait for it; 500 (the starting point suggested for tuning) falls in ~2.6 s.
-	Per car: cfg.revRise / cfg.revFall (sh_carlist.lua E.CAR_REV). Runtime only: no re-bake.
+	Per car: config.revRise / config.revFall (sh_carlist.lua AudioEngine.CAR_REV). Runtime only: no re-bake.
 ]]
-DT.REV = { rise = 500, fall = 500 }
+Drivetrain.REV = { rise = 500, fall = 500 }
 
--- Arcade gearbox shift points, as fractions of redline (cars can override with cfg.shift)
-DT.SHIFT = {
+-- Arcade gearbox shift points, as fractions of redline (cars can override with config.shift)
+Drivetrain.SHIFT = {
 	upRpm = 0.92,      -- W held: shift up here...
 	lazyUpRpm = 0.68,  -- ...or as early as this when the car barely accelerates
 	pullAccel = 2.5,   -- m/s2 of acceleration that counts as pulling hard (shifts at upRpm)
@@ -55,224 +55,232 @@ DT.SHIFT = {
 	cruiseThr = 0.8,   -- the throttle it sounds like while holding the speed (the pedal 80% down)
 }
 
--- a car's own shift points, any it leaves out from DT.SHIFT
+-- a car's own shift points, any it leaves out from Drivetrain.SHIFT
 local shiftCache = setmetatable({}, { __mode = "k" })
-function DT.ShiftPoints(t)
-	local r = shiftCache[t]
-	if r then return r end
-	r = {}
-	for k, v in pairs(DT.SHIFT) do r[k] = v end
-	for k, v in pairs(t) do r[k] = v end
-	shiftCache[t] = r
-	return r
+function Drivetrain.ShiftPoints(carShift)
+	local points = shiftCache[carShift]
+	if points then return points end
+	points = {}
+	for key, value in pairs(Drivetrain.SHIFT) do points[key] = value end
+	for key, value in pairs(carShift) do points[key] = value end
+	shiftCache[carShift] = points
+	return points
 end
 
-function DT.TorqueNorm(cfg, rpm)
-	local x = rpm / cfg.redline
-	return clamp((0.55 + 1.1 * x - x * x) / 0.8525, 0.3, 1)
+function Drivetrain.TorqueNorm(config, rpm)
+	local redlineShare = rpm / config.redline
+	return clamp((0.55 + 1.1 * redlineShare - redlineShare * redlineShare) / 0.8525, 0.3, 1)
 end
 
-function DT.EmotionFlare(cfg)
-	return clamp(cfg.redline * 0.55, 3000, 8000)
+function Drivetrain.EmotionFlare(config)
+	return clamp(config.redline * 0.55, 3000, 8000)
 end
 
-function DT.New()
+function Drivetrain.New()
 	return {
-		on = false, phase = "off", phaseT = 0, emotion = false,
-		settleFrom = 0, settleT = 0, settleDur = 3,
-		rpm = 0, gear = 0, thr = 0, thrAvg = 0, soundThr = 0,
-		cut = false, crankMode = 0, limT = 0, limHold = 0, limEvent = false,
-		shiftT = 0, shiftKind = 0, holdT = 0,
-		boost = 0, bovEvent = nil, lastPedal = false,
-		lastV = 0, accel = 0, stallT = 0, pressT = 9, steerAgo = 9,
+		on = false, phase = "off", phaseTimer = 0, emotion = false,
+		settleFromRpm = 0, settleElapsed = 0, settleDuration = 3,
+		rpm = 0, gear = 0, throttle = 0, throttleAverage = 0, soundThrottle = 0,
+		fuelCut = false, crankMode = 0, limiterCutTimer = 0, limiterHoldTimer = 0, limiterEvent = false,
+		shiftTimer = 0, shiftDirection = 0, gearHoldTimer = 0,
+		boost = 0, blowOffEvent = nil, lastPedal = false,
+		lastSpeed = 0, acceleration = 0, stallTimer = 0, throttleHeldFor = 9, timeSinceSteering = 9,
 	}
 end
 
-function DT.Start(st, emotion)
-	st.on = true
-	st.phase = "catch"
-	st.phaseT = 0.3
-	st.emotion = emotion and true or false
-	st.rpm = max(st.rpm, 150)
+function Drivetrain.Start(engineState, emotion)
+	engineState.on = true
+	engineState.phase = "catch"
+	engineState.phaseTimer = 0.3
+	engineState.emotion = emotion and true or false
+	engineState.rpm = max(engineState.rpm, 150)
 end
 
 -- engine was already running when we first saw the car: skip the start-up sequence
-function DT.SkipStart(st, cfg)
-	st.on = true
-	st.phase = "run"
-	st.rpm = max(st.rpm, cfg.idle)
+function Drivetrain.SkipStart(engineState, config)
+	engineState.on = true
+	engineState.phase = "run"
+	engineState.rpm = max(engineState.rpm, config.idle)
 end
 
-function DT.Stop(st)
-	st.on = false
-	st.phase = "off"
+function Drivetrain.Stop(engineState)
+	engineState.on = false
+	engineState.phase = "off"
 end
 
 -- Rev Bench start-up: catch -> rev flare -> eased settle to idle
-function DT.StartSequence(st, cfg, dt)
-	st.cut = false
-	st.crankMode = 0
-	if cfg.electric then
+function Drivetrain.StartSequence(engineState, config, deltaTime)
+	engineState.fuelCut = false
+	engineState.crankMode = 0
+	if config.electric then
 		-- an electric car just powers up: a short hum, then it's ready
-		st.rpm = st.rpm + (cfg.idle - st.rpm) * min(1, dt * 8)
-		st.soundThr = 0.15
-		st.phaseT = st.phaseT - dt
-		if st.phaseT <= -0.3 then st.phase = "run" end
+		engineState.rpm = engineState.rpm + (config.idle - engineState.rpm) * min(1, deltaTime * 8)
+		engineState.soundThrottle = 0.15
+		engineState.phaseTimer = engineState.phaseTimer - deltaTime
+		if engineState.phaseTimer <= -0.3 then engineState.phase = "run" end
 		return
 	end
-	if st.phase == "catch" then
-		st.crankMode = 2
-		st.soundThr = 0.35
-		st.rpm = st.rpm + (500 - st.rpm) * min(1, dt * 7)
-		st.phaseT = st.phaseT - dt
-		if st.phaseT <= 0 then st.phase = "flare"; st.phaseT = 0.6 end
-	elseif st.phase == "flare" then
-		local target = st.emotion and DT.EmotionFlare(cfg) or (cfg.idle + 700)
-		st.soundThr = st.emotion and 1 or 0.6
-		st.rpm = st.rpm + (target * 1.04 - st.rpm) * min(1, dt * (st.emotion and 10 or 8))
-		st.phaseT = st.phaseT - dt
-		if st.rpm >= target or st.phaseT <= 0 then
-			st.phase = "settle"
-			st.settleFrom = st.rpm
-			st.settleT = 0
-			st.settleDur = st.emotion and 3 or 1.5
+	if engineState.phase == "catch" then
+		engineState.crankMode = 2
+		engineState.soundThrottle = 0.35
+		engineState.rpm = engineState.rpm + (500 - engineState.rpm) * min(1, deltaTime * 7)
+		engineState.phaseTimer = engineState.phaseTimer - deltaTime
+		if engineState.phaseTimer <= 0 then engineState.phase = "flare"; engineState.phaseTimer = 0.6 end
+	elseif engineState.phase == "flare" then
+		local flareRpm = engineState.emotion and Drivetrain.EmotionFlare(config) or (config.idle + 700)
+		engineState.soundThrottle = engineState.emotion and 1 or 0.6
+		engineState.rpm = engineState.rpm + (flareRpm * 1.04 - engineState.rpm) * min(1, deltaTime * (engineState.emotion and 10 or 8))
+		engineState.phaseTimer = engineState.phaseTimer - deltaTime
+		if engineState.rpm >= flareRpm or engineState.phaseTimer <= 0 then
+			engineState.phase = "settle"
+			engineState.settleFromRpm = engineState.rpm
+			engineState.settleElapsed = 0
+			engineState.settleDuration = engineState.emotion and 3 or 1.5
 		end
-	elseif st.phase == "settle" then
-		st.settleT = st.settleT + dt
-		local p = min(1, st.settleT / st.settleDur)
-		local ease = (1 + cos(pi * p)) / 2
-		st.rpm = cfg.idle + (st.settleFrom - cfg.idle) * ease
-		st.soundThr = 0.12 + 0.15 * ease
-		if p >= 1 then st.phase = "run" end
+	elseif engineState.phase == "settle" then
+		engineState.settleElapsed = engineState.settleElapsed + deltaTime
+		local settleProgress = min(1, engineState.settleElapsed / engineState.settleDuration)
+		local ease = (1 + cos(pi * settleProgress)) / 2
+		engineState.rpm = config.idle + (engineState.settleFromRpm - config.idle) * ease
+		engineState.soundThrottle = 0.12 + 0.15 * ease
+		if settleProgress >= 1 then engineState.phase = "run" end
 	end
 end
 
--- Free-spinning engine (neutral), from Rev Bench, with the game's own rise and fall (DT.REV)
-function DT.FreeSpinRate(cfg, rpm, engThr)
-	local rise, fall = cfg.revRise or DT.REV.rise, cfg.revFall or DT.REV.fall
-	local Te = engThr * rise * DT.TorqueNorm(cfg, rpm) - fall * (0.05 + 0.12 * rpm / cfg.redline)
-	return Te * 42 * (cfg.redline / 7000)
+-- Free-spinning engine (neutral), from Rev Bench, with the game's own rise and fall (Drivetrain.REV)
+function Drivetrain.FreeSpinRate(config, rpm, engineThrottle)
+	local rise, fall = config.revRise or Drivetrain.REV.rise, config.revFall or Drivetrain.REV.fall
+	local netTorque = engineThrottle * rise * Drivetrain.TorqueNorm(config, rpm) - fall * (0.05 + 0.12 * rpm / config.redline)
+	return netTorque * 42 * (config.redline / 7000)
 end
-local function freeSpin(st, cfg, dt, engThr)
-	st.rpm = st.rpm + DT.FreeSpinRate(cfg, st.rpm, engThr) * dt
+local function freeSpin(engineState, config, deltaTime, engineThrottle)
+	engineState.rpm = engineState.rpm + Drivetrain.FreeSpinRate(config, engineState.rpm, engineThrottle) * deltaTime
 end
 
-local function gearRatio(cfg, gear)
-	if gear == -1 then return cfg.reverse * cfg.final end
-	if gear >= 1 then return cfg.gears[gear] * cfg.final end
+local function gearRatio(config, gear)
+	if gear == -1 then return config.reverse * config.final end
+	if gear >= 1 then return config.gears[gear] * config.final end
 	return 0
 end
-DT.GearRatio = gearRatio
+Drivetrain.GearRatio = gearRatio
 
 --[[
-	inp.fwd, inp.back, inp.hand : driver keys (W, S, Space)
-	inp.steer                   : A or D held (the gearbox holds its gear through corners)
-	inp.cruise                  : holding at the speed limiter (sv_cruise.lua): steady throttle, 80%
-	inp.v                       : speed along the car's nose, m/s (negative when rolling back)
+	controls.forward, controls.backward, controls.handbrake : driver keys (W, S, Space)
+	controls.steering            : A or D held (the gearbox holds its gear through corners)
+	controls.holdingSpeedLimit   : holding at the speed limiter (sv_cruise.lua): steady throttle, 80%
+	controls.speed               : speed along the car's nose, m/s (negative when rolling back)
 
-	cfg.shiftPlan (a car's own gearing, sh_presets.lua E.ApplyGearing) moves the shift points per gear:
+	config.shiftPlan (a car's own gearing, sh_presets.lua AudioEngine.ApplyGearing) moves the shift points per gear:
 	  up[g]    rpm where gear g changes up with W held (gentler pulling changes up earlier, by
 	           the same lazyUpRpm / upRpm share as the default points)
 	  down[g]  m/s under which gear g changes down coasting or braking (nil: the default points)
 ]]
-function DT.Step(st, cfg, dt, inp)
-	local v = inp.v or 0
-	local av = abs(v)
-	st.limEvent = false
+function Drivetrain.Step(engineState, config, deltaTime, controls)
+	local speed = controls.speed or 0
+	local absoluteSpeed = abs(speed)
+	engineState.limiterEvent = false
 	-- smoothed acceleration, to notice when the car has stopped pulling at full throttle
-	st.accel = st.accel + ((av - st.lastV) / dt - st.accel) * min(1, dt * 2)
-	st.lastV = av
+	engineState.acceleration = engineState.acceleration + ((absoluteSpeed - engineState.lastSpeed) / deltaTime - engineState.acceleration) * min(1, deltaTime * 2)
+	engineState.lastSpeed = absoluteSpeed
 
 	-- which way the driver wants to go, and which pedal is the "throttle"
 	local mode, pedal
-	if inp.hand and av < 1.0 then
-		mode, pedal = "N", inp.fwd         -- handbrake at a standstill: rev it in neutral
-	elseif st.gear == 0 and av < 1.0 and not inp.fwd and not inp.back then
+	if controls.handbrake and absoluteSpeed < 1.0 then
+		mode, pedal = "N", controls.forward         -- handbrake at a standstill: rev it in neutral
+	elseif engineState.gear == 0 and absoluteSpeed < 1.0 and not controls.forward and not controls.backward then
 		mode, pedal = "N", false           -- stays in neutral until W (or S) is pressed
-	elseif v < -0.6 or (inp.back and not inp.fwd and v < 0.6) then
-		mode, pedal = "R", inp.back
+	elseif speed < -0.6 or (controls.backward and not controls.forward and speed < 0.6) then
+		mode, pedal = "R", controls.backward
 	else
-		mode, pedal = "D", inp.fwd
+		mode, pedal = "D", controls.forward
 	end
 	-- S while rolling forward is the brake
-	local braking = mode == "D" and inp.back and not inp.fwd and v > 0.6
+	local braking = mode == "D" and controls.backward and not controls.forward and speed > 0.6
 
-	local want = pedal and (inp.cruise and (cfg.shift and DT.ShiftPoints(cfg.shift) or DT.SHIFT).cruiseThr or 1) or 0
-	st.thr = st.thr + clamp(want - st.thr, -dt * (inp.cruise and 1.5 or 7), dt * 5)
-	st.thrAvg = st.thrAvg + (st.thr - st.thrAvg) * min(1, dt * 2.5)
+	local targetThrottle = pedal and (controls.holdingSpeedLimit and (config.shift and Drivetrain.ShiftPoints(config.shift) or Drivetrain.SHIFT).cruiseThr or 1) or 0
+	engineState.throttle = engineState.throttle + clamp(targetThrottle - engineState.throttle, -deltaTime * (controls.holdingSpeedLimit and 1.5 or 7), deltaTime * 5)
+	engineState.throttleAverage = engineState.throttleAverage + (engineState.throttle - engineState.throttleAverage) * min(1, deltaTime * 2.5)
 
 	-- turbo boost: builds with load above ~1600 rpm with some lag, dumps through the
 	-- blow-off valve when the throttle snaps shut
-	st.bovEvent = nil
-	if cfg.turbo then
-		local want = (st.on and st.phase == "run") and st.soundThr * clamp((st.rpm - 1600) / 2000, 0, 1) or 0
-		if want > st.boost then
-			st.boost = st.boost + (want - st.boost) * min(1, dt * 1.8)
+	engineState.blowOffEvent = nil
+	if config.turbo then
+		local targetBoost = (engineState.on and engineState.phase == "run") and engineState.soundThrottle * clamp((engineState.rpm - 1600) / 2000, 0, 1) or 0
+		if targetBoost > engineState.boost then
+			engineState.boost = engineState.boost + (targetBoost - engineState.boost) * min(1, deltaTime * 1.8)
 		else
-			st.boost = st.boost + (want - st.boost) * min(1, dt * 5)
+			engineState.boost = engineState.boost + (targetBoost - engineState.boost) * min(1, deltaTime * 5)
 		end
 		-- only a proper lift on boost vents audibly; a gentle lift stays quiet
-		if st.lastPedal and not pedal and st.boost > 0.6 then
-			st.bovEvent = st.boost
-			st.boost = st.boost * 0.4
+		if engineState.lastPedal and not pedal and engineState.boost > 0.6 then
+			engineState.blowOffEvent = engineState.boost
+			engineState.boost = engineState.boost * 0.4
 		end
 	end
-	if pedal and not st.lastPedal then st.pressT = 0 elseif pedal then st.pressT = st.pressT + dt end
-	st.steerAgo = inp.steer and 0 or (st.steerAgo or 9) + dt
-	st.lastPedal = pedal
+	if pedal and not engineState.lastPedal then
+		engineState.throttleHeldFor = 0
+	elseif pedal then
+		engineState.throttleHeldFor = engineState.throttleHeldFor + deltaTime
+	end
+	engineState.timeSinceSteering = controls.steering and 0 or (engineState.timeSinceSteering or 9) + deltaTime
+	engineState.lastPedal = pedal
 
-	if not st.on then
+	if not engineState.on then
 		-- ignition off: spin down, with a few compression thumps at the end
-		st.rpm = max(0, st.rpm - (500 + st.rpm * 1.6) * dt)
-		st.soundThr = 0
-		st.cut = true
-		st.crankMode = st.rpm < 450 and 1 or 0
-		st.gear = 0
+		engineState.rpm = max(0, engineState.rpm - (500 + engineState.rpm * 1.6) * deltaTime)
+		engineState.soundThrottle = 0
+		engineState.fuelCut = true
+		engineState.crankMode = engineState.rpm < 450 and 1 or 0
+		engineState.gear = 0
 		return
 	end
 
-	if st.phase ~= "run" then
+	if engineState.phase ~= "run" then
 		-- the start-up sequence always plays out; the car can't drive until it reaches idle
 		-- (the server holds the car until then too)
-		DT.StartSequence(st, cfg, dt)
+		Drivetrain.StartSequence(engineState, config, deltaTime)
 		return
 	end
 
-	st.cut = false
-	st.crankMode = 0
+	engineState.fuelCut = false
+	engineState.crankMode = 0
 
 	-- put it in the right range
 	if mode == "N" then
-		st.gear = 0
+		engineState.gear = 0
 	elseif mode == "R" then
-		if st.gear ~= -1 then st.gear = -1; st.shiftT = 0.15; st.shiftKind = 0 end
-	elseif st.gear <= 0 then
-		st.gear = 1; st.shiftT = 0.15; st.shiftKind = 0; st.holdT = 0.5
+		if engineState.gear ~= -1 then engineState.gear = -1; engineState.shiftTimer = 0.15; engineState.shiftDirection = 0 end
+	elseif engineState.gear <= 0 then
+		engineState.gear = 1; engineState.shiftTimer = 0.15; engineState.shiftDirection = 0; engineState.gearHoldTimer = 0.5
 	end
 
-	local thr = st.thr
-	if st.shiftT > 0 then st.shiftT = st.shiftT - dt end
-	if st.rpm >= cfg.redline then
-		if st.limT <= 0 then st.limEvent = true end
-		st.limT = 0.07
-		st.limHold = 0.25
+	local throttle = engineState.throttle
+	if engineState.shiftTimer > 0 then engineState.shiftTimer = engineState.shiftTimer - deltaTime end
+	if engineState.rpm >= config.redline then
+		if engineState.limiterCutTimer <= 0 then engineState.limiterEvent = true end
+		engineState.limiterCutTimer = 0.07
+		engineState.limiterHoldTimer = 0.25
 	end
-	if st.limHold > 0 then st.limHold = st.limHold - dt end
-	if st.limT > 0 then st.limT = st.limT - dt; thr = 0; st.cut = true end
+	if engineState.limiterHoldTimer > 0 then engineState.limiterHoldTimer = engineState.limiterHoldTimer - deltaTime end
+	if engineState.limiterCutTimer > 0 then
+		engineState.limiterCutTimer = engineState.limiterCutTimer - deltaTime
+		throttle = 0
+		engineState.fuelCut = true
+	end
 
-	local idleThr = clamp((cfg.idle - st.rpm) / 400, 0, 0.3)
-	local engThr = st.cut and 0 or max(thr, idleThr)
+	local idleThrottle = clamp((config.idle - engineState.rpm) / 400, 0, 0.3)
+	local engineThrottle = engineState.fuelCut and 0 or max(throttle, idleThrottle)
 
-	if st.gear == 0 and cfg.electric then
+	if engineState.gear == 0 and config.electric then
 		-- an electric motor doesn't rev on its own
-		st.rpm = st.rpm + (cfg.idle - st.rpm) * min(1, dt * 4)
-		st.soundThr = thr * 0.2
-	elseif st.gear == 0 then
-		freeSpin(st, cfg, dt, engThr)
-		st.soundThr = engThr
+		engineState.rpm = engineState.rpm + (config.idle - engineState.rpm) * min(1, deltaTime * 4)
+		engineState.soundThrottle = throttle * 0.2
+	elseif engineState.gear == 0 then
+		freeSpin(engineState, config, deltaTime, engineThrottle)
+		engineState.soundThrottle = engineThrottle
 	else
-		local K = 60 / (2 * pi * cfg.wheelRadius)  -- engine rpm per m/s at 1:1
-		local wheelRpm = av * K * gearRatio(cfg, st.gear)
+		local rpmPerSpeed = 60 / (2 * pi * config.wheelRadius)  -- engine rpm per m/s at 1:1
+		local wheelRpm = absoluteSpeed * rpmPerSpeed * gearRatio(config, engineState.gear)
 
 		--[[
 			Arcade automatic. The keys are on/off, so the box reads intent from them:
@@ -282,122 +290,131 @@ function DT.Step(st, cfg, dt, inp)
 			            would over-rev or lug
 			  braking   cascade down through the gears, each one rev-matched with a blip
 		]]
-		if st.gear > 0 then
-			local n = #cfg.gears
-			local red = cfg.redline
-			local SH = cfg.shift and DT.ShiftPoints(cfg.shift) or DT.SHIFT
-			local rpm = st.rpm  -- the engine's actual revs
-			local corner = st.steerAgo < SH.cornerHold
-			local plan = cfg.shiftPlan
-			local function rpmIn(g) return av * K * gearRatio(cfg, g) end
+		if engineState.gear > 0 then
+			local gearCount = #config.gears
+			local redline = config.redline
+			local shiftPoints = config.shift and Drivetrain.ShiftPoints(config.shift) or Drivetrain.SHIFT
+			local rpm = engineState.rpm  -- the engine's actual revs
+			local cornering = engineState.timeSinceSteering < shiftPoints.cornerHold
+			local shiftPlan = config.shiftPlan
+			local function rpmInGear(gear) return absoluteSpeed * rpmPerSpeed * gearRatio(config, gear) end
 			-- where this gear changes up flat out, and the share of it a lazy upshift comes at
-			local upFull = plan and plan.up[st.gear] or red * SH.upRpm
-			local lazyShare = SH.lazyUpRpm / SH.upRpm
+			local fullThrottleUpshiftRpm = shiftPlan and shiftPlan.up[engineState.gear] or redline * shiftPoints.upRpm
+			local lazyUpshiftShare = shiftPoints.lazyUpRpm / shiftPoints.upRpm
 			-- may the box land in gear g? (under `frac` of redline, and under that gear's own upshift)
-			local function fits(g, frac)
-				local r = rpmIn(g)
-				return r < red * frac and not (plan and plan.up[g] and r > plan.up[g] * 0.97)
+			local function gearFits(gear, redlineShare)
+				local gearRpm = rpmInGear(gear)
+				return gearRpm < redline * redlineShare and not (shiftPlan and shiftPlan.up[gear] and gearRpm > shiftPlan.up[gear] * 0.97)
 			end
-			local planDown = plan and plan.down[st.gear]
+			local plannedDownshiftSpeed = shiftPlan and shiftPlan.down[engineState.gear]
 			-- soft: a braking / coasting downshift (a small blip and a slower rise, not a racing one)
-			local function shift(g, kind, hold, soft)
-				st.gear = g; st.shiftKind = kind; st.holdT = hold; st.stallT = 0; st.shiftSoft = soft or false
-				st.shiftT = kind == 1 and 0.32 or 0.22
+			local function shiftTo(gear, direction, holdTime, soft)
+				engineState.gear = gear
+				engineState.shiftDirection = direction
+				engineState.gearHoldTimer = holdTime
+				engineState.stallTimer = 0
+				engineState.softShift = soft or false
+				engineState.shiftTimer = direction == 1 and 0.32 or 0.22
 			end
-			st.holdT = st.holdT - dt
+			engineState.gearHoldTimer = engineState.gearHoldTimer - deltaTime
 			-- about to hit the limiter: change up now, even inside the hold or the shift before
 			-- (close gearing on a car that pulls hard reached redline before the hold ran out,
 			-- and the limiter kept cutting the sound)
-			if st.holdT > 0 and st.gear < n and wheelRpm > (pedal and upFull or red * 0.97) then
-				shift(st.gear + 1, 1, 0.8)
-				wheelRpm = rpmIn(st.gear)
+			if engineState.gearHoldTimer > 0 and engineState.gear < gearCount and wheelRpm > (pedal and fullThrottleUpshiftRpm or redline * 0.97) then
+				shiftTo(engineState.gear + 1, 1, 0.8)
+				wheelRpm = rpmInGear(engineState.gear)
 			end
-			if st.holdT <= 0 and st.shiftT <= 0 then
+			if engineState.gearHoldTimer <= 0 and engineState.shiftTimer <= 0 then
 				-- flat out but no longer accelerating (top speed / drag limit); slowing down
 				-- (a turn scrubbing speed) is not that
-				if pedal and not corner and abs(st.accel) < 0.35 and wheelRpm > red * 0.55 then
-					st.stallT = st.stallT + dt
+				if pedal and not cornering and abs(engineState.acceleration) < 0.35 and wheelRpm > redline * 0.55 then
+					engineState.stallTimer = engineState.stallTimer + deltaTime
 				else
-					st.stallT = 0
+					engineState.stallTimer = 0
 				end
 				if pedal then
 					-- kickdown when you get on it with the revs low, or if they sag while you hold it.
 					-- Judged on the wheels' revs: the engine's include converter slip, which with W
 					-- held never falls under ~0.47 x redline, so a car slowed by a turn stayed in its gear
-					local kick = (st.pressT < 0.6 and wheelRpm < red * SH.kickRpm) or wheelRpm < red * SH.sagRpm
-					local cornerKick = corner and wheelRpm < red * SH.cornerRpm
+					local kickdown = (engineState.throttleHeldFor < 0.6 and wheelRpm < redline * shiftPoints.kickRpm) or wheelRpm < redline * shiftPoints.sagRpm
+					local cornerKickdown = cornering and wheelRpm < redline * shiftPoints.cornerRpm
 					-- the shift point follows how hard the car pulls: flat out on a quick car it
 					-- holds each gear to upRpm, a car that only creeps faster (heavy, or near its
 					-- top speed) changes up early, so it still climbs into its last gear
-					local pull = clamp(st.accel / SH.pullAccel, 0, 1)
-					local upAt = upFull * (lazyShare + (1 - lazyShare) * pull)
+					local pullStrength = clamp(engineState.acceleration / shiftPoints.pullAccel, 0, 1)
+					local lazyUpshiftRpm = fullThrottleUpshiftRpm * (lazyUpshiftShare + (1 - lazyUpshiftShare) * pullStrength)
 					-- (not into the top gear: it changes up into that near the top speed, at upRpm
 					-- or once it stops gaining speed, then settles at lower revs)
 					-- (only while it still gains speed: slowing through a turn it changed up and stuck)
-					local lazy = not corner and st.accel > 0 and st.gear + 1 < n and wheelRpm > upAt and rpmIn(st.gear + 1) > red * SH.lazyLand
-					if inp.cruise then
-						kick, cornerKick = wheelRpm < red * SH.sagRpm, false
-						lazy = st.gear < n and rpmIn(st.gear + 1) > red * SH.cruiseLand
+					local lazyUpshift = not cornering and engineState.acceleration > 0 and engineState.gear + 1 < gearCount
+						and wheelRpm > lazyUpshiftRpm and rpmInGear(engineState.gear + 1) > redline * shiftPoints.lazyLand
+					if controls.holdingSpeedLimit then
+						kickdown, cornerKickdown = wheelRpm < redline * shiftPoints.sagRpm, false
+						lazyUpshift = engineState.gear < gearCount and rpmInGear(engineState.gear + 1) > redline * shiftPoints.cruiseLand
 					end
-					if st.gear < n and (wheelRpm > upFull or lazy or (st.stallT > 1.2 and rpmIn(st.gear + 1) > cfg.idle * 1.6)) then
-						shift(st.gear + 1, 1, 0.8)
-					elseif st.gear > 1 and (kick or cornerKick) then
+					local stalledInGear = engineState.gear < gearCount and engineState.stallTimer > 1.2
+						and rpmInGear(engineState.gear + 1) > config.idle * 1.6
+					if engineState.gear < gearCount and (wheelRpm > fullThrottleUpshiftRpm or lazyUpshift or stalledInGear) then
+						shiftTo(engineState.gear + 1, 1, 0.8)
+					elseif engineState.gear > 1 and (kickdown or cornerKickdown) then
 						-- the lowest gear that keeps the revs under kickLand (skips gears if needed;
 						-- under cruise just one, back above cruiseLand)
-						local land = inp.cruise and SH.cruiseLand / 0.8 or kick and SH.kickLand or SH.cornerLand
-						local g = st.gear
-						while g > 1 and fits(g - 1, land) do g = g - 1 end
-						if g < st.gear then shift(g, -1, 0.8) end
+						local landingShare = controls.holdingSpeedLimit and shiftPoints.cruiseLand / 0.8 or kickdown and shiftPoints.kickLand or shiftPoints.cornerLand
+						local targetGear = engineState.gear
+						while targetGear > 1 and gearFits(targetGear - 1, landingShare) do targetGear = targetGear - 1 end
+						if targetGear < engineState.gear then shiftTo(targetGear, -1, 0.8) end
 					end
 				elseif braking then
 					-- down one gear once the revs fall below brakeRpm, as long as the lower gear
 					-- lands under brakeLand: the revs fall with the car, each downshift a small blip
 					-- (a car's own gearing: under its downshift speed, as long as the lower gear doesn't over-rev)
-					if planDown then
-						if st.gear > 1 and av < planDown and rpmIn(st.gear - 1) < red * 0.97 then
-							shift(st.gear - 1, -1, 0.3, true)
+					if plannedDownshiftSpeed then
+						if engineState.gear > 1 and absoluteSpeed < plannedDownshiftSpeed and rpmInGear(engineState.gear - 1) < redline * 0.97 then
+							shiftTo(engineState.gear - 1, -1, 0.3, true)
 						end
-					elseif st.gear > 1 and rpm < red * SH.brakeRpm and rpmIn(st.gear - 1) < red * SH.brakeLand then
-						shift(st.gear - 1, -1, 0.3, true)
+					elseif engineState.gear > 1 and rpm < redline * shiftPoints.brakeRpm and rpmInGear(engineState.gear - 1) < redline * shiftPoints.brakeLand then
+						shiftTo(engineState.gear - 1, -1, 0.3, true)
 					end
 				else
-					if st.gear < n and wheelRpm > red * 0.97 then
-						shift(st.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
-					elseif st.gear > 1 and not inp.cruise and planDown and not corner then
-						if av < planDown and rpmIn(st.gear - 1) < red * 0.97 then shift(st.gear - 1, -1, 0.6, true) end
-					elseif st.gear > 1 and not inp.cruise and rpm < red * (corner and SH.cornerRpm or SH.lugRpm)
-						and rpmIn(st.gear - 1) < red * (corner and SH.cornerLand or 0.75) then
-						shift(st.gear - 1, -1, 0.6, true)                -- don't let it lug (or drone through a corner)
+					if engineState.gear < gearCount and wheelRpm > redline * 0.97 then
+						shiftTo(engineState.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
+					elseif engineState.gear > 1 and not controls.holdingSpeedLimit and plannedDownshiftSpeed and not cornering then
+						if absoluteSpeed < plannedDownshiftSpeed and rpmInGear(engineState.gear - 1) < redline * 0.97 then
+							shiftTo(engineState.gear - 1, -1, 0.6, true)
+						end
+					elseif engineState.gear > 1 and not controls.holdingSpeedLimit and rpm < redline * (cornering and shiftPoints.cornerRpm or shiftPoints.lugRpm)
+						and rpmInGear(engineState.gear - 1) < redline * (cornering and shiftPoints.cornerLand or 0.75) then
+						shiftTo(engineState.gear - 1, -1, 0.6, true)                -- don't let it lug (or drone through a corner)
 					end
 				end
-				wheelRpm = rpmIn(st.gear)
+				wheelRpm = rpmInGear(engineState.gear)
 			end
 		end
 
 		-- torque converter: flares to stall speed when pulling away, then the revs climb with
 		-- the car until it couples up; a little slip remains under load
-		local conv = cfg.idle + engThr * (cfg.stallRpm - cfg.idle)
-		local target = max(wheelRpm * (1 + 0.05 * engThr), conv + 0.35 * wheelRpm * engThr)
+		local converterRpm = config.idle + engineThrottle * (config.stallRpm - config.idle)
+		local targetRpm = max(wheelRpm * (1 + 0.05 * engineThrottle), converterRpm + 0.35 * wheelRpm * engineThrottle)
 		-- top gear and faster than the gearing expects: sit just under redline, don't bounce
-		if st.gear > 0 and st.gear == #cfg.gears then target = min(target, cfg.redline * 0.985) end
-		local rate
-		if st.shiftT > 0 then rate = st.shiftKind == -1 and (st.shiftSoft and 8 or 16) or 7   -- downshifts snap up to the new revs
-		elseif target > st.rpm then rate = 5 + 5 * engThr
-		else rate = 6 end
-		st.rpm = st.rpm + (target - st.rpm) * min(1, dt * rate)
+		if engineState.gear > 0 and engineState.gear == #config.gears then targetRpm = min(targetRpm, config.redline * 0.985) end
+		local followRate
+		if engineState.shiftTimer > 0 then followRate = engineState.shiftDirection == -1 and (engineState.softShift and 8 or 16) or 7   -- downshifts snap up to the new revs
+		elseif targetRpm > engineState.rpm then followRate = 5 + 5 * engineThrottle
+		else followRate = 6 end
+		engineState.rpm = engineState.rpm + (targetRpm - engineState.rpm) * min(1, deltaTime * followRate)
 
-		if st.shiftT > 0 and st.shiftKind == 1 then
+		if engineState.shiftTimer > 0 and engineState.shiftDirection == 1 then
 			-- upshift: the gearbox briefly pulls torque, it doesn't cut it
-			local p = 1 - st.shiftT / 0.32
-			st.soundThr = engThr * (0.3 + 0.7 * p * p)
-		elseif st.shiftT > 0 and st.shiftKind == -1 then
-			st.soundThr = max(engThr, st.shiftSoft and 0.25 or 0.6)   -- downshift: rev-matching throttle blip
+			local upshiftProgress = 1 - engineState.shiftTimer / 0.32
+			engineState.soundThrottle = engineThrottle * (0.3 + 0.7 * upshiftProgress * upshiftProgress)
+		elseif engineState.shiftTimer > 0 and engineState.shiftDirection == -1 then
+			engineState.soundThrottle = max(engineThrottle, engineState.softShift and 0.25 or 0.6)   -- downshift: rev-matching throttle blip
 		else
-			st.soundThr = engThr
+			engineState.soundThrottle = engineThrottle
 		end
 	end
 
-	st.rpm = clamp(st.rpm, 0, cfg.redline + 150)
+	engineState.rpm = clamp(engineState.rpm, 0, config.redline + 150)
 end
 
-return DT
+return Drivetrain

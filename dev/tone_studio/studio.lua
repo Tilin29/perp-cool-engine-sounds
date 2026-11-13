@@ -108,7 +108,7 @@ end
 function STUDIO.rhythm(req)
 	local cfg = resolve(req)
 	local R = Synth.RealismOf(cfg)
-	local iv, am, n, banks = Synth.LayoutParams(cfg.layout, R.cylVar, R.cylTiming, R.char.o1 * R.voice, R.char.o05 * R.voice)
+	local iv, am, n, banks = Synth.LayoutParams(cfg.layout, R.cylinderVariation, R.cylinderTiming, R.character.o1 * R.voice, R.character.o05 * R.voice)
 	local ang, a = {}, 0
 	for i = 1, n do ang[i] = a; a = a + iv[i] end
 	__result(json({ angles = ang, amp = am, banks = banks }))
@@ -124,9 +124,9 @@ local live
 
 -- what NewGen / NewChain work out from a profile. The running engine takes these on and keeps
 -- everything else (firing phase, filter and resonator state), so a change lands without a restart
-local GEN_FIELDS = { "pitch", "tone", "cyl", "iv", "am", "banks", "redline", "R", "ev" }
-local CHAIN_FIELDS = { "drive", "driveNorm", "tailWet", "verbWet", "muffleK", "ev" }
-local CHAIN_FILTERS = { "peak", "low", "lpf2", "shelf" }
+local GEN_FIELDS = { "pitch", "tone", "cylinderCount", "firingIntervals", "firingStrengths", "firingBanks", "redline", "realism", "electric" }
+local CHAIN_FIELDS = { "drive", "driveNorm", "tailWet", "reverbWet", "muffleScale", "electric" }
+local CHAIN_FILTERS = { "bodyPeak", "lowShelf", "topLowpass", "highShelf" }
 
 function LIVE.config(req)
 	local cfg = resolve(req)
@@ -134,16 +134,16 @@ function LIVE.config(req)
 	if live then
 		local lg, lc = live.g, live.ch
 		for _, k in ipairs(GEN_FIELDS) do lg[k] = g[k] end
-		lg.idx = lg.idx % #g.iv
-		lg.evOrder = nil
+		lg.firingIndex = lg.firingIndex % #g.firingIntervals
+		lg.evToneOrder = nil
 		for _, k in ipairs(CHAIN_FIELDS) do lc[k] = ch[k] end
 		for _, k in ipairs(CHAIN_FILTERS) do
 			for i = 1, 5 do lc[k][i] = ch[k][i] end
 		end
 	else
 		g.allowPops = false
-		g.on = true; g.gain = 1
-		g.rpm, g.tRpm = cfg.idle, cfg.idle
+		g.ignitionOn = true; g.gain = 1
+		g.rpm, g.targetRpm = cfg.idle, cfg.idle
 		local st = DT.New()
 		DT.SkipStart(st, cfg)
 		live = { g = g, ch = ch, st = st, v = 0, t = 0, ref = 0.06, fx = {}, msg = {},
@@ -198,14 +198,14 @@ local function control(L, dt)
 	elseif st.on and (inp.mode == "hold" or inp.mode == "sweep") then
 		local rpm, thr = inp.rpm, inp.thr
 		if inp.mode == "sweep" then rpm, thr = sweep(L, dt) end
-		st.rpm, st.soundThr, st.cut, st.crankMode, st.gear = rpm, thr, false, 0, 0
+		st.rpm, st.soundThrottle, st.fuelCut, st.crankMode, st.gear = rpm, thr, false, 0, 0
 	elseif inp.mode == "drive" then
-		DT.Step(st, cfg, dt, { fwd = inp.fwd, back = inp.back and L.v > 0.7, v = L.v })
+		DT.Step(st, cfg, dt, { forward = inp.fwd, backward = inp.back and L.v > 0.7, speed = L.v })
 		roll(L, dt)
 	else
-		DT.Step(st, cfg, dt, { fwd = inp.fwd, hand = true, v = 0 })
+		DT.Step(st, cfg, dt, { forward = inp.fwd, handbrake = true, speed = 0 })
 	end
-	m.tRpm, m.tThr, m.cut, m.crank, m.on = st.rpm, st.soundThr, st.cut, st.crankMode, st.on or st.rpm > 25
+	m.targetRpm, m.targetThrottle, m.fuelCut, m.crankMode, m.ignitionOn = st.rpm, st.soundThrottle, st.fuelCut, st.crankMode, st.on or st.rpm > 25
 end
 
 -- a pop or bang on top of the engine, at the level the sound bank gives it (cl_soundbank) and the
@@ -226,7 +226,7 @@ function LIVE.step()
 	control(L, CHUNK / SR)
 	local out = Synth.RenderControlled(L.g, L.ch, L.ctl, CHUNK)
 	local st = L.st
-	if st.soundThr > 0.7 then
+	if st.soundThrottle > 0.7 then
 		local s2 = 0
 		for i = 1, CHUNK do s2 = s2 + out[i] * out[i] end
 		L.ref = math.max(L.ref * 0.9995, math.sqrt(s2 / CHUNK))
@@ -237,7 +237,7 @@ function LIVE.step()
 		f.pos = f.pos + CHUNK
 		if f.pos > f.n then table.remove(L.fx, i) end
 	end
-	__live(st.rpm, st.gear, L.v * 3.6, st.soundThr, st.on and st.phase == "run" and 1 or 0, L.cfg.electric and 1 or 0)
+	__live(st.rpm, st.gear, L.v * 3.6, st.soundThrottle, st.on and st.phase == "run" and 1 or 0, L.cfg.electric and 1 or 0)
 	__push(table.unpack(out, 1, 400))
 	__push(table.unpack(out, 401, CHUNK))
 end

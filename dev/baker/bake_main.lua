@@ -13,7 +13,7 @@ local function fnv(s)
 	return string.format("%08x", h)
 end
 
--- every distinct stock engine family (the same engine at any redline, see cfg.familyKey), with
+-- every distinct stock engine family (the same engine at any redline, see config.familyKey), with
 -- the cars that use it. Each family is baked once, at its highest redline.
 function BAKE.list(version)
 	local byFam, fams = {}, {}
@@ -61,11 +61,11 @@ function BAKE.info(i)
 end
 
 local function run(b)
-	while b.co and coroutine.status(b.co) ~= "dead" do
-		local ok, err = coroutine.resume(b.co)
+	while b.buildCoroutine and coroutine.status(b.buildCoroutine) ~= "dead" do
+		local ok, err = coroutine.resume(b.buildCoroutine)
 		if not ok then error(err) end
 	end
-	b.co = nil
+	b.buildCoroutine = nil
 end
 
 local function stem(b, name) return (name:sub(#b.prefix + 1)) end
@@ -79,7 +79,7 @@ function BAKE.bake(i, sr)
 	b.startRedlines = e.redlines
 	run(b)
 	assert(b.ready, "bank did not finish")
-	local m = { dir = e.dir, sr = b.sr, cyl = b.cyl, limitedDb = b.limitedDb, cars = e.cars, engine = e.cfg.engineName }
+	local m = { dir = e.dir, sr = b.sampleRate, cyl = b.cyl, limitedDb = b.limitedDb, cars = e.cars, engine = e.cfg.engineName }
 	if #e.redlines > 1 then m.redlines = e.redlines end
 	if next(b.startEmoAt) then
 		m.startEmoAt = {}
@@ -104,7 +104,7 @@ function BAKE.bakeEnv(version)
 	local b = Bank.GetEnv()
 	b.prefix = "env_" .. fnv("env|" .. version) .. "/"
 	run(b)
-	local m = { dir = b.prefix:sub(1, -2), sr = b.sr, peak = {} }
+	local m = { dir = b.prefix:sub(1, -2), sr = b.sampleRate, peak = {} }
 	for k, pk in pairs(b.peak) do
 		if not k:find("/", 1, true) then m.peak[k] = pk end
 	end

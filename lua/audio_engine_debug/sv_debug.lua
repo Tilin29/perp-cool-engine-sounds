@@ -3,279 +3,281 @@
 	audio_engine_debug is 1. Not part of the final addon (see sh_debug.lua).
 ]]
 
-local E = AUDIO_ENGINE
-local DBG = E.Debug
-local KV = E.KV
+local AudioEngine = AUDIO_ENGINE
+local EngineDebug = AudioEngine.Debug
+local KeyValues = AudioEngine.KV
 
-for _, n in ipairs({ "audio_dbg_state_req", "audio_dbg_state", "audio_dbg_cvar", "audio_dbg_tune",
+for _, networkName in ipairs({ "audio_dbg_state_req", "audio_dbg_state", "audio_dbg_cvar", "audio_dbg_tune",
 	"audio_dbg_script_req", "audio_dbg_script", "audio_dbg_script_apply", "audio_dbg_gear", "audio_dbg_rev",
 	"audio_dbg_result" }) do
-	util.AddNetworkString(n)
+	util.AddNetworkString(networkName)
 end
 
-local function result(ply, ok, msg)
+local function sendResult(requester, succeeded, message)
 	net.Start("audio_dbg_result")
-	net.WriteBool(ok)
-	net.WriteString(msg)
-	net.Send(ply)
+	net.WriteBool(succeeded)
+	net.WriteString(message)
+	net.Send(requester)
 end
 
 -- the car a request is about: one of ours, the player allowed
-local function carOf(ply, veh)
-	if not DBG.Allowed(ply) then return nil end
-	if not (IsValid(veh) and E.TrackedVehicles and E.TrackedVehicles[veh] and E.GetCarConfig(veh)) then
-		result(ply, false, "Not a car with the procedural engine.")
+local function requestedCar(requester, vehicle)
+	if not EngineDebug.Allowed(requester) then return nil end
+	if not (IsValid(vehicle) and AudioEngine.TrackedVehicles and AudioEngine.TrackedVehicles[vehicle] and AudioEngine.GetCarConfig(vehicle)) then
+		sendResult(requester, false, "Not a car with the procedural engine.")
 		return nil
 	end
-	return veh
+	return vehicle
 end
 
 ---------------------------------------------------------------------------
 -- state: server convars and tuned tables
 ---------------------------------------------------------------------------
-local function sendState(ply)
+local function sendState(requester)
 	net.Start("audio_dbg_state")
-	net.WriteUInt(#DBG.SERVER_CVARS, 8)
-	for _, c in ipairs(DBG.SERVER_CVARS) do
-		local cv = GetConVar(c[1])
-		net.WriteString(c[1])
-		net.WriteString(cv and cv:GetString() or "")
+	net.WriteUInt(#EngineDebug.SERVER_CVARS, 8)
+	for _, cvarEntry in ipairs(EngineDebug.SERVER_CVARS) do
+		local conVar = GetConVar(cvarEntry[1])
+		net.WriteString(cvarEntry[1])
+		net.WriteString(conVar and conVar:GetString() or "")
 	end
-	net.WriteUInt(#DBG.TUNABLES, 8)
-	for _, t in ipairs(DBG.TUNABLES) do
-		local tbl = E[t[1]]
-		net.WriteFloat(tbl and tonumber(tbl[t[2]]) or 0)
+	net.WriteUInt(#EngineDebug.TUNABLES, 8)
+	for _, tunable in ipairs(EngineDebug.TUNABLES) do
+		local targetTable = AudioEngine[tunable[1]]
+		net.WriteFloat(targetTable and tonumber(targetTable[tunable[2]]) or 0)
 	end
-	net.Send(ply)
+	net.Send(requester)
 end
 
 -- the tables' values as the files have them, for "what changed"
-DBG.TUNABLE_FILE = DBG.TUNABLE_FILE or {}
-for _, t in ipairs(DBG.TUNABLES) do
-	local key = t[1] .. "." .. t[2]
-	if DBG.TUNABLE_FILE[key] == nil and E[t[1]] then DBG.TUNABLE_FILE[key] = E[t[1]][t[2]] end
+EngineDebug.TUNABLE_FILE = EngineDebug.TUNABLE_FILE or {}
+for _, tunable in ipairs(EngineDebug.TUNABLES) do
+	local key = tunable[1] .. "." .. tunable[2]
+	if EngineDebug.TUNABLE_FILE[key] == nil and AudioEngine[tunable[1]] then EngineDebug.TUNABLE_FILE[key] = AudioEngine[tunable[1]][tunable[2]] end
 end
 
-net.Receive("audio_dbg_state_req", function(_, ply)
-	if DBG.Allowed(ply) then sendState(ply) end
+net.Receive("audio_dbg_state_req", function(_, requester)
+	if EngineDebug.Allowed(requester) then sendState(requester) end
 end)
 
-net.Receive("audio_dbg_cvar", function(_, ply)
-	if not DBG.Allowed(ply) then return end
-	local n = net.ReadUInt(4)
-	for _ = 1, n do
+net.Receive("audio_dbg_cvar", function(_, requester)
+	if not EngineDebug.Allowed(requester) then return end
+	local count = net.ReadUInt(4)
+	for _ = 1, count do
 		local name, value = net.ReadString(), net.ReadString()
-		local c = DBG.SERVER_CVAR_SET[name]
-		if c then
-			local v = tonumber(value) or 0
-			if c[2] == "bool" then v = v ~= 0 and 1 or 0 end
-			if c[4] then v = math.Clamp(v, c[4], c[5]) end
-			RunConsoleCommand(name, tostring(v))
+		local cvarEntry = EngineDebug.SERVER_CVAR_SET[name]
+		if cvarEntry then
+			local newValue = tonumber(value) or 0
+			if cvarEntry[2] == "bool" then newValue = newValue ~= 0 and 1 or 0 end
+			if cvarEntry[4] then newValue = math.Clamp(newValue, cvarEntry[4], cvarEntry[5]) end
+			RunConsoleCommand(name, tostring(newValue))
 		end
 	end
 	-- (RunConsoleCommand takes effect on the next frame)
-	timer.Simple(0.1, function() if IsValid(ply) then sendState(ply) end end)
+	timer.Simple(0.1, function() if IsValid(requester) then sendState(requester) end end)
 end)
 
-net.Receive("audio_dbg_tune", function(_, ply)
-	if not DBG.Allowed(ply) then return end
-	local i, v = net.ReadUInt(8), net.ReadFloat()
-	local t = DBG.TUNABLES[i]
-	local tbl = t and E[t[1]]
-	if not (tbl and v == v) then return end
-	tbl[t[2]] = math.Clamp(v, t[3], t[4])
+net.Receive("audio_dbg_tune", function(_, requester)
+	if not EngineDebug.Allowed(requester) then return end
+	local tunableIndex, newValue = net.ReadUInt(8), net.ReadFloat()
+	local tunable = EngineDebug.TUNABLES[tunableIndex]
+	local targetTable = tunable and AudioEngine[tunable[1]]
+	if not (targetTable and newValue == newValue) then return end
+	targetTable[tunable[2]] = math.Clamp(newValue, tunable[3], tunable[4])
 	-- the anti-spin setup is built into each car's params: rebuild them
-	if t[1] == "ANTI_SPIN" and E.RebaseHandling then
-		for veh in pairs(E.TrackedVehicles or {}) do
-			if IsValid(veh) then E.RebaseHandling(veh) end
+	if tunable[1] == "ANTI_SPIN" and AudioEngine.RebaseHandling then
+		for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
+			if IsValid(vehicle) then AudioEngine.RebaseHandling(vehicle) end
 		end
 	end
-	sendState(ply)
+	sendState(requester)
 end)
 
 ---------------------------------------------------------------------------
 -- the car's vehicle script
 ---------------------------------------------------------------------------
 -- the script the car is on, or (fell back to the test script) the PERP script it stands in for
-local function scriptOf(veh)
-	local car = E.GetCarConfig(veh)
-	local actual = veh.audioScript or E.VehicleScriptOf(veh)
-	if actual and actual ~= E.TEST_SCRIPT then return actual, false end
-	local want = istable(veh.VehicleTable) and veh.VehicleTable.AudioPerpScript or car.script
-	return want or actual, true
+local function scriptOf(vehicle)
+	local carConfig = AudioEngine.GetCarConfig(vehicle)
+	local actualScript = vehicle.audioScript or AudioEngine.VehicleScriptOf(vehicle)
+	if actualScript and actualScript ~= AudioEngine.TEST_SCRIPT then return actualScript, false end
+	local wantedScript = istable(vehicle.VehicleTable) and vehicle.VehicleTable.AudioPerpScript or carConfig.script
+	return wantedScript or actualScript, true
 end
 
 -- off the PERP server: test_car.txt with the PERP script's physics values (sv_perp_physics.lua) in it
 local function synthesize(perpScript)
-	local text = file.Read(E.TEST_SCRIPT, "GAME")
+	local text = file.Read(AudioEngine.TEST_SCRIPT, "GAME")
 	if not text then return nil end
-	local ph = E.PERP_PHYSICS and E.PERP_PHYSICS[perpScript]
-	if not ph then return text end
+	local perpPhysics = AudioEngine.PERP_PHYSICS and AudioEngine.PERP_PHYSICS[perpScript]
+	if not perpPhysics then return text end
 	local values = {}
-	for _, e in ipairs(KV.Parse(text)) do
-		local v
-		if e.path == "engine" and e.lkey == "gear" then
-			v = ph.engine and ph.engine.gears and ph.engine.gears[e.occ]
-		elseif e.path == "body" and e.lkey == "masscenteroverride" then
-			local m = ph.body and ph.body.masscenter
-			v = m and string.format("%s %s %s", KV.Num(m[1]), KV.Num(m[2]), KV.Num(m[3]))
-		elseif e.axle and e.path:sub(1, 4) == "axle" then
-			v = ph.axles and ph.axles[e.axle] and ph.axles[e.axle][e.lkey]
+	for _, entry in ipairs(KeyValues.Parse(text)) do
+		local value
+		if entry.path == "engine" and entry.lowerKey == "gear" then
+			value = perpPhysics.engine and perpPhysics.engine.gears and perpPhysics.engine.gears[entry.occurrence]
+		elseif entry.path == "body" and entry.lowerKey == "masscenteroverride" then
+			local massCenter = perpPhysics.body and perpPhysics.body.masscenter
+			value = massCenter and string.format("%s %s %s", KeyValues.Num(massCenter[1]), KeyValues.Num(massCenter[2]), KeyValues.Num(massCenter[3]))
+		elseif entry.axle and entry.path:sub(1, 4) == "axle" then
+			value = perpPhysics.axles and perpPhysics.axles[entry.axle] and perpPhysics.axles[entry.axle][entry.lowerKey]
 		else
-			local sec = ph[e.path]
-			v = istable(sec) and sec[e.lkey]
+			local section = perpPhysics[entry.path]
+			value = istable(section) and section[entry.lowerKey]
 		end
-		if isnumber(v) then v = KV.Num(v) end
-		if isstring(v) then values[e.idx] = v end
+		if isnumber(value) then value = KeyValues.Num(value) end
+		if isstring(value) then values[entry.index] = value end
 	end
-	return KV.Rebuild(text, KV.Parse(text), values)
+	return KeyValues.Rebuild(text, KeyValues.Parse(text), values)
 end
 
 -- the car's script as loaded (kept on the car: later edits are measured against it)
-local function baseline(veh)
-	if veh.audioDbg then return veh.audioDbg end
-	if not veh.audioScriptParams then return nil, "This car's handling wasn't captured (spawned before the addon loaded?)." end
-	local path, fallback = scriptOf(veh)
+local function baseline(vehicle)
+	if vehicle.audioDebugBaseline then return vehicle.audioDebugBaseline end
+	if not vehicle.audioScriptParams then return nil, "This car's handling wasn't captured (spawned before the addon loaded?)." end
+	local path, fallback = scriptOf(vehicle)
 	if not path then return nil, "No vehicle script found for this car." end
 	local text
 	if fallback then text = synthesize(path) else text = file.Read(path, "GAME") end
 	if not text then return nil, "Can't read " .. path .. "." end
-	local phys = veh:GetPhysicsObject()
-	veh.audioDbg = {
+	local physics = vehicle:GetPhysicsObject()
+	vehicle.audioDebugBaseline = {
 		path = path, fallback = fallback, text = text, current = text,
-		params = table.Copy(veh.audioScriptParams), mass = IsValid(phys) and phys:GetMass() or nil,
+		params = table.Copy(vehicle.audioScriptParams), mass = IsValid(physics) and physics:GetMass() or nil,
 	}
-	return veh.audioDbg
+	return vehicle.audioDebugBaseline
 end
 
-local function sendScript(ply, veh, b)
-	local entries = KV.Parse(b.current)
+local function sendScript(requester, vehicle, baselineData)
+	local entries = KeyValues.Parse(baselineData.current)
 	-- which entries reach the car live (a field of its params)
 	local live = {}
-	for _, e in ipairs(entries) do
-		if KV.Target(b.params, e) then live[#live + 1] = e.idx end
+	for _, entry in ipairs(entries) do
+		if KeyValues.Target(baselineData.params, entry) then live[#live + 1] = entry.index end
 	end
-	local data = util.Compress(b.current .. "\0" .. b.text) or ""
+	local data = util.Compress(baselineData.current .. "\0" .. baselineData.text) or ""
 	net.Start("audio_dbg_script")
-	net.WriteEntity(veh)
-	net.WriteString(b.path)
-	net.WriteBool(b.fallback)
+	net.WriteEntity(vehicle)
+	net.WriteString(baselineData.path)
+	net.WriteBool(baselineData.fallback)
 	net.WriteUInt(#data, 16)
 	net.WriteData(data, #data)
 	net.WriteUInt(#live, 12)
 	for _, i in ipairs(live) do net.WriteUInt(i, 12) end
-	net.Send(ply)
+	net.Send(requester)
 end
 
-net.Receive("audio_dbg_script_req", function(_, ply)
-	local veh = carOf(ply, net.ReadEntity())
-	if not veh then return end
-	local b, err = baseline(veh)
-	if not b then result(ply, false, err) return end
-	sendScript(ply, veh, b)
+net.Receive("audio_dbg_script_req", function(_, requester)
+	local vehicle = requestedCar(requester, net.ReadEntity())
+	if not vehicle then return end
+	local baselineData, errorMessage = baseline(vehicle)
+	if not baselineData then sendResult(requester, false, errorMessage) return end
+	sendScript(requester, vehicle, baselineData)
 end)
 
 -- the edited text onto the car: every changed value scaled from the file's into its params
-net.Receive("audio_dbg_script_apply", function(_, ply)
-	local veh = carOf(ply, net.ReadEntity())
-	local len = net.ReadUInt(16)
-	local data = len > 0 and net.ReadData(len) or ""
-	if not veh then return end
-	local b, err = baseline(veh)
-	if not b then result(ply, false, err) return end
-	local text = data ~= "" and util.Decompress(data) or b.text   -- "" = back to the file
-	if not text then result(ply, false, "Couldn't read the edited script.") return end
-	local orig, new = KV.Parse(b.text), KV.Parse(text)
-	if not KV.SameShape(orig, new) then result(ply, false, "The edited script's keys don't match the file's.") return end
-	local p = table.Copy(b.params)
+net.Receive("audio_dbg_script_apply", function(_, requester)
+	local vehicle = requestedCar(requester, net.ReadEntity())
+	local dataLength = net.ReadUInt(16)
+	local data = dataLength > 0 and net.ReadData(dataLength) or ""
+	if not vehicle then return end
+	local baselineData, errorMessage = baseline(vehicle)
+	if not baselineData then sendResult(requester, false, errorMessage) return end
+	local text = data ~= "" and util.Decompress(data) or baselineData.text   -- "" = back to the file
+	if not text then sendResult(requester, false, "Couldn't read the edited script.") return end
+	local fileEntries, editedEntries = KeyValues.Parse(baselineData.text), KeyValues.Parse(text)
+	if not KeyValues.SameShape(fileEntries, editedEntries) then sendResult(requester, false, "The edited script's keys don't match the file's.") return end
+	local params = table.Copy(baselineData.params)
 	local applied, skipped, mass = 0, {}, nil
-	for i, e in ipairs(new) do
-		local o = orig[i]
-		if e.value ~= o.value then
-			if not KV.ValidValue(e.value) then result(ply, false, "Bad value for " .. e.key .. ".") return end
-			if KV.ApplyValue(p, e, o.value, e.value) then
+	for i, entry in ipairs(editedEntries) do
+		local fileEntry = fileEntries[i]
+		if entry.value ~= fileEntry.value then
+			if not KeyValues.ValidValue(entry.value) then sendResult(requester, false, "Bad value for " .. entry.key .. ".") return end
+			if KeyValues.ApplyValue(params, entry, fileEntry.value, entry.value) then
 				applied = applied + 1
-				if e.path == "body" and e.lkey == "massoverride" then mass = tonumber(e.value) end
+				if entry.path == "body" and entry.lowerKey == "massoverride" then mass = tonumber(entry.value) end
 			else
-				skipped[#skipped + 1] = e.label .. "." .. e.key
+				skipped[#skipped + 1] = entry.label .. "." .. entry.key
 			end
 		end
 	end
-	E.RebaseHandling(veh, p)
-	local phys = veh:GetPhysicsObject()
-	local m = mass or b.mass
-	if IsValid(phys) and m and m > 0 then phys:SetMass(m) end
-	b.current = text
-	local msg = string.format("Applied %d change%s live to %s.", applied, applied == 1 and "" or "s", E.GetCarConfig(veh).name)
-	if data == "" then msg = "Back to the file's values on " .. E.GetCarConfig(veh).name .. "." end
-	if #skipped > 0 then msg = msg .. " Needs a respawn (not live): " .. table.concat(skipped, ", ", 1, math.min(#skipped, 6)) .. (#skipped > 6 and " ..." or "") end
-	result(ply, true, msg)
-	sendScript(ply, veh, b)
+	AudioEngine.RebaseHandling(vehicle, params)
+	local physics = vehicle:GetPhysicsObject()
+	local newMass = mass or baselineData.mass
+	if IsValid(physics) and newMass and newMass > 0 then physics:SetMass(newMass) end
+	baselineData.current = text
+	local message = string.format("Applied %d change%s live to %s.", applied, applied == 1 and "" or "s", AudioEngine.GetCarConfig(vehicle).name)
+	if data == "" then message = "Back to the file's values on " .. AudioEngine.GetCarConfig(vehicle).name .. "." end
+	if #skipped > 0 then
+		message = message .. " Needs a respawn (not live): " .. table.concat(skipped, ", ", 1, math.min(#skipped, 6)) .. (#skipped > 6 and " ..." or "")
+	end
+	sendResult(requester, true, message)
+	sendScript(requester, vehicle, baselineData)
 end)
 
 ---------------------------------------------------------------------------
 -- gearing and rev response: networked to every client (sh_debug.lua reads them)
 ---------------------------------------------------------------------------
-net.Receive("audio_dbg_gear", function(_, ply)
-	local veh = carOf(ply, net.ReadEntity())
-	local s = net.ReadString()
-	if not veh then return end
-	local enc = s ~= "" and DBG.EncodeGearing(DBG.DecodeGearing(s)) or ""
-	veh:SetNW2String("audio_dbg_gear", enc)
-	result(ply, true, enc == "" and "Gearing back to the car's own." or "Gearing applied live (everyone hears it).")
+net.Receive("audio_dbg_gear", function(_, requester)
+	local vehicle = requestedCar(requester, net.ReadEntity())
+	local encodedText = net.ReadString()
+	if not vehicle then return end
+	local encoded = encodedText ~= "" and EngineDebug.EncodeGearing(EngineDebug.DecodeGearing(encodedText)) or ""
+	vehicle:SetNW2String("audio_dbg_gear", encoded)
+	sendResult(requester, true, encoded == "" and "Gearing back to the car's own." or "Gearing applied live (everyone hears it).")
 end)
 
-net.Receive("audio_dbg_rev", function(_, ply)
-	local global = net.ReadBool()
-	local veh = not global and net.ReadEntity() or nil
-	local s = net.ReadString()
-	if not DBG.Allowed(ply) then return end
-	local r, f = DBG.DecodeRev(s)
-	local enc = r and DBG.EncodeRev(r, f) or ""
-	if global then
-		SetGlobal2String("audio_dbg_rev", enc)
-		result(ply, true, enc == "" and "Rev response for all cars back to DT.REV." or "Rev response set for all cars.")
+net.Receive("audio_dbg_rev", function(_, requester)
+	local forAllCars = net.ReadBool()
+	local vehicle = not forAllCars and net.ReadEntity() or nil
+	local encodedText = net.ReadString()
+	if not EngineDebug.Allowed(requester) then return end
+	local rise, fall = EngineDebug.DecodeRev(encodedText)
+	local encoded = rise and EngineDebug.EncodeRev(rise, fall) or ""
+	if forAllCars then
+		SetGlobal2String("audio_dbg_rev", encoded)
+		sendResult(requester, true, encoded == "" and "Rev response for all cars back to DT.REV." or "Rev response set for all cars.")
 		return
 	end
-	veh = carOf(ply, veh)
-	if not veh then return end
-	veh:SetNW2String("audio_dbg_rev", enc)
-	result(ply, true, enc == "" and "This car's rev response back to its own." or "Rev response set for this car.")
+	vehicle = requestedCar(requester, vehicle)
+	if not vehicle then return end
+	vehicle:SetNW2String("audio_dbg_rev", encoded)
+	sendResult(requester, true, encoded == "" and "This car's rev response back to its own." or "Rev response set for this car.")
 end)
 
 ---------------------------------------------------------------------------
 -- switching the module off undoes what it changed live
 ---------------------------------------------------------------------------
-cvars.AddChangeCallback("audio_engine_debug", function(_, _, new)
-	if tonumber(new) ~= 0 then return end
-	for _, t in ipairs(DBG.TUNABLES) do
-		local v = DBG.TUNABLE_FILE[t[1] .. "." .. t[2]]
-		if v ~= nil and E[t[1]] then E[t[1]][t[2]] = v end
+cvars.AddChangeCallback("audio_engine_debug", function(_, _, newValue)
+	if tonumber(newValue) ~= 0 then return end
+	for _, tunable in ipairs(EngineDebug.TUNABLES) do
+		local value = EngineDebug.TUNABLE_FILE[tunable[1] .. "." .. tunable[2]]
+		if value ~= nil and AudioEngine[tunable[1]] then AudioEngine[tunable[1]][tunable[2]] = value end
 	end
 	SetGlobal2String("audio_dbg_rev", "")
-	for veh in pairs(E.TrackedVehicles or {}) do
-		if IsValid(veh) then
-			veh:SetNW2String("audio_dbg_gear", "")
-			veh:SetNW2String("audio_dbg_rev", "")
-			local b = veh.audioDbg
+	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
+		if IsValid(vehicle) then
+			vehicle:SetNW2String("audio_dbg_gear", "")
+			vehicle:SetNW2String("audio_dbg_rev", "")
+			local baselineData = vehicle.audioDebugBaseline
 			-- (also puts the file's anti-spin values back on every car)
-			E.RebaseHandling(veh, b and b.params or nil)
-			if b then
-				local phys = veh:GetPhysicsObject()
-				if IsValid(phys) and b.mass then phys:SetMass(b.mass) end
-				veh.audioDbg = nil
+			AudioEngine.RebaseHandling(vehicle, baselineData and baselineData.params or nil)
+			if baselineData then
+				local physics = vehicle:GetPhysicsObject()
+				if IsValid(physics) and baselineData.mass then physics:SetMass(baselineData.mass) end
+				vehicle.audioDebugBaseline = nil
 			end
 		end
 	end
 end, "audio_engine_debug")
 
--- (a Lua refresh of the core replaces E.GetEngineConfig: wrap it again)
-timer.Create("audio_engine_debug_install", 5, 0, DBG.Install)
+-- (a Lua refresh of the core replaces AudioEngine.GetEngineConfig: wrap it again)
+timer.Create("audio_engine_debug_install", 5, 0, EngineDebug.Install)
 
-hook.Add("PlayerSay", "audio_engine_debug", function(ply, text)
-	local t = string.lower(string.Trim(text))
-	if (t == "!enginedebug" or t == "/enginedebug") and DBG.Allowed(ply) then
-		ply:ConCommand("audio_engine_debug_menu")
+hook.Add("PlayerSay", "audio_engine_debug", function(requester, text)
+	local message = string.lower(string.Trim(text))
+	if (message == "!enginedebug" or message == "/enginedebug") and EngineDebug.Allowed(requester) then
+		requester:ConCommand("audio_engine_debug_menu")
 		return ""
 	end
 end)

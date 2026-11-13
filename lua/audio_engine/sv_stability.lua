@@ -14,7 +14,7 @@
 	    rotation down (it never turns a sliding car's travel: that launched it where the nose pointed)
 	  * lateral grip: without the handbrake, extra tyre grip (gripAssist g) takes sideways speed
 	    away at any slip angle; the forward speed is never touched, so it can't launch the car
-	  * how much the car is sliding (0..1, veh.audioSlide) goes to traction control
+	  * how much the car is sliding (0..1, vehicle.audioSlideAmount) goes to traction control
 	    (sv_handling.lua), which takes power away: a strong car stepping out under throttle
 	    keeps sliding as long as it has full power, whatever the yaw correction does
 	  * slip limit: steering without the handbrake keeps the tail-out slip angle near slipMax
@@ -32,9 +32,9 @@
 	It only acts on the ground, moving forward, above minSpeed.
 ]]
 
-local E = AUDIO_ENGINE
+local AudioEngine = AUDIO_ENGINE
 
-local cvOn = CreateConVar("audio_engine_stability", "0", FCVAR_ARCHIVE + FCVAR_NOTIFY,
+local stabilityConVar = CreateConVar("audio_engine_stability", "0", FCVAR_ARCHIVE + FCVAR_NOTIFY,
 	"1 = stability control on registered cars")
 
 local DEFAULTS = {
@@ -75,218 +75,218 @@ local DEFAULTS = {
 	holdGrace = 1,         -- s
 	holdSettled = 3,       -- deg/s
 }
-E.STABILITY_DEFAULTS = DEFAULTS
+AudioEngine.STABILITY_DEFAULTS = DEFAULTS
 
 local deg, rad, atan2, abs, min, max, sqrt, tan = math.deg, math.rad, math.atan2, math.abs, math.min, math.max, math.sqrt, math.tan
-local function clamp(x, a, b) if x < a then return a elseif x > b then return b end return x end
-local function sign(x) return x >= 0 and 1 or -1 end
+local function clamp(value, low, high) if value < low then return low elseif value > high then return high end return value end
+local function sign(value) return value >= 0 and 1 or -1 end
 
 -- nose direction and wheelbase, from the wheel attachments (cached per model)
-local geoCache = {}
-local function geometry(veh)
-	local mdl = veh:GetModel()
-	if geoCache[mdl] then return geoCache[mdl] end
-	local p = {}
-	for _, n in ipairs({ "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr" }) do
-		local id = veh:LookupAttachment(n)
-		local a = id and id > 0 and veh:GetAttachment(id)
-		if not a then return { fwd = Vector(0, 1, 0), wheelbase = 2.6 } end
-		p[n] = veh:WorldToLocal(a.Pos)
+local geometryCache = {}
+local function geometry(vehicle)
+	local model = vehicle:GetModel()
+	if geometryCache[model] then return geometryCache[model] end
+	local wheelPositions = {}
+	for _, attachmentName in ipairs({ "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr" }) do
+		local attachmentId = vehicle:LookupAttachment(attachmentName)
+		local attachment = attachmentId and attachmentId > 0 and vehicle:GetAttachment(attachmentId)
+		if not attachment then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
+		wheelPositions[attachmentName] = vehicle:WorldToLocal(attachment.Pos)
 	end
-	local f = ((p.wheel_fl + p.wheel_fr) - (p.wheel_rl + p.wheel_rr)) * 0.5
-	f.z = 0
-	local len = f:Length()
-	if len < 1 then return { fwd = Vector(0, 1, 0), wheelbase = 2.6 } end
-	local wb = clamp(len * 0.0254, 1.8, 4.5)
-	f:Normalize()
-	geoCache[mdl] = { fwd = f, wheelbase = wb }
-	return geoCache[mdl]
+	local forward = ((wheelPositions.wheel_fl + wheelPositions.wheel_fr) - (wheelPositions.wheel_rl + wheelPositions.wheel_rr)) * 0.5
+	forward.z = 0
+	local length = forward:Length()
+	if length < 1 then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
+	local wheelbase = clamp(length * 0.0254, 1.8, 4.5)
+	forward:Normalize()
+	geometryCache[model] = { forward = forward, wheelbase = wheelbase }
+	return geometryCache[model]
 end
-E.CarGeometry = geometry
+AudioEngine.CarGeometry = geometry
 
 -- is the car on the ground? (a short trace down from its floor)
-local function onGround(veh)
-	local up = veh:GetUp()
-	local start = veh:GetPos() + up * 12
-	local tr = util.TraceLine({ start = start, endpos = start - up * 40, filter = veh, mask = MASK_SOLID })
-	return tr.Hit
+local function onGround(vehicle)
+	local upDirection = vehicle:GetUp()
+	local start = vehicle:GetPos() + upDirection * 12
+	local trace = util.TraceLine({ start = start, endpos = start - upDirection * 40, filter = vehicle, mask = MASK_SOLID })
+	return trace.Hit
 end
 
 -- extra tyre grip: takes up to `g` of sideways speed (vr, inches/s along `right`) away per
 -- second, like a tyre's side force. The forward speed is never touched, so it can't launch a
 -- sideways car where its nose points (turning the whole velocity toward the nose did that)
-local function lateralGrip(phys, right, vr, g, dt)
-	local cut = min(abs(vr), g * 9.81 / 0.0254 * dt)
-	if cut > 0 then phys:AddVelocity(right * (-sign(vr) * cut)) end
+local function lateralGrip(physics, right, sidewaysSpeed, grip, deltaTime)
+	local removed = min(abs(sidewaysSpeed), grip * 9.81 / 0.0254 * deltaTime)
+	if removed > 0 then physics:AddVelocity(right * (-sign(sidewaysSpeed) * removed)) end
 end
 
-local function assist(veh, cfg, dt)
-	local drv = veh:GetDriver()
-	if not IsValid(drv) then return end
-	local phys = veh:GetPhysicsObject()
-	if not IsValid(phys) or not phys:IsMotionEnabled() then return end
-	if not onGround(veh) then return end
+local function assist(vehicle, carConfig, deltaTime)
+	local driver = vehicle:GetDriver()
+	if not IsValid(driver) then return end
+	local physics = vehicle:GetPhysicsObject()
+	if not IsValid(physics) or not physics:IsMotionEnabled() then return end
+	if not onGround(vehicle) then return end
 
-	local S = cfg.stability or {}
-	local function P(k) local v = S[k]; if v == nil then v = DEFAULTS[k] end return v end
+	local settings = carConfig.stability or {}
+	local function setting(key) local value = settings[key]; if value == nil then value = DEFAULTS[key] end return value end
 
-	local geo = geometry(veh)
-	local up = veh:GetUp()
-	local fwd = veh:LocalToWorld(geo.fwd) - veh:GetPos()
-	fwd = fwd - up * fwd:Dot(up)
-	fwd:Normalize()
-	local right = fwd:Cross(up)
+	local carGeometry = geometry(vehicle)
+	local upDirection = vehicle:GetUp()
+	local forward = vehicle:LocalToWorld(carGeometry.forward) - vehicle:GetPos()
+	forward = forward - upDirection * forward:Dot(upDirection)
+	forward:Normalize()
+	local right = forward:Cross(upDirection)
 
-	local vel = phys:GetVelocity()
-	local vf, vr = vel:Dot(fwd), vel:Dot(right)
-	local speedIn = sqrt(vf * vf + vr * vr)            -- inches/s
-	local v = speedIn * 0.0254                         -- m/s
-	local kmh = v * 3.6
-	local minSpeed = P("minSpeed")
+	local velocity = physics:GetVelocity()
+	local forwardSpeed, sidewaysSpeed = velocity:Dot(forward), velocity:Dot(right)
+	local speedInches = sqrt(forwardSpeed * forwardSpeed + sidewaysSpeed * sidewaysSpeed)            -- inches/s
+	local speed = speedInches * 0.0254                         -- m/s
+	local speedKmh = speed * 3.6
+	local minSpeed = setting("minSpeed")
 
 	-- the driver's steering, smoothed like the wheels turn (left = +)
-	local want = (drv:KeyDown(IN_MOVELEFT) and 1 or 0) - (drv:KeyDown(IN_MOVERIGHT) and 1 or 0)
-	local s = veh.audioSteer or 0
-	s = s + clamp(want - s, -dt * 4, dt * 4)
-	veh.audioSteer = s
+	local steerInput = (driver:KeyDown(IN_MOVELEFT) and 1 or 0) - (driver:KeyDown(IN_MOVERIGHT) and 1 or 0)
+	local smoothedSteer = vehicle.audioSteerInput or 0
+	smoothedSteer = smoothedSteer + clamp(steerInput - smoothedSteer, -deltaTime * 4, deltaTime * 4)
+	vehicle.audioSteerInput = smoothedSteer
 
-	veh.audioSlide, veh.audioSlideT, veh.audioSpin = 0, CurTime(), true
+	vehicle.audioSlideAmount, vehicle.audioSlideTime, vehicle.audioOverRotating = 0, CurTime(), true
 
 	-- straight-line hold: throttle, no steering, no handbrake or drift -> the car keeps the
 	-- heading it had when the keys were let go, from a standstill up (launch spins start below
 	-- minSpeed). Any rotation counts as sliding, so traction control cuts the power too
-	if want == 0 and abs(s) < 0.05 and drv:KeyDown(IN_FORWARD) and not drv:KeyDown(IN_JUMP)
-		and not veh.audioDrift and vf > -40 then
-		local heading = deg(atan2(fwd.y, fwd.x))         -- left = +, like the yaw rate
-		local err = veh.audioHeading and math.NormalizeAngle(veh.audioHeading - heading) or 0
-		local yaw = phys:GetAngleVelocity().z
-		if not veh.audioHeading or abs(err) > P("straightMax") then
-			veh.audioHeading, err = heading, 0           -- (re)captured: after a crash or a spin it holds the new line
-			veh.audioHoldGrace = abs(yaw) > P("holdSettled") and CurTime() + P("holdGrace") or nil
+	if steerInput == 0 and abs(smoothedSteer) < 0.05 and driver:KeyDown(IN_FORWARD) and not driver:KeyDown(IN_JUMP)
+		and not vehicle.audioDrift and forwardSpeed > -40 then
+		local heading = deg(atan2(forward.y, forward.x))         -- left = +, like the yaw rate
+		local headingError = vehicle.audioHeldHeading and math.NormalizeAngle(vehicle.audioHeldHeading - heading) or 0
+		local yawRate = physics:GetAngleVelocity().z
+		if not vehicle.audioHeldHeading or abs(headingError) > setting("straightMax") then
+			vehicle.audioHeldHeading, headingError = heading, 0           -- (re)captured: after a crash or a spin it holds the new line
+			vehicle.audioHoldGraceUntil = abs(yawRate) > setting("holdSettled") and CurTime() + setting("holdGrace") or nil
 		end
 		-- still rotating out of a turn: holding the line it had when the keys were let go turned it
 		-- back against its tyres for seconds (read as a slide, power cut). Follow it until it settles
-		local settling = veh.audioHoldGrace and CurTime() < veh.audioHoldGrace and abs(yaw) > P("holdSettled")
+		local settling = vehicle.audioHoldGraceUntil and CurTime() < vehicle.audioHoldGraceUntil and abs(yawRate) > setting("holdSettled")
 		if settling then
-			veh.audioHeading, err = heading, 0
+			vehicle.audioHeldHeading, headingError = heading, 0
 		else
-			veh.audioHoldGrace = nil
+			vehicle.audioHoldGraceUntil = nil
 		end
-		local target = clamp(err * P("straightHold"), -30, 30)
-		phys:AddAngleVelocity(Vector(0, 0, (target - yaw) * min(1, P("straightDamp") * dt)))
-		local beta = v > 2 and abs(deg(atan2(vr, vf))) or 0
-		lateralGrip(phys, right, vr, P("gripAssist") * clamp((kmh - minSpeed) / 12, 0, 1), dt)
-		local yawSlide = settling and 0 or (abs(yaw - target) - 4) / 15
-		veh.audioSlide = clamp(max(yawSlide, (beta - 3) / 10), 0, 1)
-		veh.audioLogYaw, veh.audioLogBeta = yaw - target, beta
+		local targetYawRate = clamp(headingError * setting("straightHold"), -30, 30)
+		physics:AddAngleVelocity(Vector(0, 0, (targetYawRate - yawRate) * min(1, setting("straightDamp") * deltaTime)))
+		local slipAngle = speed > 2 and abs(deg(atan2(sidewaysSpeed, forwardSpeed))) or 0
+		lateralGrip(physics, right, sidewaysSpeed, setting("gripAssist") * clamp((speedKmh - minSpeed) / 12, 0, 1), deltaTime)
+		local yawSlide = settling and 0 or (abs(yawRate - targetYawRate) - 4) / 15
+		vehicle.audioSlideAmount = clamp(max(yawSlide, (slipAngle - 3) / 10), 0, 1)
+		vehicle.audioLogYawError, vehicle.audioLogSlipAngle = yawRate - targetYawRate, slipAngle
 		return
 	end
-	veh.audioHeading, veh.audioLogYaw, veh.audioLogBeta = nil, nil, nil
+	vehicle.audioHeldHeading, vehicle.audioLogYawError, vehicle.audioLogSlipAngle = nil, nil, nil
 
-	if kmh < minSpeed or vf <= 0 then return end
-	local fade = clamp((kmh - minSpeed) / 12, 0, 1)
-	local beta = deg(atan2(vr, vf))                      -- + = nose rotated left of the travel
+	if speedKmh < minSpeed or forwardSpeed <= 0 then return end
+	local fade = clamp((speedKmh - minSpeed) / 12, 0, 1)
+	local slipAngle = deg(atan2(sidewaysSpeed, forwardSpeed))                      -- + = nose rotated left of the travel
 	-- drifting: started with the handbrake, held while the car stays sideways
-	if drv:KeyDown(IN_JUMP) then veh.audioDrift = true
-	elseif abs(beta) < P("driftHold") then veh.audioDrift = false end
-	local handbrake = veh.audioDrift
+	if driver:KeyDown(IN_JUMP) then vehicle.audioDrift = true
+	elseif abs(slipAngle) < setting("driftHold") then vehicle.audioDrift = false end
+	local handbrake = vehicle.audioDrift
 
 	-- rotation the driver is asking for (deg/s, left = +): what the steering angle would give
 	-- at this speed, capped by what the tyres can actually hold
-	-- (sv_handling may have widened the car's lock at speed: veh.audioSteerFast)
-	local fast = P("steerFast") * (veh.audioSteerFast or 1)
-	local lock = rad(P("steerSlow") + (fast - P("steerSlow")) * clamp((kmh - 20) / 80, 0, 1))
-	local vv = max(v, 2)
-	local wKin = deg(vv * tan(lock) / geo.wheelbase)
-	local wGrip = deg(P("grip") * 9.81 / vv)
-	local wRef = s * min(wKin, wGrip)
+	-- (sv_handling may have widened the car's lock at speed: vehicle.audioFastSteerScale)
+	local fastLock = setting("steerFast") * (vehicle.audioFastSteerScale or 1)
+	local lock = rad(setting("steerSlow") + (fastLock - setting("steerSlow")) * clamp((speedKmh - 20) / 80, 0, 1))
+	local turnSpeed = max(speed, 2)
+	local kinematicYawRate = deg(turnSpeed * tan(lock) / carGeometry.wheelbase)
+	local gripYawRate = deg(setting("grip") * 9.81 / turnSpeed)
+	local askedYawRate = smoothedSteer * min(kinematicYawRate, gripYawRate)
 
-	local yaw = phys:GetAngleVelocity().z                -- deg/s, left = +
-	local add = 0
-	local a = abs(beta)
-	local tailOut = beta * yaw > 0                       -- sliding the way it rotates (oversteer)
+	local yawRate = physics:GetAngleVelocity().z                -- deg/s, left = +
+	local yawCorrection = 0
+	local absSlipAngle = abs(slipAngle)
+	local tailOut = slipAngle * yawRate > 0                       -- sliding the way it rotates (oversteer)
 
 	-- how fast the slip angle changes (smoothed; a stale reading from an earlier pass is dropped)
 	local now = CurTime()
-	local dBeta = veh.audioBeta and now - veh.audioBetaT < dt * 2.5 and (beta - veh.audioBeta) / dt or 0
-	veh.audioBeta, veh.audioBetaT = beta, now
-	veh.audioBetaRate = (veh.audioBetaRate or 0) + (dBeta - (veh.audioBetaRate or 0)) * min(1, 15 * dt)
+	local slipAngleChange = vehicle.audioSlipAngle and now - vehicle.audioSlipAngleTime < deltaTime * 2.5 and (slipAngle - vehicle.audioSlipAngle) / deltaTime or 0
+	vehicle.audioSlipAngle, vehicle.audioSlipAngleTime = slipAngle, now
+	vehicle.audioSlipAngleRate = (vehicle.audioSlipAngleRate or 0) + (slipAngleChange - (vehicle.audioSlipAngleRate or 0)) * min(1, 15 * deltaTime)
 
-	local allow = handbrake and P("driftYaw") or (P("yawAllow") + 0.15 * abs(wRef))
-	local kOver = P("overDamp")
-	local braking = drv:KeyDown(IN_BACK) and not drv:KeyDown(IN_FORWARD)
-	local share = braking and P("brakeTurn") or P("turnShare")
+	local yawAllowance = handbrake and setting("driftYaw") or (setting("yawAllow") + 0.15 * abs(askedYawRate))
+	local oversteerDamping = setting("overDamp")
+	local braking = driver:KeyDown(IN_BACK) and not driver:KeyDown(IN_FORWARD)
+	local turnInShare = braking and setting("brakeTurn") or setting("turnShare")
 
-	if yaw * wRef >= 0 then
+	if yawRate * askedYawRate >= 0 then
 		-- turning the way the driver steers: catch only the part beyond what was asked
-		local excess = abs(yaw) - abs(wRef) - allow
+		local excess = abs(yawRate) - abs(askedYawRate) - yawAllowance
 		if excess > 0 then
-			add = add - sign(yaw) * excess * min(1, kOver * dt)
-		elseif not handbrake and abs(wRef) > 4 and v > 5 and abs(yaw) < abs(wRef) * share
-			and not (tailOut and a > P("slipMax") * 0.5) then
+			yawCorrection = yawCorrection - sign(yawRate) * excess * min(1, oversteerDamping * deltaTime)
+		elseif not handbrake and abs(askedYawRate) > 4 and speed > 5 and abs(yawRate) < abs(askedYawRate) * turnInShare
+			and not (tailOut and absSlipAngle > setting("slipMax") * 0.5) then
 			-- pushing wide (or ploughing on under braking): help it turn in
-			local k = braking and P("brakeHelp") or P("turnHelp")
-			add = add + sign(wRef) * (abs(wRef) * share - abs(yaw)) * min(1, k * dt)
+			local turnInRate = braking and setting("brakeHelp") or setting("turnHelp")
+			yawCorrection = yawCorrection + sign(askedYawRate) * (abs(askedYawRate) * turnInShare - abs(yawRate)) * min(1, turnInRate * deltaTime)
 		end
 	elseif not handbrake then
 		-- rotating against the steering (a snap the other way): stop it. Not while drifting:
 		-- there counter-steering is how the driver holds the angle
-		local excess = abs(yaw) - allow * 0.5
-		if excess > 0 then add = add - sign(yaw) * excess * min(1, kOver * dt) end
+		local excess = abs(yawRate) - yawAllowance * 0.5
+		if excess > 0 then yawCorrection = yawCorrection - sign(yawRate) * excess * min(1, oversteerDamping * deltaTime) end
 	end
 
 	-- slip limit (no handbrake): steering at speed turns, it doesn't drift. Past slipMax the nose
-	-- may only rotate as fast as the car's path does (yaw - dBeta/dt), less a little to bring the
+	-- may only rotate as fast as the car's path does (yaw - slipAngleChange/dt), less a little to bring the
 	-- slip angle back. It only ever takes rotation away (the travel direction is never touched)
-	if not handbrake and tailOut and a > P("slipMax") then
-		local back = min(60, (a - P("slipMax")) * P("slipReturn"))
-		local d = -veh.audioBetaRate - sign(beta) * back
-		if d * beta < 0 then add = add + d * min(1, P("slipDamp") * dt) end
+	if not handbrake and tailOut and absSlipAngle > setting("slipMax") then
+		local returnRate = min(60, (absSlipAngle - setting("slipMax")) * setting("slipReturn"))
+		local slipCorrection = -vehicle.audioSlipAngleRate - sign(slipAngle) * returnRate
+		if slipCorrection * slipAngle < 0 then yawCorrection = yawCorrection + slipCorrection * min(1, setting("slipDamp") * deltaTime) end
 	end
 
 	-- lateral grip (no handbrake): extra tyre grip that takes sideways speed away
-	if not handbrake then lateralGrip(phys, right, vr, P("gripAssist") * fade, dt) end
+	if not handbrake then lateralGrip(physics, right, sidewaysSpeed, setting("gripAssist") * fade, deltaTime) end
 
 	-- last-resort guard: tail stepping OUT (slide in the same direction as the rotation)
-	local maxA = handbrake and P("handbrakeAngle") or P("driftAngle")
-	if tailOut and a > maxA * 0.6 then
-		local k = clamp((a - maxA * 0.6) / (maxA * 0.4), 0, 1)
-		if a > maxA then
-			k = 1 + (a - maxA) / 10
-			add = add - sign(beta) * min(90, (a - maxA) * 4) * dt * 4    -- ease the nose back
+	local slideLimit = handbrake and setting("handbrakeAngle") or setting("driftAngle")
+	if tailOut and absSlipAngle > slideLimit * 0.6 then
+		local guardStrength = clamp((absSlipAngle - slideLimit * 0.6) / (slideLimit * 0.4), 0, 1)
+		if absSlipAngle > slideLimit then
+			guardStrength = 1 + (absSlipAngle - slideLimit) / 10
+			yawCorrection = yawCorrection - sign(slipAngle) * min(90, (absSlipAngle - slideLimit) * 4) * deltaTime * 4    -- ease the nose back
 		end
-		add = add - yaw * min(1, kOver * 0.6 * k * dt)
+		yawCorrection = yawCorrection - yawRate * min(1, oversteerDamping * 0.6 * guardStrength * deltaTime)
 	end
 
 	-- how much it's sliding, for the power cut: the tail out past slideFrom, or rotating well
 	-- beyond what the steering asks. Not in a drift: there the driver wants the power.
-	-- audioSpin: over-rotating, cut hard; only the tail out (the car still turns as asked) is a
+	-- audioOverRotating: over-rotating, cut hard; only the tail out (the car still turns as asked) is a
 	-- corner taken fast, and it keeps enough power to pull through it (sv_handling slideTurnFloor)
 	-- the keys just let go, the steering still coming back (until the straight-line hold takes
 	-- over): the turn's own rotation isn't over-rotating, it read as a spin and dipped the power
 	if not handbrake then
-		local returning = want == 0
-		local over = returning and 0
-			or yaw * wRef >= 0 and (abs(yaw) - abs(wRef) - allow) / 20 or (abs(yaw) - allow * 0.5) / 20
-		local tail = beta * yaw > 0 and (a - P("slideFrom")) / (P("slideFull") - P("slideFrom")) or 0
-		veh.audioSlide = clamp(max(over, tail), 0, 1) * fade
-		veh.audioSpin = over > 0
+		local returning = steerInput == 0
+		local overRotation = returning and 0
+			or yawRate * askedYawRate >= 0 and (abs(yawRate) - abs(askedYawRate) - yawAllowance) / 20 or (abs(yawRate) - yawAllowance * 0.5) / 20
+		local tailOutSlide = slipAngle * yawRate > 0 and (absSlipAngle - setting("slideFrom")) / (setting("slideFull") - setting("slideFrom")) or 0
+		vehicle.audioSlideAmount = clamp(max(overRotation, tailOutSlide), 0, 1) * fade
+		vehicle.audioOverRotating = overRotation > 0
 	end
-	veh.audioLogYaw, veh.audioLogBeta = yaw - wRef, beta
+	vehicle.audioLogYawError, vehicle.audioLogSlipAngle = yawRate - askedYawRate, slipAngle
 
-	if add ~= 0 then
-		phys:AddAngleVelocity(Vector(0, 0, add * fade))
+	if yawCorrection ~= 0 then
+		physics:AddAngleVelocity(Vector(0, 0, yawCorrection * fade))
 	end
 end
 
 hook.Add("Tick", "audio_engine_stability", function()
-	if not cvOn:GetBool() then return end
-	local dt = engine.TickInterval()
-	for veh in pairs(E.TrackedVehicles or {}) do
-		if IsValid(veh) then
-			local cfg = E.GetCarConfig(veh)
+	if not stabilityConVar:GetBool() then return end
+	local deltaTime = engine.TickInterval()
+	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
+		if IsValid(vehicle) then
+			local carConfig = AudioEngine.GetCarConfig(vehicle)
 			-- not on spiked tyres (sv_handling.lua): a stinger is meant to make the car hard to drive
-			if cfg and cfg.stability ~= false and not veh.audioSpiked then assist(veh, cfg, dt) end
+			if carConfig and carConfig.stability ~= false and not vehicle.audioSpiked then assist(vehicle, carConfig, deltaTime) end
 		end
 	end
 end)

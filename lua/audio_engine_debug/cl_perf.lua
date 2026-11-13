@@ -2,7 +2,7 @@
 	Audio Engine debug module: performance profiler (client). Not part of the final addon.
 	Superadmins (or the host), while audio_engine_debug is 1.
 
-	Nothing here runs until asked: the measuring wrappers (and E.PerfCar, the core's per-car
+	Nothing here runs until asked: the measuring wrappers (and AudioEngine.PerfCar, the core's per-car
 	timing point) are put on only while a capture runs or the overlay is open, then taken off.
 
 	  audio_engine_perf [seconds] [client | server | both]
@@ -13,7 +13,7 @@
 	                                    stress test: running PERP cars in front of you (sv_perf.lua)
 
 	Client figures:
-	  time      the addon's hooks per frame (average, worst), each car's own update (E.PerfCar),
+	  time      the addon's hooks per frame (average, worst), each car's own update (AudioEngine.PerfCar),
 	            against the frame time
 	  sound     CSoundPatches the addon holds and how many play (Source mixes a limited number of
 	            channels for everything: past that sounds drop out), sound commands per frame
@@ -24,15 +24,15 @@
 	  other     traces (tunnel probes), dynamic lights and lens quads / glow sprites drawn per frame
 ]]
 
-local E = AUDIO_ENGINE
-local DBG = E.Debug
+local AudioEngine = AUDIO_ENGINE
+local EngineDebug = AudioEngine.Debug
 
 -- (Lua refresh: take the previous load's wrappers off before this one starts)
-if DBG.PerfClient and DBG.PerfClient.Uninstall then DBG.PerfClient.Uninstall() end
+if EngineDebug.PerfClient and EngineDebug.PerfClient.Uninstall then EngineDebug.PerfClient.Uninstall() end
 local PERF = {}
-DBG.PerfClient = PERF
+EngineDebug.PerfClient = PERF
 
-local OURS = { "^audio_engine", "^police_siren" }
+local OUR_HOOK_PATTERNS = { "^audio_engine", "^police_siren" }
 local UNITS_TO_M = 0.01905
 local HUD_EVERY = 1
 local SNAPSHOT_EVERY = 0.5
@@ -41,44 +41,44 @@ local ENGINE_BYTES_PER_SAMPLE = 2
 local MB = 1024 * 1024
 local SOUND_METHODS = { "ChangeVolume", "ChangePitch", "PlayEx", "Play", "Stop", "SetDSP", "SetSoundLevel", "FadeOut" }
 
-local function ours(name)
+local function isOurs(name)
 	if not isstring(name) then return false end
-	for _, p in ipairs(OURS) do
-		if string.find(name, p) then return true end
+	for _, pattern in ipairs(OUR_HOOK_PATTERNS) do
+		if string.find(name, pattern) then return true end
 	end
 
 	return false
 end
 
-local function say(msg)
-	chat.AddText(Color(255, 190, 60), "[Audio Engine perf] ", Color(230, 230, 230), msg)
+local function report(message)
+	chat.AddText(Color(255, 190, 60), "[Audio Engine perf] ", Color(230, 230, 230), message)
 end
 
 ---------------------------------------------------------------------------
 -- accumulators: a capture and the overlay each keep their own
 ---------------------------------------------------------------------------
-local accs = {}
+local accumulators = {}
 
-local function newAcc()
-	return { t0 = SysTime(), frames = 0, frameSum = 0, frameMax = 0, hooks = {}, cars = {}, traces = 0,
+local function newAccumulator()
+	return { startTime = SysTime(), frames = 0, frameSum = 0, frameMax = 0, hooks = {}, cars = {}, traces = 0,
 		sound = {}, creates = 0, dlights = 0, quads = 0, sprites = 0 }
 end
 
-local function each(fn)
-	for _, a in pairs(accs) do fn(a) end
+local function forEachAccumulator(action)
+	for _, accumulator in pairs(accumulators) do action(accumulator) end
 end
 
 local inHook = 0
 
-local function addTime(tbl, key, dt)
-	local h = tbl[key]
-	if not h then
-		h = { calls = 0, total = 0, max = 0 }
-		tbl[key] = h
+local function addTime(timings, key, seconds)
+	local entry = timings[key]
+	if not entry then
+		entry = { calls = 0, total = 0, max = 0 }
+		timings[key] = entry
 	end
-	h.calls = h.calls + 1
-	h.total = h.total + dt
-	if dt > h.max then h.max = dt end
+	entry.calls = entry.calls + 1
+	entry.total = entry.total + seconds
+	if seconds > entry.max then entry.max = seconds end
 end
 
 ---------------------------------------------------------------------------
@@ -88,55 +88,55 @@ local installed = false
 local wrapped = {}
 local saved = {}
 
-local function counter(field)
-	return function(a) a[field] = a[field] + 1 end
+local function counter(counterField)
+	return function(accumulator) accumulator[counterField] = accumulator[counterField] + 1 end
 end
 local countTrace, countCreate, countDlight = counter("traces"), counter("creates"), counter("dlights")
 local countQuad, countSprite = counter("quads"), counter("sprites")
 
-local function wrapLib(lib, fname, count)
-	local orig = lib[fname]
-	if not orig then return end
-	saved[#saved + 1] = { lib, fname, orig }
-	lib[fname] = function(...)
-		if inHook > 0 then each(count) end
-		return orig(...)
+local function wrapLib(library, functionName, countFunction)
+	local original = library[functionName]
+	if not original then return end
+	saved[#saved + 1] = { library, functionName, original }
+	library[functionName] = function(...)
+		if inHook > 0 then forEachAccumulator(countFunction) end
+		return original(...)
 	end
 end
 
 local function install()
 	if installed then return end
 	installed = true
-	for event, list in pairs(hook.GetTable()) do
+	for event, hooks in pairs(hook.GetTable()) do
 		if not string.find(event, "/", 1, true) then
-			for name, fn in pairs(list) do
-				if ours(name) and isfunction(fn) then
+			for name, hookFunction in pairs(hooks) do
+				if isOurs(name) and isfunction(hookFunction) then
 					local key = event .. " / " .. name
 					local function wrapper(...)
 						inHook = inHook + 1
-						local t0 = SysTime()
-						local a, b, c, d, e, f = fn(...)
-						local dt = SysTime() - t0
-						for _, acc in pairs(accs) do addTime(acc.hooks, key, dt) end
+						local startTime = SysTime()
+						local result1, result2, result3, result4, result5, result6 = hookFunction(...)
+						local seconds = SysTime() - startTime
+						for _, accumulator in pairs(accumulators) do addTime(accumulator.hooks, key, seconds) end
 						inHook = inHook - 1
-						return a, b, c, d, e, f
+						return result1, result2, result3, result4, result5, result6
 					end
 					hook.Add(event, name, wrapper)
-					table.insert(wrapped, { event, name, fn, wrapper })
+					table.insert(wrapped, { event, name, hookFunction, wrapper })
 				end
 			end
 		end
 	end
 	hook.Add("Think", "audio_dbg_perf_frame", function()
-		local ft = RealFrameTime()
-		for _, a in pairs(accs) do
-			a.frames = a.frames + 1
-			a.frameSum = a.frameSum + ft
-			if ft > a.frameMax then a.frameMax = ft end
+		local frameTime = RealFrameTime()
+		for _, accumulator in pairs(accumulators) do
+			accumulator.frames = accumulator.frames + 1
+			accumulator.frameSum = accumulator.frameSum + frameTime
+			if frameTime > accumulator.frameMax then accumulator.frameMax = frameTime end
 		end
 	end)
-	E.PerfCar = function(ent, dt)
-		for _, a in pairs(accs) do addTime(a.cars, ent, dt) end
+	AudioEngine.PerfCar = function(entity, seconds)
+		for _, accumulator in pairs(accumulators) do addTime(accumulator.cars, entity, seconds) end
 	end
 	wrapLib(util, "TraceLine", countTrace)
 	wrapLib(util, "TraceHull", countTrace)
@@ -144,32 +144,32 @@ local function install()
 	wrapLib(_G, "DynamicLight", countDlight)
 	wrapLib(render, "DrawQuadEasy", countQuad)
 	wrapLib(render, "DrawSprite", countSprite)
-	local meta = FindMetaTable("CSoundPatch")
-	for _, m in ipairs(SOUND_METHODS) do
-		wrapLib(meta, m, function(a) a.sound[m] = (a.sound[m] or 0) + 1 end)
+	local patchMeta = FindMetaTable("CSoundPatch")
+	for _, method in ipairs(SOUND_METHODS) do
+		wrapLib(patchMeta, method, function(accumulator) accumulator.sound[method] = (accumulator.sound[method] or 0) + 1 end)
 	end
 end
 
 local function uninstall()
 	if not installed then return end
 	installed = false
-	for _, w in ipairs(wrapped) do
-		local list = hook.GetTable()[w[1]]
-		if list and list[w[2]] == w[4] then hook.Add(w[1], w[2], w[3]) end
+	for _, wrap in ipairs(wrapped) do
+		local hooks = hook.GetTable()[wrap[1]]
+		if hooks and hooks[wrap[2]] == wrap[4] then hook.Add(wrap[1], wrap[2], wrap[3]) end
 	end
 	wrapped = {}
 	hook.Remove("Think", "audio_dbg_perf_frame")
-	E.PerfCar = nil
+	AudioEngine.PerfCar = nil
 	for i = #saved, 1, -1 do
-		local s = saved[i]
-		s[1][s[2]] = s[3]
+		local savedEntry = saved[i]
+		savedEntry[1][savedEntry[2]] = savedEntry[3]
 	end
 	saved = {}
 end
 PERF.Uninstall = uninstall
 
 local function refresh()
-	if next(accs) then install() else uninstall() end
+	if next(accumulators) then install() else uninstall() end
 end
 
 ---------------------------------------------------------------------------
@@ -178,175 +178,175 @@ end
 local wavBytes = setmetatable({}, { __mode = "k" })
 
 -- the bytes of a baked bank's WAV files (the engine loads them when the bank is used)
-local function bakedBytes(b)
-	if wavBytes[b] then return wavBytes[b] end
+local function bakedBytes(bank)
+	if wavBytes[bank] then return wavBytes[bank] end
 	local total = 0
-	for name in pairs(b.peak or {}) do
+	for name in pairs(bank.peak or {}) do
 		if isstring(name) and string.EndsWith(name, ".wav") then total = total + (file.Size("sound/" .. name, "GAME") or 0) end
 	end
-	wavBytes[b] = total
+	wavBytes[bank] = total
 
 	return total
 end
 
 local function bankMemory()
-	local m = { baked = 0, bakedBytes = 0, generated = 0, genSamples = 0, building = 0 }
-	local Bank = E.Bank
-	if not Bank then return m end
-	local function add(b)
-		if not b then return end
-		if b.baked then
-			m.baked = m.baked + 1
-			m.bakedBytes = m.bakedBytes + bakedBytes(b)
+	local memory = { baked = 0, bakedBytes = 0, generated = 0, genSamples = 0, building = 0 }
+	local Bank = AudioEngine.Bank
+	if not Bank then return memory end
+	local function addBank(bank)
+		if not bank then return end
+		if bank.baked then
+			memory.baked = memory.baked + 1
+			memory.bakedBytes = memory.bakedBytes + bakedBytes(bank)
 		else
-			m.generated = m.generated + 1
-			m.genSamples = m.genSamples + (b.samples or 0)
-			if not b.ready then m.building = m.building + 1 end
+			memory.generated = memory.generated + 1
+			memory.genSamples = memory.genSamples + (bank.samples or 0)
+			if not bank.ready then memory.building = memory.building + 1 end
 		end
 	end
-	for _, b in pairs(Bank.list or {}) do add(b) end
-	add(Bank.env)
-	m.count = Bank.count or 0
-	local cv = GetConVar("audio_engine_maxsounds")
-	m.max = cv and cv:GetInt() or 0
-	m.queue = #(Bank.queue or {})
+	for _, bank in pairs(Bank.list or {}) do addBank(bank) end
+	addBank(Bank.env)
+	memory.count = Bank.count or 0
+	local conVar = GetConVar("audio_engine_maxsounds")
+	memory.max = conVar and conVar:GetInt() or 0
+	memory.queue = #(Bank.queue or {})
 
-	return m
+	return memory
 end
 
 local function snapshot()
-	local s = { cars = {}, patches = 0, playing = 0, running = 0, lights = 0, vehicles = 0 }
+	local snap = { cars = {}, patches = 0, playing = 0, running = 0, lights = 0, vehicles = 0 }
 	local eye = LocalPlayer():EyePos()
-	for _, ent in ipairs(ents.FindByClass("prop_vehicle_jeep*")) do
-		s.vehicles = s.vehicles + 1
-		local car = E.GetClientCar and E.GetClientCar(ent)
+	for _, entity in ipairs(ents.FindByClass("prop_vehicle_jeep*")) do
+		snap.vehicles = snap.vehicles + 1
+		local car = AudioEngine.GetClientCar and AudioEngine.GetClientCar(entity)
 		if car then
-			local n, playing = 0, 0
-			for _, p in pairs(car.patches or {}) do
-				n = n + 1
-				if p:IsPlaying() then playing = playing + 1 end
+			local patchCount, playing = 0, 0
+			for _, patch in pairs(car.patches or {}) do
+				patchCount = patchCount + 1
+				if patch:IsPlaying() then playing = playing + 1 end
 			end
-			if car.oneshot and car.oneshot.patch then
-				n = n + 1
-				if car.oneshot.patch:IsPlaying() then playing = playing + 1 end
+			if car.oneShot and car.oneShot.patch then
+				patchCount = patchCount + 1
+				if car.oneShot.patch:IsPlaying() then playing = playing + 1 end
 			end
-			local cfg = E.GetCarConfig(ent)
+			local carConfig = AudioEngine.GetCarConfig(entity)
 			local bank = car.bank
-			local on = ent:GetNW2Bool("audio_on", false)
-			local lights = ent:GetNW2Int("audio_lights", 0) > 0
-			s.patches, s.playing = s.patches + n, s.playing + playing
-			if on then s.running = s.running + 1 end
-			if lights then s.lights = s.lights + 1 end
-			s.cars[ent] = {
-				name = cfg and cfg.name or ent:GetModel(), dist = ent:GetPos():Distance(eye) * UNITS_TO_M, on = on, lights = lights,
-				patches = n, playing = playing, mode = car.mode or "active",
+			local engineOn = entity:GetNW2Bool("audio_on", false)
+			local lights = entity:GetNW2Int("audio_lights", 0) > 0
+			snap.patches, snap.playing = snap.patches + patchCount, snap.playing + playing
+			if engineOn then snap.running = snap.running + 1 end
+			if lights then snap.lights = snap.lights + 1 end
+			snap.cars[entity] = {
+				name = carConfig and carConfig.name or entity:GetModel(), distanceMeters = entity:GetPos():Distance(eye) * UNITS_TO_M, on = engineOn, lights = lights,
+				patches = patchCount, playing = playing, mode = car.restState or "active",
 				bank = not bank and "none" or bank.baked and "baked" or bank.ready and "generated" or "building",
 			}
 		end
 	end
-	s.banks = bankMemory()
-	s.siren = POLICE_SIREN and POLICE_SIREN.Stats and POLICE_SIREN.Stats() or nil
-	s.luaKB = collectgarbage("count")
+	snap.banks = bankMemory()
+	snap.siren = POLICE_SIREN and POLICE_SIREN.Stats and POLICE_SIREN.Stats() or nil
+	snap.luaKB = collectgarbage("count")
 
-	return s
+	return snap
 end
 PERF.Snapshot = snapshot
 
-local function memoryLines(s, out)
-	local b = s.banks
-	local genLua, genEngine = b.genSamples * LUA_BYTES_PER_SAMPLE, b.genSamples * ENGINE_BYTES_PER_SAMPLE
-	out(string.format("Sound banks: %d baked (WAV files %.1f MB in the engine), %d generated (%.1f MB of Lua tables + ~%.1f MB in the engine)%s",
-		b.baked, b.bakedBytes / MB, b.generated, genLua / MB, genEngine / MB,
-		b.building > 0 and string.format(", %d still building", b.building) or ""))
-	out(string.format("  generated engines count %d of audio_engine_maxsounds %d; %d in the build queue", b.count or 0, b.max or 0, b.queue or 0))
-	local p = s.siren
-	if p then
-		local sr = (p.sampleRate or 44100)
-		out(string.format("Siren: %d tone versions built (%.1f s of audio: %.1f MB of Lua tables + ~%.1f MB in the engine), %d siren cars near, %d sounding, %d patches (%d playing)%s",
-			p.tonesBuilt * 2, p.samples / sr, p.samples * LUA_BYTES_PER_SAMPLE / MB, p.samples * ENGINE_BYTES_PER_SAMPLE / MB,
-			p.cars, p.sounding, p.patches, p.playing, p.building > 0 and string.format(", %d building", p.building) or ""))
+local function memoryLines(snap, printLine)
+	local banks = snap.banks
+	local genLua, genEngine = banks.genSamples * LUA_BYTES_PER_SAMPLE, banks.genSamples * ENGINE_BYTES_PER_SAMPLE
+	printLine(string.format("Sound banks: %d baked (WAV files %.1f MB in the engine), %d generated (%.1f MB of Lua tables + ~%.1f MB in the engine)%s",
+		banks.baked, banks.bakedBytes / MB, banks.generated, genLua / MB, genEngine / MB,
+		banks.building > 0 and string.format(", %d still building", banks.building) or ""))
+	printLine(string.format("  generated engines count %d of audio_engine_maxsounds %d; %d in the build queue", banks.count or 0, banks.max or 0, banks.queue or 0))
+	local siren = snap.siren
+	if siren then
+		local sampleRate = (siren.sampleRate or 44100)
+		printLine(string.format("Siren: %d tone versions built (%.1f s of audio: %.1f MB of Lua tables + ~%.1f MB in the engine), %d siren cars near, %d sounding, %d patches (%d playing)%s",
+			siren.tonesBuilt * 2, siren.samples / sampleRate, siren.samples * LUA_BYTES_PER_SAMPLE / MB, siren.samples * ENGINE_BYTES_PER_SAMPLE / MB,
+			siren.cars, siren.sounding, siren.patches, siren.playing, siren.building > 0 and string.format(", %d building", siren.building) or ""))
 	end
-	out(string.format("Client Lua memory (all addons): %.1f MB", s.luaKB / 1024))
+	printLine(string.format("Client Lua memory (all addons): %.1f MB", snap.luaKB / 1024))
 end
 
-local function printSnapshot(s, out, timing)
-	out(string.format("Cars: %d vehicles, %d with the procedural engine (%d running, %d lights on)",
-		s.vehicles, table.Count(s.cars), s.running, s.lights))
-	out(string.format("Engine sound patches: %d held, %d playing (all the game's sounds share a limited number of channels)",
-		s.patches, s.playing))
-	local list = {}
-	for ent, c in pairs(s.cars) do
-		local t = timing and timing[ent]
-		c.ms = t and t.total / math.max(timing.frames, 1) * 1000 or 0
-		c.max = t and t.max * 1000 or 0
-		table.insert(list, c)
+local function printSnapshot(snap, printLine, timing)
+	printLine(string.format("Cars: %d vehicles, %d with the procedural engine (%d running, %d lights on)",
+		snap.vehicles, table.Count(snap.cars), snap.running, snap.lights))
+	printLine(string.format("Engine sound patches: %d held, %d playing (all the game's sounds share a limited number of channels)",
+		snap.patches, snap.playing))
+	local rows = {}
+	for entity, row in pairs(snap.cars) do
+		local carTiming = timing and timing[entity]
+		row.ms = carTiming and carTiming.total / math.max(timing.frames, 1) * 1000 or 0
+		row.max = carTiming and carTiming.max * 1000 or 0
+		table.insert(rows, row)
 	end
-	table.sort(list, function(a, b)
-		if a.ms ~= b.ms then return a.ms > b.ms end
-		return a.dist < b.dist
+	table.sort(rows, function(first, second)
+		if first.ms ~= second.ms then return first.ms > second.ms end
+		return first.distanceMeters < second.distanceMeters
 	end)
-	out("  car                                     dist m  engine  state    bank        patches(playing)" .. (timing and "   ms/frame   worst ms" or ""))
-	for _, c in ipairs(list) do
-		out(string.format("  %-38s %7.0f  %-6s  %-7s  %-10s  %3d (%d)%s", string.sub(c.name, 1, 38), c.dist, c.on and "on" or "off",
-			c.mode, c.bank, c.patches, c.playing, timing and string.format("        %8.4f %10.3f", c.ms, c.max) or ""))
+	printLine("  car                                     dist m  engine  state    bank        patches(playing)" .. (timing and "   ms/frame   worst ms" or ""))
+	for _, row in ipairs(rows) do
+		printLine(string.format("  %-38s %7.0f  %-6s  %-7s  %-10s  %3d (%d)%s", string.sub(row.name, 1, 38), row.distanceMeters, row.on and "on" or "off",
+			row.mode, row.bank, row.patches, row.playing, timing and string.format("        %8.4f %10.3f", row.ms, row.max) or ""))
 	end
-	out("  (state: active = every frame; parked = idle sound only, 10x a second while you move slowly; asleep = engine off,"
+	printLine("  (state: active = every frame; parked = idle sound only, 10x a second while you move slowly; asleep = engine off,"
 		.. " 4x a second; far = past audio_engine_range, silent; dormant = out of view)")
-	memoryLines(s, out)
+	memoryLines(snap, printLine)
 end
 
 ---------------------------------------------------------------------------
 -- the timing summary of an accumulator
 ---------------------------------------------------------------------------
-local function timing(a)
-	local frames = math.max(a.frames, 1)
+local function timing(accumulator)
+	local frames = math.max(accumulator.frames, 1)
 	local hooks, total = {}, 0
-	for key, h in pairs(a.hooks) do
-		table.insert(hooks, { key = key, ms = h.total * 1000 / frames, max = h.max * 1000, calls = h.calls / frames })
-		total = total + h.total
+	for key, hookTiming in pairs(accumulator.hooks) do
+		table.insert(hooks, { key = key, ms = hookTiming.total * 1000 / frames, max = hookTiming.max * 1000, calls = hookTiming.calls / frames })
+		total = total + hookTiming.total
 	end
-	table.sort(hooks, function(x, y) return x.ms > y.ms end)
+	table.sort(hooks, function(first, second) return first.ms > second.ms end)
 	local cars = { frames = frames }
 	local carTotal = 0
-	for ent, t in pairs(a.cars) do
-		cars[ent] = t
-		carTotal = carTotal + t.total
+	for entity, carTiming in pairs(accumulator.cars) do
+		cars[entity] = carTiming
+		carTotal = carTotal + carTiming.total
 	end
 	local sound, soundTotal = {}, 0
-	for m, n in pairs(a.sound) do
-		table.insert(sound, string.format("%s %.1f", m, n / frames))
-		soundTotal = soundTotal + n
+	for method, count in pairs(accumulator.sound) do
+		table.insert(sound, string.format("%s %.1f", method, count / frames))
+		soundTotal = soundTotal + count
 	end
 	table.sort(sound)
 
 	return {
-		secs = SysTime() - a.t0, frames = frames, frameMs = a.frameSum / frames * 1000, frameMax = a.frameMax * 1000,
+		seconds = SysTime() - accumulator.startTime, frames = frames, frameMs = accumulator.frameSum / frames * 1000, frameMax = accumulator.frameMax * 1000,
 		hooks = hooks, totalMs = total * 1000 / frames, carMs = carTotal * 1000 / frames, cars = cars,
-		traces = a.traces / frames, sound = sound, soundPerFrame = soundTotal / frames, creates = a.creates,
-		dlights = a.dlights / frames, quads = a.quads / frames, sprites = a.sprites / frames,
+		traces = accumulator.traces / frames, sound = sound, soundPerFrame = soundTotal / frames, creates = accumulator.creates,
+		dlights = accumulator.dlights / frames, quads = accumulator.quads / frames, sprites = accumulator.sprites / frames,
 	}
 end
 
-local function printReport(t, s, out)
-	out(string.format("==== Audio Engine performance, CLIENT: %.1f s, %d frames, %.1f fps (frame %.2f ms average, %.1f ms worst) ====",
-		t.secs, t.frames, 1000 / math.max(t.frameMs, 0.001), t.frameMs, t.frameMax))
-	out(string.format("Addon Lua: %.3f ms per frame (%.1f%% of the frame); the cars' own updates %.3f ms of it",
-		t.totalMs, t.totalMs / math.max(t.frameMs, 0.001) * 100, t.carMs))
-	out("  hook (event / name)                               ms/frame   worst ms  calls/frame")
-	for _, h in ipairs(t.hooks) do
-		out(string.format("  %-48s %8.4f %10.3f %10.2f", h.key, h.ms, h.max, h.calls))
+local function printReport(timingSummary, snap, printLine)
+	printLine(string.format("==== Audio Engine performance, CLIENT: %.1f s, %d frames, %.1f fps (frame %.2f ms average, %.1f ms worst) ====",
+		timingSummary.seconds, timingSummary.frames, 1000 / math.max(timingSummary.frameMs, 0.001), timingSummary.frameMs, timingSummary.frameMax))
+	printLine(string.format("Addon Lua: %.3f ms per frame (%.1f%% of the frame); the cars' own updates %.3f ms of it",
+		timingSummary.totalMs, timingSummary.totalMs / math.max(timingSummary.frameMs, 0.001) * 100, timingSummary.carMs))
+	printLine("  hook (event / name)                               ms/frame   worst ms  calls/frame")
+	for _, hookTiming in ipairs(timingSummary.hooks) do
+		printLine(string.format("  %-48s %8.4f %10.3f %10.2f", hookTiming.key, hookTiming.ms, hookTiming.max, hookTiming.calls))
 	end
-	out(string.format("Per frame: %.1f sound commands (%s), %.1f traces, %.1f dynamic lights, %.1f lens quads, %.1f glow sprites; %d sounds created",
-		t.soundPerFrame, table.concat(t.sound, ", "), t.traces, t.dlights, t.quads, t.sprites, t.creates))
-	printSnapshot(s, out, t.cars)
+	printLine(string.format("Per frame: %.1f sound commands (%s), %.1f traces, %.1f dynamic lights, %.1f lens quads, %.1f glow sprites; %d sounds created",
+		timingSummary.soundPerFrame, table.concat(timingSummary.sound, ", "), timingSummary.traces, timingSummary.dlights, timingSummary.quads, timingSummary.sprites, timingSummary.creates))
+	printSnapshot(snap, printLine, timingSummary.cars)
 end
 
 ---------------------------------------------------------------------------
 -- commands
 ---------------------------------------------------------------------------
 local function allowed()
-	if DBG.Allowed(LocalPlayer()) then return true end
-	say(DBG.Enabled() and "Superadmins only." or "The debug tools are off on this server (audio_engine_debug 0).")
+	if EngineDebug.Allowed(LocalPlayer()) then return true end
+	report(EngineDebug.Enabled() and "Superadmins only." or "The debug tools are off on this server (audio_engine_debug 0).")
 
 	return false
 end
@@ -355,29 +355,29 @@ local capture
 concommand.Add("audio_engine_perf", function(_, _, args)
 	if not allowed() then return end
 	if capture then
-		say("A capture is already running.")
+		report("A capture is already running.")
 		return
 	end
-	local secs = math.Clamp(tonumber(args[1]) or 10, 1, 120)
-	local which = string.lower(args[2] or "both")
-	if which == "both" or which == "server" then
+	local seconds = math.Clamp(tonumber(args[1]) or 10, 1, 120)
+	local realm = string.lower(args[2] or "both")
+	if realm == "both" or realm == "server" then
 		net.Start("audio_dbg_perf_cap")
-		net.WriteFloat(secs)
+		net.WriteFloat(seconds)
 		net.SendToServer()
 	end
-	if which == "both" or which == "client" then
-		capture = newAcc()
-		accs.capture = capture
+	if realm == "both" or realm == "client" then
+		capture = newAccumulator()
+		accumulators.capture = capture
 		refresh()
-		timer.Create("audio_dbg_perf_capture", secs, 1, function()
-			local t = timing(capture)
-			accs.capture, capture = nil, nil
+		timer.Create("audio_dbg_perf_capture", seconds, 1, function()
+			local timingSummary = timing(capture)
+			accumulators.capture, capture = nil, nil
 			refresh()
-			printReport(t, snapshot(), print)
-			say("Report printed to the console.")
+			printReport(timingSummary, snapshot(), print)
+			report("Report printed to the console.")
 		end)
 	end
-	say(string.format("Measuring for %.0f s (%s); the report goes to the console. Play normally meanwhile.", secs, which))
+	report(string.format("Measuring for %.0f s (%s); the report goes to the console. Play normally meanwhile.", seconds, realm))
 end, nil, "Performance capture (debug): audio_engine_perf [seconds = 10] [client | server | both]")
 
 concommand.Add("audio_engine_perf_snapshot", function()
@@ -388,25 +388,25 @@ end, nil, "What the Audio Engine has loaded and playing right now: cars, sound p
 ---------------------------------------------------------------------------
 -- the live overlay
 ---------------------------------------------------------------------------
-local hud = false
-local hudAcc, hudTiming, hudSnap, serverStats
-local nextHud, nextSnap = 0, 0
+local hudOn = false
+local hudAcc, hudTiming, hudSnapshot, serverStats
+local nextHud, nextSnapshot = 0, 0
 
-local function setHud(on)
-	if on == hud then return end
-	hud = on
-	if on then
-		hudAcc = newAcc()
-		accs.hud = hudAcc
-		hudTiming, hudSnap, serverStats = nil, nil, nil
+local function setHud(turnOn)
+	if turnOn == hudOn then return end
+	hudOn = turnOn
+	if turnOn then
+		hudAcc = newAccumulator()
+		accumulators.hud = hudAcc
+		hudTiming, hudSnapshot, serverStats = nil, nil, nil
 	else
-		accs.hud, hudAcc = nil, nil
+		accumulators.hud, hudAcc = nil, nil
 	end
 	refresh()
 	net.Start("audio_dbg_perf_sub")
-	net.WriteBool(on)
+	net.WriteBool(turnOn)
 	net.SendToServer()
-	if on then
+	if turnOn then
 		hook.Add("HUDPaint", "audio_dbg_perf", PERF.Paint)
 	else
 		hook.Remove("HUDPaint", "audio_dbg_perf")
@@ -414,88 +414,88 @@ local function setHud(on)
 end
 
 concommand.Add("audio_engine_perf_hud", function(_, _, args)
-	local want = args[1] and args[1] ~= "0" or (not args[1] and not hud)
-	if want and not allowed() then return end
-	setHud(want)
+	local wantOn = args[1] and args[1] ~= "0" or (not args[1] and not hudOn)
+	if wantOn and not allowed() then return end
+	setHud(wantOn)
 end, nil, "Live performance overlay (debug): audio_engine_perf_hud [0/1]")
 
 net.Receive("audio_dbg_perf_stats", function()
 	serverStats = net.ReadTable()
 end)
 
-local FONT = "DebugFixed"
-local LINE = 13
+local HUD_FONT = "DebugFixed"
+local LINE_HEIGHT = 13
 
 function PERF.Paint()
 	local now = SysTime()
 	if now >= nextHud and hudAcc then
 		nextHud = now + HUD_EVERY
 		hudTiming = timing(hudAcc)
-		hudAcc = newAcc()
-		accs.hud = hudAcc
+		hudAcc = newAccumulator()
+		accumulators.hud = hudAcc
 	end
-	if now >= nextSnap then
-		nextSnap = now + SNAPSHOT_EVERY
-		hudSnap = snapshot()
+	if now >= nextSnapshot then
+		nextSnapshot = now + SNAPSHOT_EVERY
+		hudSnapshot = snapshot()
 	end
 	local lines = {}
-	local function out(s) lines[#lines + 1] = s end
-	out("AUDIO ENGINE PERF (audio_engine_perf_hud 0 to close)")
-	local t = hudTiming
-	if t then
-		out(string.format("client %.0f fps  frame %.2f ms  addon %.3f ms (%.1f%%)  cars %.3f ms",
-			1000 / math.max(t.frameMs, 0.001), t.frameMs, t.totalMs, t.totalMs / math.max(t.frameMs, 0.001) * 100, t.carMs))
-		for i = 1, math.min(5, #t.hooks) do
-			out(string.format("  %-44s %7.3f ms  (worst %.2f)", t.hooks[i].key, t.hooks[i].ms, t.hooks[i].max))
+	local function printLine(line) lines[#lines + 1] = line end
+	printLine("AUDIO ENGINE PERF (audio_engine_perf_hud 0 to close)")
+	local timingSummary = hudTiming
+	if timingSummary then
+		printLine(string.format("client %.0f fps  frame %.2f ms  addon %.3f ms (%.1f%%)  cars %.3f ms",
+			1000 / math.max(timingSummary.frameMs, 0.001), timingSummary.frameMs, timingSummary.totalMs, timingSummary.totalMs / math.max(timingSummary.frameMs, 0.001) * 100, timingSummary.carMs))
+		for i = 1, math.min(5, #timingSummary.hooks) do
+			printLine(string.format("  %-44s %7.3f ms  (worst %.2f)", timingSummary.hooks[i].key, timingSummary.hooks[i].ms, timingSummary.hooks[i].max))
 		end
-		out(string.format("per frame: %.0f sound cmds  %.1f traces  %.1f dlights  %.0f quads  %.0f sprites",
-			t.soundPerFrame, t.traces, t.dlights, t.quads, t.sprites))
+		printLine(string.format("per frame: %.0f sound cmds  %.1f traces  %.1f dlights  %.0f quads  %.0f sprites",
+			timingSummary.soundPerFrame, timingSummary.traces, timingSummary.dlights, timingSummary.quads, timingSummary.sprites))
 	end
-	local s = hudSnap
-	if s then
-		out(string.format("cars %d (%d running, %d lights)  patches %d held / %d playing",
-			table.Count(s.cars), s.running, s.lights, s.patches, s.playing))
-		local b = s.banks
-		out(string.format("banks: %d baked %.1f MB wav, %d generated %.1f MB Lua + %.1f MB engine; Lua %.1f MB",
-			b.baked, b.bakedBytes / MB, b.generated, b.genSamples * LUA_BYTES_PER_SAMPLE / MB, b.genSamples * ENGINE_BYTES_PER_SAMPLE / MB, s.luaKB / 1024))
-		if s.siren then
-			out(string.format("siren: %d versions built %.1f MB Lua, %d sounding, %d patches", s.siren.tonesBuilt * 2,
-				s.siren.samples * LUA_BYTES_PER_SAMPLE / MB, s.siren.sounding, s.siren.patches))
+	local snap = hudSnapshot
+	if snap then
+		printLine(string.format("cars %d (%d running, %d lights)  patches %d held / %d playing",
+			table.Count(snap.cars), snap.running, snap.lights, snap.patches, snap.playing))
+		local banks = snap.banks
+		printLine(string.format("banks: %d baked %.1f MB wav, %d generated %.1f MB Lua + %.1f MB engine; Lua %.1f MB",
+			banks.baked, banks.bakedBytes / MB, banks.generated, banks.genSamples * LUA_BYTES_PER_SAMPLE / MB, banks.genSamples * ENGINE_BYTES_PER_SAMPLE / MB, snap.luaKB / 1024))
+		if snap.siren then
+			printLine(string.format("siren: %d versions built %.1f MB Lua, %d sounding, %d patches", snap.siren.tonesBuilt * 2,
+				snap.siren.samples * LUA_BYTES_PER_SAMPLE / MB, snap.siren.sounding, snap.siren.patches))
 		end
 		-- the costliest cars (by the last second's timing), else the nearest
-		local list = {}
-		for ent, c in pairs(s.cars) do
-			local ct = t and t.cars[ent]
-			c.ms = ct and ct.total / t.frames * 1000 or 0
-			table.insert(list, c)
+		local rows = {}
+		for entity, row in pairs(snap.cars) do
+			local carTiming = timingSummary and timingSummary.cars[entity]
+			row.ms = carTiming and carTiming.total / timingSummary.frames * 1000 or 0
+			table.insert(rows, row)
 		end
-		table.sort(list, function(x, y)
-			if x.ms ~= y.ms then return x.ms > y.ms end
-			return x.dist < y.dist
+		table.sort(rows, function(first, second)
+			if first.ms ~= second.ms then return first.ms > second.ms end
+			return first.distanceMeters < second.distanceMeters
 		end)
-		for i = 1, math.min(8, #list) do
-			local c = list[i]
-			out(string.format("  %-30s %5.0f m %-3s %-9s %2d/%-2d  %.4f ms", string.sub(c.name, 1, 30), c.dist, c.on and "on" or "off",
-				c.bank, c.playing, c.patches, c.ms))
+		for i = 1, math.min(8, #rows) do
+			local row = rows[i]
+			printLine(string.format("  %-30s %5.0f m %-3s %-9s %2d/%-2d  %.4f ms", string.sub(row.name, 1, 30), row.distanceMeters, row.on and "on" or "off",
+				row.bank, row.playing, row.patches, row.ms))
 		end
 	end
-	local sv = serverStats
-	if sv then
-		out(string.format("server: addon %.3f ms/tick (%.1f%% of %.1f ms)  %.1f traces/tick  Lua %.1f MB",
-			sv.totalMsTick, sv.totalMsTick / math.max(sv.tickMs, 0.001) * 100, sv.tickMs, sv.tracesTick, sv.luaKB / 1024))
-		out(string.format("  NW2 %.1f changes/s  net %.1f msgs/s %.0f B/s  cars %d tracked, %d running, %d driven",
-			sv.nwSec, sv.netSec, sv.netBytesSec, sv.cars.tracked, sv.cars.on, sv.cars.driven))
-		for _, h in ipairs(sv.hooks or {}) do
-			out(string.format("  %-44s %7.4f ms (worst %.2f)", h.key, h.msTick, h.maxMs))
+	local server = serverStats
+	if server then
+		printLine(string.format("server: addon %.3f ms/tick (%.1f%% of %.1f ms)  %.1f traces/tick  Lua %.1f MB",
+			server.totalMsTick, server.totalMsTick / math.max(server.tickMs, 0.001) * 100, server.tickMs, server.tracesTick, server.luaKB / 1024))
+		printLine(string.format("  NW2 %.1f changes/s  net %.1f msgs/s %.0f B/s  cars %d tracked, %d running, %d driven",
+			server.nwSec, server.netSec, server.netBytesSec, server.cars.tracked, server.cars.on, server.cars.driven))
+		for _, hookTiming in ipairs(server.hooks or {}) do
+			printLine(string.format("  %-44s %7.4f ms (worst %.2f)", hookTiming.key, hookTiming.msTick, hookTiming.maxMs))
 		end
 	end
-	surface.SetFont(FONT)
-	local w = 0
-	for _, l in ipairs(lines) do w = math.max(w, (surface.GetTextSize(l))) end
-	local x, y = ScrW() - w - 24, 80
+	surface.SetFont(HUD_FONT)
+	local width = 0
+	for _, line in ipairs(lines) do width = math.max(width, (surface.GetTextSize(line))) end
+	local left, top = ScrW() - width - 24, 80
 	surface.SetDrawColor(0, 0, 0, 200)
-	surface.DrawRect(x - 8, y - 6, w + 16, #lines * LINE + 12)
-	for i, l in ipairs(lines) do
-		draw.SimpleText(l, FONT, x, y + (i - 1) * LINE, i == 1 and Color(255, 190, 60) or color_white)
+	surface.DrawRect(left - 8, top - 6, width + 16, #lines * LINE_HEIGHT + 12)
+	for i, line in ipairs(lines) do
+		draw.SimpleText(line, HUD_FONT, left, top + (i - 1) * LINE_HEIGHT, i == 1 and Color(255, 190, 60) or color_white)
 	end
 end

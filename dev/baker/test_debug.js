@@ -74,16 +74,16 @@ const LUA = path.join(ADDON, 'lua')
       check(KV.Rebuild(txt, es, {}) == txt, p .. ": unchanged rebuild is byte for byte")
       local hp, gear3, spring2, mc
       for _, e in ipairs(es) do
-        if e.path == "engine" and e.lkey == "horsepower" then hp = e end
-        if e.path == "engine" and e.lkey == "gear" and e.occ == 3 then gear3 = e end
-        if e.path == "axle/suspension" and e.axle == 2 and e.lkey == "springconstant" then spring2 = e end
-        if e.path == "body" and e.lkey == "masscenteroverride" then mc = e end
+        if e.path == "engine" and e.lowerKey == "horsepower" then hp = e end
+        if e.path == "engine" and e.lowerKey == "gear" and e.occurrence == 3 then gear3 = e end
+        if e.path == "axle/suspension" and e.axle == 2 and e.lowerKey == "springconstant" then spring2 = e end
+        if e.path == "body" and e.lowerKey == "masscenteroverride" then mc = e end
       end
       check(hp and gear3 and spring2, p .. ": found horsepower, 3rd gear, rear spring")
-      local edited = KV.Rebuild(txt, es, { [hp.idx] = "400", [gear3.idx] = "1.75", [spring2.idx] = "99" })
+      local edited = KV.Rebuild(txt, es, { [hp.index] = "400", [gear3.index] = "1.75", [spring2.index] = "99" })
       local es2 = KV.Parse(edited)
       check(KV.SameShape(es, es2), p .. ": same shape after editing")
-      check(es2[hp.idx].value == "400" and es2[gear3.idx].value == "1.75" and es2[spring2.idx].value == "99", p .. ": edits landed")
+      check(es2[hp.index].value == "400" and es2[gear3.index].value == "1.75" and es2[spring2.index].value == "99", p .. ": edits landed")
       local changed = 0
       for i = 1, #es do if es[i].value ~= es2[i].value then changed = changed + 1 end end
       check(changed == 3, p .. ": only the 3 edited values changed (" .. changed .. ")")
@@ -95,7 +95,7 @@ const LUA = path.join(ADDON, 'lua')
     -- values scale into params whatever their unit
     local params = { engine = { horsepower = 320 * 7, maxSpeed = 125 * 17.6, gearRatio = { 3.5, 2.2, 1.5 }, isAutoTransmission = true },
       body = { massCenterOverride = Vector(0, 0, -5 * 2.54) }, axles = { { torqueFactor = 0.4 }, { suspension_stabilizerConstant = 0 } } }
-    local function e(path, key, occ, axle) return { path = path, lkey = key, occ = occ or 1, axle = axle } end
+    local function e(path, key, occ, axle) return { path = path, lowerKey = key, occurrence = occ or 1, axle = axle } end
     check(KV.ApplyValue(params, e("engine", "horsepower"), "320", "400") and near(params.engine.horsepower, 400 * 7, 1e-6), "horsepower scales")
     check(KV.ApplyValue(params, e("engine", "maxspeed"), "125", "100") and near(params.engine.maxSpeed, 100 * 17.6, 1e-6), "speed scales")
     check(KV.ApplyValue(params, e("engine", "gear", 2), "2.2", "2.0") and near(params.engine.gearRatio[2], 2.0, 1e-9), "2nd gear")
@@ -134,7 +134,7 @@ const LUA = path.join(ADDON, 'lua')
       local a = math.max(0.3, 4.5 * (1 - (v / vmax) ^ 3))
       v = math.min(vmax, v + a * dt)
       local g0 = st.gear
-      DT.Step(st, cfg, dt, { fwd = true, v = v })
+      DT.Step(st, cfg, dt, { forward = true, speed = v })
       if st.gear > g0 and g0 >= 1 then ups[#ups + 1] = { g0, v / 0.44704 } end
     end
     local line = {}
@@ -151,7 +151,7 @@ const LUA = path.join(ADDON, 'lua')
     for _ = 1, 60 * 30 do
       v = math.max(0, v - 5 * dt)
       local g0 = st.gear
-      DT.Step(st, cfg, dt, { back = true, v = v })
+      DT.Step(st, cfg, dt, { backward = true, speed = v })
       if st.gear < g0 and st.gear >= 1 then downs[#downs + 1] = { g0, v / 0.44704 } end
       if v <= 0.5 then break end
     end
@@ -230,7 +230,7 @@ const LUA = path.join(ADDON, 'lua')
     local stN = DT.New()
     DT.SkipStart(stN, cfg0)
     stN.rpm = cfg0.redline * 0.9
-    DT.Step(stN, cfg0, dt, { hand = true, v = 0 })
+    DT.Step(stN, cfg0, dt, { handbrake = true, speed = 0 })
     local r1 = stN.rpm
     local cfgF = {}
     for k, v2 in pairs(cfg0) do cfgF[k] = v2 end
@@ -238,7 +238,7 @@ const LUA = path.join(ADDON, 'lua')
     local stF = DT.New()
     DT.SkipStart(stF, cfgF)
     stF.rpm = cfg0.redline * 0.9
-    DT.Step(stF, cfgF, dt, { hand = true, v = 0 })
+    DT.Step(stF, cfgF, dt, { handbrake = true, speed = 0 })
     check(stF.rpm < r1, "a car's own revFall drops the revs faster in neutral")
   `)
   console.log(failed ? `${failed} check(s) failed` : 'all checks passed')

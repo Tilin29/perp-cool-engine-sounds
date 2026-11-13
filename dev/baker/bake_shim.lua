@@ -51,6 +51,7 @@ function cvMeta:GetBool() return (tonumber(self.v) or 0) ~= 0 end
 function cvMeta:GetString() return tostring(self.v) end
 function CreateClientConVar(name, def) local c = CV[name] or setmetatable({ v = def }, cvMeta) CV[name] = c return c end
 CreateConVar = CreateClientConVar
+FCVAR_NONE, FCVAR_ARCHIVE, FCVAR_REPLICATED = 0, 128, 8192
 function GetConVar(name) return CV[name] end
 cvars = { AddChangeCallback = function() end }
 concommand = { Add = function() end }

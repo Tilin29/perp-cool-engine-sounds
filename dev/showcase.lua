@@ -140,8 +140,8 @@ while true do
   now = now + dt
   run("Think")
   local c = AUDIO_ENGINE.ClientCars[car]
-  local st = c.st
-  log:write(string.format("%.3f,%.1f,%.0f,%d,%.2f,%.2f,%s\n", now, c.v * 3.6, st.rpm, st.gear, st.thr, st.soundThr, st.phase))
+  local st = c.engineState
+  log:write(string.format("%.3f,%.1f,%.0f,%d,%.2f,%.2f,%s\n", now, c.speedAlongNose * 3.6, st.rpm, st.gear, st.throttle, st.soundThrottle, st.phase))
   local n = SR / FPS
   for i = 1, n do out[#out + 1] = 0 end
   mix(n, out)

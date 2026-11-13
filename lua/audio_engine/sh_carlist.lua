@@ -6,7 +6,7 @@
 	turbo preset; the turbo itself is a shared sound, so it never costs a new engine.
 
 	Cars only get the procedural engine once they are registered with their model. All of them
-	are, from E.CAR_MODELS at the bottom of this file. To add another car, register it by name:
+	are, from AudioEngine.CAR_MODELS at the bottom of this file. To add another car, register it by name:
 
 	    AUDIO_ENGINE.RegisterCarNamed("models/tdmcars/458spider.mdl", "Ferrari 458 Spider")
 
@@ -20,194 +20,194 @@
 ]]
 
 AUDIO_ENGINE = AUDIO_ENGINE or {}
-local E = AUDIO_ENGINE
+local AudioEngine = AUDIO_ENGINE
 
 -- character: the car's own exhaust voice over its engine type's (cl_synth.lua CHARACTER: f1, f2,
 -- f3, w, o1, o05; any left out keep the type's). A new sound: re-bake. dev/tone_studio.html edits it
-local function P(preset, stock, character) return { preset = preset, stock = stock, character = character } end
+local function engineEntry(preset, stock, character) return { preset = preset, stock = stock, character = character } end
 
-E.CAR_ENGINES = {
-	["Alfa Romeo 33 Stradale (1967)"] = P("v8flat", { redline = 8800 }),
-	["Alfa Romeo Giulietta"] = P("i4t"),
-	["Aston Martin DB5"] = P("i6", { redline = 5500 }),
-	["Aston Martin DBS"] = P("v12na", { redline = 7000 }),
-	["Aston Martin Rapide"] = P("v12na", { redline = 7000 }),
-	["Aston Martin V12 Vantage"] = P("v12na", { redline = 7000 }),
-	["Audi R8 Plus"] = P("v10"),
-	["Audi R8 Spyder"] = P("v10"),
-	["Audi R8 V10"] = P("v10"),
-	["Audi RS4 Avant"] = P("v8s"),
-	["Audi S5"] = P("v8s", { redline = 7000 }),
-	["Audi TT 2007"] = P("i4t"),
-	["BMW 1M"] = P("i6t"),
-	["BMW 340i"] = P("i6t"),
-	["BMW 507"] = P("v8r", { redline = 5000 }),
-	["BMW M1"] = P("i6"),
-	["BMW M3 E92"] = P("v8s", { redline = 8400 }),
-	["BMW M5 E34"] = P("i6"),
-	["BMW M5 E60"] = P("v10"),
-	["BMW M6 2013"] = P("v8xt"),
-	["Bowler EXR-S"] = P("v8p"),
-	["Bugatti EB110"] = P("v12t"),
+AudioEngine.CAR_ENGINES = {
+	["Alfa Romeo 33 Stradale (1967)"] = engineEntry("v8flat", { redline = 8800 }),
+	["Alfa Romeo Giulietta"] = engineEntry("i4t"),
+	["Aston Martin DB5"] = engineEntry("i6", { redline = 5500 }),
+	["Aston Martin DBS"] = engineEntry("v12na", { redline = 7000 }),
+	["Aston Martin Rapide"] = engineEntry("v12na", { redline = 7000 }),
+	["Aston Martin V12 Vantage"] = engineEntry("v12na", { redline = 7000 }),
+	["Audi R8 Plus"] = engineEntry("v10"),
+	["Audi R8 Spyder"] = engineEntry("v10"),
+	["Audi R8 V10"] = engineEntry("v10"),
+	["Audi RS4 Avant"] = engineEntry("v8s"),
+	["Audi S5"] = engineEntry("v8s", { redline = 7000 }),
+	["Audi TT 2007"] = engineEntry("i4t"),
+	["BMW 1M"] = engineEntry("i6t"),
+	["BMW 340i"] = engineEntry("i6t"),
+	["BMW 507"] = engineEntry("v8r", { redline = 5000 }),
+	["BMW M1"] = engineEntry("i6"),
+	["BMW M3 E92"] = engineEntry("v8s", { redline = 8400 }),
+	["BMW M5 E34"] = engineEntry("i6"),
+	["BMW M5 E60"] = engineEntry("v10"),
+	["BMW M6 2013"] = engineEntry("v8xt"),
+	["Bowler EXR-S"] = engineEntry("v8p"),
+	["Bugatti EB110"] = engineEntry("v12t"),
 	-- tuned in dev/tone_studio.html
-	["Bugatti Veyron 16.4"] = P("w16", { popTone = 0.65, tone = 0.4, gurgle = 0.2 },
+	["Bugatti Veyron 16.4"] = engineEntry("w16", { popTone = 0.65, tone = 0.4, gurgle = 0.2 },
 		{ f1 = 66, f2 = 486, f3 = 224, w = 0.88, o1 = 0.23, o05 = 0.42 }),
-	["Bugatti Veyron SS"] = P("w16"),
-	["Cadillac Escalade 2012"] = P("v8x"),
-	["Chevrolet Blazer"] = P("v6", { redline = 5000 }),
-	["Chevrolet C10"] = P("v8x", { redline = 5000 }),
-	["Chevrolet Camaro SS 69"] = P("v8m"),
-	["Chevrolet Camaro ZL1"] = P("v8p"),
-	["Chevrolet Chevelle SS"] = P("v8m"),
-	["Chevrolet Corvette GSC"] = P("v8p"),
-	["Chevrolet Corvette Stingray 427"] = P("v8m"),
-	["Chevrolet Impala SS 96"] = P("v8r", { redline = 5000 }),
-	["Chevrolet Spark"] = P("i4q"),
-	["Chrysler 300C"] = P("v8r"),
-	["Chrysler PT Cruiser"] = P("i4w"),
-	["Citroen C1"] = P("i3"),
-	["Citroen C4"] = P("i4w"),
-	["DeLorean DMC-12"] = P("v6odd"),
-	["Dodge Challenger 1970"] = P("v8m"),
-	["Dodge Challenger 2015"] = P("v8p"),
-	["Dodge Charger 2012"] = P("v8p"),
-	["Dodge Charger SRT-8"] = P("v8p"),
-	["Dodge RAM SRT10"] = P("v10l"),
-	["Dodge Viper GTS"] = P("v10l"),
-	["Dundreary Limousine"] = P("v8r"),
-	["Ferrari 250 GTO"] = P("v12na", { redline = 7500 }),
-	["Ferrari 250GT"] = P("v12na", { redline = 7000 }),
-	["Ferrari 458 Spider"] = P("v8flat", { redline = 9000 }),
-	["Ferrari 512 TR"] = P("f12"),
-	["Ferrari Enzo"] = P("v12na"),
-	["Ferrari F12 Berlinetta"] = P("v12na", { redline = 8700 }),
-	["Ferrari F430"] = P("v8flat"),
-	["Ferrari F50"] = P("v12na", { redline = 8500 }),
-	["Ferrari LaFerrari"] = P("v12na", { redline = 9200 }),
-	["Ford Crown Victoria"] = P("v8r", { redline = 5000 }),
-	["Ford Deluxe Coupe 1940"] = P("v8m", { redline = 4000 }),
-	["Ford F100"] = P("v8x", { redline = 5000 }),
-	["Ford F350"] = P("v8x", { redline = 5000 }),
-	["Ford Focus RS"] = P("i5t"),
-	["Ford Focus SVT"] = P("i4s", { redline = 7200 }),
-	["Ford GT 05"] = P("v8p", { redline = 6500 }),
-	["Ford Mustang GT"] = P("v8p", { redline = 7000 }),
-	["Ford Raptor SVT"] = P("v8x"),
-	["Ford Shelby GT500"] = P("v8m"),
-	["Ford Transit"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["GMC Sierra"] = P("v8x"),
-	["GMC Syclone"] = P("v6t", { redline = 5000 }),
-	["GMC Vandura"] = P("v8x", { redline = 5000 }),
-	["Holden HSV GTS"] = P("v8p"),
-	["Holden HSV W427"] = P("v8p", { redline = 6500 }),
-	["Honda CR-X SiR"] = P("i4s", { redline = 8000 }),
-	["Honda Civic Type R"] = P("i4s"),
-	["Honda Civic Type R 1997"] = P("i4s"),
-	["Honda S2000"] = P("i4s", { redline = 9000 }),
-	["Hudson Hornet"] = P("i6", { redline = 4500, tone = 0.4 }),
-	["Hummer H1"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
-	["Jaguar E-Type"] = P("i6", { redline = 6000 }),
-	["Jaguar F-Type"] = P("v8p", { redline = 6500 }),
-	["Jeep Grand Cherokee"] = P("v8x"),
-	["Jeep Wrangler"] = P("i6", { redline = 5000 }),
-	["Kia Ceed"] = P("i4q"),
-	["Kia Forte Koup"] = P("i4q"),
-	["Lamborghini Diablo"] = P("v12na", { redline = 7000 }),
-	["Lamborghini Gallardo"] = P("v10"),
-	["Lamborghini Gallardo LP570-4 Spyder Performante"] = P("v10"),
-	["Lamborghini Miura"] = P("v12na", { redline = 7500 }),
-	["Lamborghini Murcielago"] = P("v12na"),
-	["Lamborghini Murcielago LP670-4 SV"] = P("v12na"),
-	["Lamborghini Reventon Roadster"] = P("v12na"),
-	["Land Rover Defender"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["Land Rover Range Rover 08"] = P("v8xt", { redline = 4500, tone = 0.4 }),
-	["Land Rover Range Rover 2012"] = P("v8xt", { redline = 6000 }),
-	["Lexus IS 300"] = P("i6"),
-	["Lexus IS F"] = P("v8s", { redline = 7000 }),
-	["Maserati Ghibli S"] = P("v6t", { redline = 6500 }),
-	["Maserati Quattroporte Sport GT S"] = P("v8s", { redline = 7200 }),
-	["Mazda Furai"] = P("r3"),
-	["Mazda MX-5 2007"] = P("i4", { redline = 7000 }),
-	["Mazda RX-8"] = P("r2"),
-	["Mazda RX7"] = P("r2t"),
-	["Mazda Speed 3 2009"] = P("i4t"),
-	["McLaren F1"] = P("v12na", { redline = 7500 }),
-	["McLaren P1"] = P("v8h", { turbo = true, bov = true, redline = 8500 }),
-	["Mercedes 300 SEL"] = P("v8r", { redline = 5000 }),
-	["Mercedes 300SL Gullwing Coupe"] = P("i6", { redline = 6000 }),
-	["Mercedes C32 AMG"] = P("v6", { redline = 6200 }),
-	["Mercedes E63 AMG"] = P("v8s", { redline = 7200 }),
-	["Mercedes G-Class"] = P("v8x"),
-	["Mercedes ML63 AMG"] = P("v8s", { redline = 7200 }),
-	["Mercedes McLaren SLR"] = P("v8r", { redline = 6500 }),
-	["Mercedes SL65 AMG"] = P("sl65"),
-	["Mercedes SLS AMG"] = P("v8s", { redline = 7200 }),
-	["Mini Clubman"] = P("i4w"),
-	["Mini Cooper 1965"] = P("i4", { redline = 6000 }),
-	["Mini Cooper S 2011"] = P("i4st"),
-	["Mini Coupe"] = P("i4st"),
-	["Mitsubishi Colt Ralliart"] = P("i4st"),
-	["Mitsubishi Eclipse GSX"] = P("i4t"),
-	["Mitsubishi Eclipse GT"] = P("v6"),
-	["Mitsubishi Lancer Evo VIII"] = P("i4t"),
-	["Mitsubishi Lancer Evo X"] = P("i4t"),
-	["Morgan Aero SS"] = P("v8p", { redline = 6500 }),
-	["Nissan 350z"] = P("v6", { redline = 7000 }),
-	["Nissan 370Z"] = P("v6", { redline = 7500 }),
-	["Nissan GT-R SpecV"] = P("v6t"),
-	["Nissan Leaf"] = P("ev", { redline = 10400 }),
-	["Nissan Silvia"] = P("i4t"),
-	["Nissan Skyline R34"] = P("i6t", { redline = 8000 }),
-	["Noble M600"] = P("v8xt"),
-	["Pagani Zonda C12"] = P("v12na", { redline = 7500 }),
-	["Pontiac Fiero GT"] = P("v6", { redline = 5500 }),
-	["Pontiac Firebird Trans Am"] = P("v8m"),
-	["Porsche 911 GT3"] = P("f6"),
-	["Porsche 918 Spyder"] = P("v8h"),
-	["Porsche 997 GT3"] = P("f6", { redline = 8400 }),
-	["Porsche Carrera GT"] = P("v10"),
-	["Porsche Cayenne Turbo 2012"] = P("v8xt"),
-	["Porsche Cayenne Turbo S"] = P("v8xt"),
-	["Scion FR-S"] = P("f4"),
-	["Scion tC"] = P("i4w"),
-	["Scion xD"] = P("i4q"),
-	["Shelby 1000"] = P("v8m", { redline = 6500 }),
-	["Subaru Impreza WRX STI"] = P("boxer"),
-	["Subaru Legacy GT 2010"] = P("boxer"),
-	["Subaru Legacy RS 1990"] = P("boxer"),
-	["Tesla Model S"] = P("ev"),
-	["Toyota FJ Cruiser"] = P("v6"),
-	["Toyota MR2 GT"] = P("i4t"),
-	["Toyota Prius"] = P("i4h"),
-	["Toyota Supra"] = P("i6t"),
-	["Vauxhall Agila"] = P("i3"),
-	["Vauxhall Astra"] = P("i4w"),
-	["Vauxhall Corsa"] = P("i4q"),
-	["Vauxhall Insignia"] = P("i4t"),
-	["Volkswagen Beetle 1967"] = P("f4air"),
-	["Volkswagen Camper 1965"] = P("f4air"),
-	["Volkswagen Golf GTI 2014"] = P("i4st"),
-	["Volkswagen Golf MKII"] = P("i4w"),
-	["Volkswagen Golf MKIII"] = P("i4w"),
-	["Volkswagen New Beetle"] = P("i4w"),
-	["Volkswagen Scirocco GT"] = P("i4st"),
-	["Volvo 242 Turbo"] = P("i4t", { redline = 6000 }),
-	["Volvo 850R"] = P("i5t"),
-	["Volvo S60"] = P("i5t"),
+	["Bugatti Veyron SS"] = engineEntry("w16"),
+	["Cadillac Escalade 2012"] = engineEntry("v8x"),
+	["Chevrolet Blazer"] = engineEntry("v6", { redline = 5000 }),
+	["Chevrolet C10"] = engineEntry("v8x", { redline = 5000 }),
+	["Chevrolet Camaro SS 69"] = engineEntry("v8m"),
+	["Chevrolet Camaro ZL1"] = engineEntry("v8p"),
+	["Chevrolet Chevelle SS"] = engineEntry("v8m"),
+	["Chevrolet Corvette GSC"] = engineEntry("v8p"),
+	["Chevrolet Corvette Stingray 427"] = engineEntry("v8m"),
+	["Chevrolet Impala SS 96"] = engineEntry("v8r", { redline = 5000 }),
+	["Chevrolet Spark"] = engineEntry("i4q"),
+	["Chrysler 300C"] = engineEntry("v8r"),
+	["Chrysler PT Cruiser"] = engineEntry("i4w"),
+	["Citroen C1"] = engineEntry("i3"),
+	["Citroen C4"] = engineEntry("i4w"),
+	["DeLorean DMC-12"] = engineEntry("v6odd"),
+	["Dodge Challenger 1970"] = engineEntry("v8m"),
+	["Dodge Challenger 2015"] = engineEntry("v8p"),
+	["Dodge Charger 2012"] = engineEntry("v8p"),
+	["Dodge Charger SRT-8"] = engineEntry("v8p"),
+	["Dodge RAM SRT10"] = engineEntry("v10l"),
+	["Dodge Viper GTS"] = engineEntry("v10l"),
+	["Dundreary Limousine"] = engineEntry("v8r"),
+	["Ferrari 250 GTO"] = engineEntry("v12na", { redline = 7500 }),
+	["Ferrari 250GT"] = engineEntry("v12na", { redline = 7000 }),
+	["Ferrari 458 Spider"] = engineEntry("v8flat", { redline = 9000 }),
+	["Ferrari 512 TR"] = engineEntry("f12"),
+	["Ferrari Enzo"] = engineEntry("v12na"),
+	["Ferrari F12 Berlinetta"] = engineEntry("v12na", { redline = 8700 }),
+	["Ferrari F430"] = engineEntry("v8flat"),
+	["Ferrari F50"] = engineEntry("v12na", { redline = 8500 }),
+	["Ferrari LaFerrari"] = engineEntry("v12na", { redline = 9200 }),
+	["Ford Crown Victoria"] = engineEntry("v8r", { redline = 5000 }),
+	["Ford Deluxe Coupe 1940"] = engineEntry("v8m", { redline = 4000 }),
+	["Ford F100"] = engineEntry("v8x", { redline = 5000 }),
+	["Ford F350"] = engineEntry("v8x", { redline = 5000 }),
+	["Ford Focus RS"] = engineEntry("i5t"),
+	["Ford Focus SVT"] = engineEntry("i4s", { redline = 7200 }),
+	["Ford GT 05"] = engineEntry("v8p", { redline = 6500 }),
+	["Ford Mustang GT"] = engineEntry("v8p", { redline = 7000 }),
+	["Ford Raptor SVT"] = engineEntry("v8x"),
+	["Ford Shelby GT500"] = engineEntry("v8m"),
+	["Ford Transit"] = engineEntry("i4t", { redline = 4500, tone = 0.3 }),
+	["GMC Sierra"] = engineEntry("v8x"),
+	["GMC Syclone"] = engineEntry("v6t", { redline = 5000 }),
+	["GMC Vandura"] = engineEntry("v8x", { redline = 5000 }),
+	["Holden HSV GTS"] = engineEntry("v8p"),
+	["Holden HSV W427"] = engineEntry("v8p", { redline = 6500 }),
+	["Honda CR-X SiR"] = engineEntry("i4s", { redline = 8000 }),
+	["Honda Civic Type R"] = engineEntry("i4s"),
+	["Honda Civic Type R 1997"] = engineEntry("i4s"),
+	["Honda S2000"] = engineEntry("i4s", { redline = 9000 }),
+	["Hudson Hornet"] = engineEntry("i6", { redline = 4500, tone = 0.4 }),
+	["Hummer H1"] = engineEntry("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
+	["Jaguar E-Type"] = engineEntry("i6", { redline = 6000 }),
+	["Jaguar F-Type"] = engineEntry("v8p", { redline = 6500 }),
+	["Jeep Grand Cherokee"] = engineEntry("v8x"),
+	["Jeep Wrangler"] = engineEntry("i6", { redline = 5000 }),
+	["Kia Ceed"] = engineEntry("i4q"),
+	["Kia Forte Koup"] = engineEntry("i4q"),
+	["Lamborghini Diablo"] = engineEntry("v12na", { redline = 7000 }),
+	["Lamborghini Gallardo"] = engineEntry("v10"),
+	["Lamborghini Gallardo LP570-4 Spyder Performante"] = engineEntry("v10"),
+	["Lamborghini Miura"] = engineEntry("v12na", { redline = 7500 }),
+	["Lamborghini Murcielago"] = engineEntry("v12na"),
+	["Lamborghini Murcielago LP670-4 SV"] = engineEntry("v12na"),
+	["Lamborghini Reventon Roadster"] = engineEntry("v12na"),
+	["Land Rover Defender"] = engineEntry("i4t", { redline = 4500, tone = 0.3 }),
+	["Land Rover Range Rover 08"] = engineEntry("v8xt", { redline = 4500, tone = 0.4 }),
+	["Land Rover Range Rover 2012"] = engineEntry("v8xt", { redline = 6000 }),
+	["Lexus IS 300"] = engineEntry("i6"),
+	["Lexus IS F"] = engineEntry("v8s", { redline = 7000 }),
+	["Maserati Ghibli S"] = engineEntry("v6t", { redline = 6500 }),
+	["Maserati Quattroporte Sport GT S"] = engineEntry("v8s", { redline = 7200 }),
+	["Mazda Furai"] = engineEntry("r3"),
+	["Mazda MX-5 2007"] = engineEntry("i4", { redline = 7000 }),
+	["Mazda RX-8"] = engineEntry("r2"),
+	["Mazda RX7"] = engineEntry("r2t"),
+	["Mazda Speed 3 2009"] = engineEntry("i4t"),
+	["McLaren F1"] = engineEntry("v12na", { redline = 7500 }),
+	["McLaren P1"] = engineEntry("v8h", { turbo = true, bov = true, redline = 8500 }),
+	["Mercedes 300 SEL"] = engineEntry("v8r", { redline = 5000 }),
+	["Mercedes 300SL Gullwing Coupe"] = engineEntry("i6", { redline = 6000 }),
+	["Mercedes C32 AMG"] = engineEntry("v6", { redline = 6200 }),
+	["Mercedes E63 AMG"] = engineEntry("v8s", { redline = 7200 }),
+	["Mercedes G-Class"] = engineEntry("v8x"),
+	["Mercedes ML63 AMG"] = engineEntry("v8s", { redline = 7200 }),
+	["Mercedes McLaren SLR"] = engineEntry("v8r", { redline = 6500 }),
+	["Mercedes SL65 AMG"] = engineEntry("sl65"),
+	["Mercedes SLS AMG"] = engineEntry("v8s", { redline = 7200 }),
+	["Mini Clubman"] = engineEntry("i4w"),
+	["Mini Cooper 1965"] = engineEntry("i4", { redline = 6000 }),
+	["Mini Cooper S 2011"] = engineEntry("i4st"),
+	["Mini Coupe"] = engineEntry("i4st"),
+	["Mitsubishi Colt Ralliart"] = engineEntry("i4st"),
+	["Mitsubishi Eclipse GSX"] = engineEntry("i4t"),
+	["Mitsubishi Eclipse GT"] = engineEntry("v6"),
+	["Mitsubishi Lancer Evo VIII"] = engineEntry("i4t"),
+	["Mitsubishi Lancer Evo X"] = engineEntry("i4t"),
+	["Morgan Aero SS"] = engineEntry("v8p", { redline = 6500 }),
+	["Nissan 350z"] = engineEntry("v6", { redline = 7000 }),
+	["Nissan 370Z"] = engineEntry("v6", { redline = 7500 }),
+	["Nissan GT-R SpecV"] = engineEntry("v6t"),
+	["Nissan Leaf"] = engineEntry("ev", { redline = 10400 }),
+	["Nissan Silvia"] = engineEntry("i4t"),
+	["Nissan Skyline R34"] = engineEntry("i6t", { redline = 8000 }),
+	["Noble M600"] = engineEntry("v8xt"),
+	["Pagani Zonda C12"] = engineEntry("v12na", { redline = 7500 }),
+	["Pontiac Fiero GT"] = engineEntry("v6", { redline = 5500 }),
+	["Pontiac Firebird Trans Am"] = engineEntry("v8m"),
+	["Porsche 911 GT3"] = engineEntry("f6"),
+	["Porsche 918 Spyder"] = engineEntry("v8h"),
+	["Porsche 997 GT3"] = engineEntry("f6", { redline = 8400 }),
+	["Porsche Carrera GT"] = engineEntry("v10"),
+	["Porsche Cayenne Turbo 2012"] = engineEntry("v8xt"),
+	["Porsche Cayenne Turbo S"] = engineEntry("v8xt"),
+	["Scion FR-S"] = engineEntry("f4"),
+	["Scion tC"] = engineEntry("i4w"),
+	["Scion xD"] = engineEntry("i4q"),
+	["Shelby 1000"] = engineEntry("v8m", { redline = 6500 }),
+	["Subaru Impreza WRX STI"] = engineEntry("boxer"),
+	["Subaru Legacy GT 2010"] = engineEntry("boxer"),
+	["Subaru Legacy RS 1990"] = engineEntry("boxer"),
+	["Tesla Model S"] = engineEntry("ev"),
+	["Toyota FJ Cruiser"] = engineEntry("v6"),
+	["Toyota MR2 GT"] = engineEntry("i4t"),
+	["Toyota Prius"] = engineEntry("i4h"),
+	["Toyota Supra"] = engineEntry("i6t"),
+	["Vauxhall Agila"] = engineEntry("i3"),
+	["Vauxhall Astra"] = engineEntry("i4w"),
+	["Vauxhall Corsa"] = engineEntry("i4q"),
+	["Vauxhall Insignia"] = engineEntry("i4t"),
+	["Volkswagen Beetle 1967"] = engineEntry("f4air"),
+	["Volkswagen Camper 1965"] = engineEntry("f4air"),
+	["Volkswagen Golf GTI 2014"] = engineEntry("i4st"),
+	["Volkswagen Golf MKII"] = engineEntry("i4w"),
+	["Volkswagen Golf MKIII"] = engineEntry("i4w"),
+	["Volkswagen New Beetle"] = engineEntry("i4w"),
+	["Volkswagen Scirocco GT"] = engineEntry("i4st"),
+	["Volvo 242 Turbo"] = engineEntry("i4t", { redline = 6000 }),
+	["Volvo 850R"] = engineEntry("i5t"),
+	["Volvo S60"] = engineEntry("i5t"),
 
 	-- work and emergency vehicles on their own models (not in the engine list). They reuse
 	-- engines already baked (the same sound at a lower redline needs no new bank):
 	-- the diesels as the Hummer H1's, the petrol V8s as the Ford F350's, the vans as the Transit's
-	["Ambulance"] = P("v8x", { redline = 5000 }),   -- GTA IV ambulance (Ford E-Series type)
-	["Courier Truck"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
-	["Fire Truck"] = P("v8xt", { redline = 3000, idle = 650, tone = 0.35 }),
-	["Ford F350 Fire Rescue"] = P("v8x", { redline = 5000 }),
-	["Ford F350 Tow Truck"] = P("v8x", { redline = 5000 }),
-	["Ford F450 Ambulance"] = P("v8x", { redline = 5000 }),
-	["Ford Transit 2016 (Police)"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["Ford Transit 2016 (Prisoner Transport)"] = P("i4t", { redline = 4500, tone = 0.3 }),
-	["Lenco BearCat"] = P("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),   -- 6.7 diesel V8
-	["SWAT Stockade"] = P("v8xt", { redline = 3200, idle = 650, tone = 0.35 }),   -- GTA IV police stockade
+	["Ambulance"] = engineEntry("v8x", { redline = 5000 }),   -- GTA IV ambulance (Ford E-Series type)
+	["Courier Truck"] = engineEntry("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),
+	["Fire Truck"] = engineEntry("v8xt", { redline = 3000, idle = 650, tone = 0.35 }),
+	["Ford F350 Fire Rescue"] = engineEntry("v8x", { redline = 5000 }),
+	["Ford F350 Tow Truck"] = engineEntry("v8x", { redline = 5000 }),
+	["Ford F450 Ambulance"] = engineEntry("v8x", { redline = 5000 }),
+	["Ford Transit 2016 (Police)"] = engineEntry("i4t", { redline = 4500, tone = 0.3 }),
+	["Ford Transit 2016 (Prisoner Transport)"] = engineEntry("i4t", { redline = 4500, tone = 0.3 }),
+	["Lenco BearCat"] = engineEntry("v8xt", { redline = 3500, idle = 650, tone = 0.35 }),   -- 6.7 diesel V8
+	["SWAT Stockade"] = engineEntry("v8xt", { redline = 3200, idle = 650, tone = 0.35 }),   -- GTA IV police stockade
 }
 
 --[[
@@ -218,8 +218,8 @@ E.CAR_ENGINES = {
 	own pop values are only the starting point when an engine is retuned in the menu.
 	Frequency and volume are runtime settings: changing them needs no re-bake.
 ]]
-E.STOCK_POP_VOLUME = 0.7   -- stock pops & bangs volume (the menu's 100% is 1)
-E.CAR_POPS = {
+AudioEngine.STOCK_POP_VOLUME = 0.7   -- stock pops & bangs volume (the menu's 100% is 1)
+AudioEngine.CAR_POPS = {
 	-- frequent: famous for it
 	["Jaguar F-Type"] = 0.6,
 	["Mazda Furai"] = 0.6,
@@ -315,8 +315,8 @@ E.CAR_POPS = {
 	audible stock blow-off or wastegate sound get it. Every other turbo car keeps the turbo
 	whistle without it. Runtime only: no re-bake.
 ]]
-E.STOCK_BOV_VOLUME = 0.6   -- stock blow-off volume (the menu's 100% is 1)
-E.CAR_BOV = {
+AudioEngine.STOCK_BOV_VOLUME = 0.6   -- stock blow-off volume (the menu's 100% is 1)
+AudioEngine.CAR_BOV = {
 	["Bugatti Veyron 16.4"] = true,
 	["Bugatti Veyron SS"] = true,
 	["Bugatti EB110"] = true,
@@ -335,7 +335,7 @@ E.CAR_BOV = {
 	preset turbo is switched off (Range Rover 2012: on the twin-turbo V8 preset). Runtime only:
 	no re-bake.
 ]]
-E.CAR_SUPERCHARGER = {
+AudioEngine.CAR_SUPERCHARGER = {
 	["Ford GT 05"] = "sport",              -- 5.4 V8, Lysholm twin-screw
 	["Mercedes McLaren SLR"] = "sport",    -- 5.4 V8, twin-screw
 	["Mercedes C32 AMG"] = "sport",        -- 3.2 V6, twin-screw
@@ -352,7 +352,7 @@ E.CAR_SUPERCHARGER = {
 }
 
 --[[
-	Whine pitch against the others (cfg.scPitch, cl_engine), for a blower geared unlike the
+	Whine pitch against the others (config.scPitch, cl_engine), for a blower geared unlike the
 	~20 lobe passes per crank turn the whine is tuned to. A Roots / TVS blower (two rotors, each
 	pushing its own pockets) passes 2 x lobes x drive ratio a turn, a twin-screw male lobes x ratio.
 	  Eaton TVS (LSA: ZL1, HSV GTS; AJ133: F-Type, Bowler, Range Rover; GT500): 4 lobes, ~2.6:1 =
@@ -365,7 +365,7 @@ E.CAR_SUPERCHARGER = {
 	  ~7 per turn: the low classic whine
 	Shelby 1000 (twin-screw, drive unknown) is left as tuned. Runtime only.
 ]]
-E.SC_PITCH = {
+AudioEngine.SC_PITCH = {
 	["Mercedes McLaren SLR"] = 0.52,
 	["Mercedes C32 AMG"] = 0.52,
 	["Ford GT 05"] = 0.52,
@@ -374,30 +374,30 @@ E.SC_PITCH = {
 	["Pontiac Firebird Trans Am"] = 0.35,
 }
 
--- gear count with fitted gearing (sh_presets.lua E.FitGearEnds), instead of the one the top speed
--- gives (at most E.GEAR_FIT.maxCount 5; set here 2..8). Runtime only: no re-bake
-E.CAR_GEARS = {
+-- gear count with fitted gearing (sh_presets.lua AudioEngine.FitGearEnds), instead of the one the top speed
+-- gives (at most AudioEngine.GEAR_FIT.maxCount 5; set here 2..8). Runtime only: no re-bake
+AudioEngine.CAR_GEARS = {
 	["Mazda Furai"] = 6,
 	["Mini Cooper 1965"] = 3,
 	["Mini Cooper S 2011"] = 3,
 }
 
 --[[
-	A car's own gearing, set by shift speed per gear (sh_presets.lua E.ApplyGearing): replaces the
+	A car's own gearing, set by shift speed per gear (sh_presets.lua AudioEngine.ApplyGearing): replaces the
 	fitted gearing. Made with the debug module's gearing editor (audio_engine_debug_menu), which
 	copies an entry for this table. Runtime only: no re-bake.
 	  ["BMW 1M"] = { topRpm = 6000, { mph = 30, rpm = 6500 }, { mph = 52, rpm = 6600, down = 18 }, ..., { down = 70 } },
 ]]
-E.CAR_GEARING = {
+AudioEngine.CAR_GEARING = {
 }
 
 --[[
 	How quickly a car's engine revs up and drops back to idle when revved standing still, as
-	sh_drivetrain.lua DT.REV (rise / fall, torque units; default 500 / 500). Made with the debug
+	sh_drivetrain.lua Drivetrain.REV (rise / fall, torque units; default 500 / 500). Made with the debug
 	module's rev response page. Runtime only.
 	  ["BMW 1M"] = { rise = 600, fall = 800 },
 ]]
-E.CAR_REV = {
+AudioEngine.CAR_REV = {
 }
 
 --[[
@@ -406,7 +406,7 @@ E.CAR_REV = {
 	homologation specials). Every other car starts with a short, gentle rise to just above idle.
 	Runtime only: the server picks the start, both start-ups are in every bank, so no re-bake.
 ]]
-E.CAR_EMOTION = {}
+AudioEngine.CAR_EMOTION = {}
 for _, name in ipairs({
 	-- supercars and exotics
 	"Alfa Romeo 33 Stradale (1967)", "Aston Martin DBS", "Aston Martin Rapide", "Aston Martin V12 Vantage",
@@ -435,9 +435,9 @@ for _, name in ipairs({
 	-- hot hatches and rally specials
 	"Ford Focus RS", "Honda Civic Type R", "Honda Civic Type R 1997", "Mitsubishi Lancer Evo VIII",
 	"Mitsubishi Lancer Evo X", "Subaru Impreza WRX STI",
-}) do E.CAR_EMOTION[name] = true end
+}) do AudioEngine.CAR_EMOTION[name] = true end
 -- and they carry further (Source sound level in dB; other cars 85, economy cars 80)
-E.EMOTION_SOUNDLEVEL = 92
+AudioEngine.EMOTION_SOUNDLEVEL = 92
 
 --[[
 	Economy cars: stock silencers and small engines sound duller and quieter than the presets,
@@ -448,8 +448,8 @@ E.EMOTION_SOUNDLEVEL = 92
 	  (a preset with economyTuned was tuned as an economy car: its tone and gurgle are kept)
 	  volume, soundLevel         (quieter, and carries less far; runtime)
 ]]
-E.ECONOMY_SOUND = { toneScale = 0.5, muffle = 0.7, gurgle = 0, volume = 0.8, soundLevel = 80 }
-E.ECONOMY = {
+AudioEngine.ECONOMY_SOUND = { toneScale = 0.5, muffle = 0.7, gurgle = 0, volume = 0.8, soundLevel = 80 }
+AudioEngine.ECONOMY = {
 	["Chevrolet Spark"] = true,
 	["Chrysler PT Cruiser"] = true,
 	["Citroen C1"] = true,
@@ -475,15 +475,15 @@ E.ECONOMY = {
 	which made these parts flap with every shift, and Source's own speed value folds some of them
 	back down at high speed (the R8 Plus and LaFerrari animations retract again near the top of
 	the range). On these cars the server drives the pose from speed instead (sv_engine.lua): the parts rise once the
-	car reaches E.WING_UP of its top speed and lower only under E.WING_DOWN_MPH (the gap stops them
+	car reaches AudioEngine.WING_UP of its top speed and lower only under AudioEngine.WING_DOWN_MPH (the gap stops them
 	flapping), the needles still sweep with speed inside each range.
 	{ rest from, rest to, up from, up to, pose = name if not vehicle_guage }: pose ranges where every part is fully down / fully up,
 	read from the blend animations of each model's vehicle_guage sequence (the TDM .mdl files).
 ]]
-E.WING_UP = 0.7
-E.WING_DOWN_MPH = 30
-E.WING_RATE = 0.25 -- pose range per second the parts travel
-E.GAUGE_PARTS = {
+AudioEngine.WING_UP = 0.7
+AudioEngine.WING_DOWN_MPH = 30
+AudioEngine.WING_RATE = 0.25 -- pose range per second the parts travel
+AudioEngine.GAUGE_PARTS = {
 	["Audi R8 Plus"] = { 0, 0.30, 0.45, 0.70 },                      -- Spoiler (down again past 0.8)
 	["Audi R8 V10"] = { 0, 0.40, 0.75, 1 },                          -- Spoiler1, Spoiler2
 	["Bugatti Veyron 16.4"] = { 0, 0.35, 0.65, 1 },                  -- Spoiler01-03
@@ -512,11 +512,11 @@ E.GAUGE_PARTS = {
 	the spoilerbrake pose (named twice in the model, the wing uses the first). SLR: its airbrake pose
 	compiled empty; the source data has the flap at 22.5 deg about its own z.
 ]]
-E.WING_BRAKE_HOLD = 0.5
-E.WING_BRAKE_MPH = 15
-E.WING_MAIN_RATE = 0.8 -- share of the travel per second (~1.3 s)
-E.WING_FLAP_RATE = 2   -- brake flap up per second (~0.5 s); folds at half this
-E.BRAKE_WINGS = {
+AudioEngine.WING_BRAKE_HOLD = 0.5
+AudioEngine.WING_BRAKE_MPH = 15
+AudioEngine.WING_MAIN_RATE = 0.8 -- share of the travel per second (~1.3 s)
+AudioEngine.WING_FLAP_RATE = 2   -- brake flap up per second (~0.5 s); folds at half this
+AudioEngine.BRAKE_WINGS = {
 	["McLaren P1"] = { flapPose = "spoilerbrake", tuck = {   -- placed with the bone editor (audio_engine_bonedump)
 		{ bone = "spoiler_main", pos = { 0, 9, -13 } },
 		{ bone = "spoiler", pos = { -0.34, 1.88, 0.04 }, ang = { -0.16, -24.58, 0 } },
@@ -525,69 +525,76 @@ E.BRAKE_WINGS = {
 }
 
 -- speed rule shared by all wings: up from WING_UP of the top speed, down under WING_DOWN_MPH
-function E.WingSpeedUp(veh, kmh, top)
-	local f = kmh / math.max(top or 250, 40)
-	if f >= E.WING_UP then veh.audioWingUp = true elseif kmh < E.WING_DOWN_MPH * 1.609344 then veh.audioWingUp = false end
-	return veh.audioWingUp or false, f
+function AudioEngine.WingSpeedUp(vehicle, speedKmh, topSpeed)
+	local topSpeedShare = speedKmh / math.max(topSpeed or 250, 40)
+	if topSpeedShare >= AudioEngine.WING_UP then
+		vehicle.audioWingUpLatched = true
+	elseif speedKmh < AudioEngine.WING_DOWN_MPH * 1.609344 then
+		vehicle.audioWingUpLatched = false
+	end
+	return vehicle.audioWingUpLatched or false, topSpeedShare
 end
 
 -- the vehicle_guage pose for a car with parts on it (run by the server, sv_engine.lua): kmh and
--- top speed in km/h; cl_engine glides to it at E.WING_RATE of the pose range per second (the
+-- top speed in km/h; cl_engine glides to it at AudioEngine.WING_RATE of the pose range per second (the
 -- parts take ~1-1.5 s)
-function E.WingPose(veh, gp, kmh, top)
-	local up, f = E.WingSpeedUp(veh, kmh, top)
-	if up then
-		return gp[3] + (gp[4] - gp[3]) * math.Clamp((f - E.WING_UP) / (1 - E.WING_UP), 0, 1)
+function AudioEngine.WingPose(vehicle, gaugeParts, speedKmh, topSpeed)
+	local wingUp, topSpeedShare = AudioEngine.WingSpeedUp(vehicle, speedKmh, topSpeed)
+	if wingUp then
+		return gaugeParts[3] + (gaugeParts[4] - gaugeParts[3]) * math.Clamp((topSpeedShare - AudioEngine.WING_UP) / (1 - AudioEngine.WING_UP), 0, 1)
 	end
-	return gp[1] + (gp[2] - gp[1]) * math.Clamp(f / E.WING_UP, 0, 1)
+	return gaugeParts[1] + (gaugeParts[2] - gaugeParts[1]) * math.Clamp(topSpeedShare / AudioEngine.WING_UP, 0, 1)
 end
 
 -- register a car's model with the engine from the list above
-function E.RegisterCarNamed(model, carName, extra)
-	local e = E.CAR_ENGINES[carName]
-	if not e then
+function AudioEngine.RegisterCarNamed(model, carName, extra)
+	local listed = AudioEngine.CAR_ENGINES[carName]
+	if not listed then
 		ErrorNoHalt("[Audio Engine] no engine listed for '" .. tostring(carName) .. "'\n")
 		return
 	end
-	local cfg = {
+	local carConfig = {
 		carId = string.lower((carName:gsub("[^%w]+", "_"))),
 		name = carName,
-		preset = e.preset,
-		stock = e.stock,
-		character = e.character,
-		stockPops = E.CAR_POPS[carName] or 0,
-		stockPopVol = E.STOCK_POP_VOLUME,
-		stockBov = E.CAR_BOV[carName] and true or false,
-		stockBovVol = E.STOCK_BOV_VOLUME,
-		supercharger = E.CAR_SUPERCHARGER[carName],
-		scPitch = E.SC_PITCH[carName],
-		emotionStart = E.CAR_EMOTION[carName] or false,
-		gaugeParts = E.GAUGE_PARTS[carName],
-		brakeWing = E.BRAKE_WINGS[carName],
-		gearCount = E.CAR_GEARS[carName],
-		gearing = E.CAR_GEARING[carName],
-		rev = E.CAR_REV[carName],
+		preset = listed.preset,
+		stock = listed.stock,
+		character = listed.character,
+		stockPops = AudioEngine.CAR_POPS[carName] or 0,
+		stockPopVol = AudioEngine.STOCK_POP_VOLUME,
+		stockBov = AudioEngine.CAR_BOV[carName] and true or false,
+		stockBovVol = AudioEngine.STOCK_BOV_VOLUME,
+		supercharger = AudioEngine.CAR_SUPERCHARGER[carName],
+		scPitch = AudioEngine.SC_PITCH[carName],
+		emotionStart = AudioEngine.CAR_EMOTION[carName] or false,
+		gaugeParts = AudioEngine.GAUGE_PARTS[carName],
+		brakeWing = AudioEngine.BRAKE_WINGS[carName],
+		gearCount = AudioEngine.CAR_GEARS[carName],
+		gearing = AudioEngine.CAR_GEARING[carName],
+		rev = AudioEngine.CAR_REV[carName],
 		topSpeed = "auto",
 		wheelRadius = 0.33,
-		soundLevel = E.CAR_EMOTION[carName] and E.EMOTION_SOUNDLEVEL or 85,
+		soundLevel = AudioEngine.CAR_EMOTION[carName] and AudioEngine.EMOTION_SOUNDLEVEL or 85,
 		volume = 1.0,
 	}
-	local preset = E.EnginePreset(e.preset)
-	if E.ECONOMY[carName] then
-		local eco = E.ECONOMY_SOUND
+	local preset = AudioEngine.EnginePreset(listed.preset)
+	if AudioEngine.ECONOMY[carName] then
+		local economySound = AudioEngine.ECONOMY_SOUND
 		local stock = {}
-		for k, v in pairs(e.stock or {}) do stock[k] = v end
+		for key, value in pairs(listed.stock or {}) do stock[key] = value end
 		if not (preset and preset.economyTuned) then
-			stock.tone = (stock.tone or (preset and preset.tone) or 0.4) * eco.toneScale
-			stock.gurgle = eco.gurgle
+			stock.tone = (stock.tone or (preset and preset.tone) or 0.4) * economySound.toneScale
+			stock.gurgle = economySound.gurgle
 		end
-		cfg.stock = stock
-		cfg.volume, cfg.soundLevel, cfg.muffle, cfg.economy = eco.volume, eco.soundLevel, eco.muffle, true
+		carConfig.stock = stock
+		carConfig.volume = economySound.volume
+		carConfig.soundLevel = economySound.soundLevel
+		carConfig.muffle = economySound.muffle
+		carConfig.economy = true
 	end
 	-- a preset's own silencer (part of the sound: re-bake)
-	if preset and preset.muffle then cfg.muffle = preset.muffle end
-	for k, v in pairs(extra or {}) do cfg[k] = v end
-	return E.RegisterCar(model, cfg)
+	if preset and preset.muffle then carConfig.muffle = preset.muffle end
+	for key, value in pairs(extra or {}) do carConfig[key] = value end
+	return AudioEngine.RegisterCar(model, carConfig)
 end
 
 --[[
@@ -600,7 +607,7 @@ end
 	BearCat, ambulances, fire trucks, the stockade...) are listed here too, by their base script.
 	{ model, base vehicle script, wheel radius (m, from the script) }. Built by dev/perp_carmodels.py.
 ]]
-E.CAR_MODELS = {
+AudioEngine.CAR_MODELS = {
 	["Alfa Romeo 33 Stradale (1967)"] = { "models/tdmcars/alfa_stradale.mdl", "scripts/vehicles/tdmcars/alfa_stradale.txt", 0.368 },
 	["Alfa Romeo Giulietta"] = { "models/tdmcars/alfa_giulietta.mdl", "scripts/vehicles/tdmcars/alfa_giulietta.txt", 0.376 },
 	["Ambulance"] = { "models/sickness/meatwagon.mdl", "scripts/vehicles/perp2/ambulance.txt", 0.368 },
@@ -785,9 +792,9 @@ E.CAR_MODELS = {
 	the Crown Vic has the taxi on 11 and the police on 12). The engine follows the model, so they
 	sound like their car; the script only changes the handling. A car whose base script is
 	listed here (the ambulances, fire trucks, BearCat...) spawns from this tab only.
-	{ spawn name, car (E.CAR_MODELS), vehicle script, skin }. Built by dev/perp_carmodels.py.
+	{ spawn name, car (AudioEngine.CAR_MODELS), vehicle script, skin }. Built by dev/perp_carmodels.py.
 ]]
-E.JOB_VEHICLES = {
+AudioEngine.JOB_VEHICLES = {
 	{ "Ambulance", "Ambulance", "scripts/vehicles/perp2/ambulance.txt", 0 },
 	{ "Audi RS4 Avant First Responder", "Audi RS4 Avant", "scripts/vehicles/tdmcars/rs4avant_medic.txt", 11 },
 	{ "BMW 340i Police", "BMW 340i", "scripts/vehicles/tdmcars/bmw_340i_police.txt", 11 },
@@ -815,10 +822,10 @@ E.JOB_VEHICLES = {
 
 -- the stability assist on the PERP cars, with each car's own steering angles (sv_handling.lua).
 -- Never on spiked tyres: a stinger is meant to make the car hard to drive. false = off for all
-E.PERP_STABILITY = true
+AudioEngine.PERP_STABILITY = true
 
-for name, m in pairs(E.CAR_MODELS) do
-	local extra = { script = m[2], wheelRadius = m[3] or 0.36, perp = true }
-	if not E.PERP_STABILITY then extra.stability = false end
-	E.RegisterCarNamed(m[1], name, extra)
+for name, modelEntry in pairs(AudioEngine.CAR_MODELS) do
+	local extra = { script = modelEntry[2], wheelRadius = modelEntry[3] or 0.36, perp = true }
+	if not AudioEngine.PERP_STABILITY then extra.stability = false end
+	AudioEngine.RegisterCarNamed(modelEntry[1], name, extra)
 end

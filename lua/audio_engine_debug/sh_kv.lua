@@ -16,86 +16,86 @@
 	  comment the // comment after it on the same line, if any
 ]]
 
-local E = AUDIO_ENGINE
-local KV = {}
-E.KV = KV
+local AudioEngine = AUDIO_ENGINE
+local KeyValues = {}
+AudioEngine.KV = KeyValues
 
 -- what a value may be edited to (numbers, words, vectors "0 0 -5"): never quotes or braces
-function KV.ValidValue(v)
-	return type(v) == "string" and #v <= 64 and v:find("^[%w%s%.%-%+_]*$") ~= nil
+function KeyValues.ValidValue(value)
+	return type(value) == "string" and #value <= 64 and value:find("^[%w%s%.%-%+_]*$") ~= nil
 end
 
-function KV.Parse(text)
+function KeyValues.Parse(text)
 	local entries = {}
-	local n = #text
-	local i = 1
+	local textLength = #text
+	local position = 1
 	-- the stack of open blocks: { name, children = { name -> count }, keys = { lkey -> count }, axle }
 	local stack = { { name = "", children = {}, keys = {} } }
-	local pending   -- a key waiting for its value or block
+	local pendingKey   -- a key waiting for its value or block
 
 	local function lineEndComment(from)
-		local nl = text:find("\n", from, true) or (n + 1)
-		local rest = text:sub(from, nl - 1)
-		local c = rest:match("^[ \t]*//[ \t]*(.-)%s*$")
-		return c
+		local lineEnd = text:find("\n", from, true) or (textLength + 1)
+		local rest = text:sub(from, lineEnd - 1)
+		local comment = rest:match("^[ \t]*//[ \t]*(.-)%s*$")
+		return comment
 	end
 
-	while i <= n do
-		local c = text:sub(i, i)
-		if c:find("%s") then
-			i = i + 1
-		elseif text:sub(i, i + 1) == "//" then
-			i = (text:find("\n", i, true) or n) + 1
-		elseif c == "{" then
-			local top = stack[#stack]
-			local name = pending and pending.v:lower() or ""
-			top.children[name] = (top.children[name] or 0) + 1
-			local frame = { name = name, occ = top.children[name], children = {}, keys = {}, axle = top.axle }
-			if name == "axle" and #stack == 2 then frame.axle = frame.occ end
-			stack[#stack + 1] = frame
-			pending = nil
-			i = i + 1
-		elseif c == "}" then
+	while position <= textLength do
+		local character = text:sub(position, position)
+		if character:find("%s") then
+			position = position + 1
+		elseif text:sub(position, position + 1) == "//" then
+			position = (text:find("\n", position, true) or textLength) + 1
+		elseif character == "{" then
+			local currentBlock = stack[#stack]
+			local name = pendingKey and pendingKey.text:lower() or ""
+			currentBlock.children[name] = (currentBlock.children[name] or 0) + 1
+			local block = { name = name, occurrence = currentBlock.children[name], children = {}, keys = {}, axle = currentBlock.axle }
+			if name == "axle" and #stack == 2 then block.axle = block.occurrence end
+			stack[#stack + 1] = block
+			pendingKey = nil
+			position = position + 1
+		elseif character == "}" then
 			if #stack > 1 then stack[#stack] = nil end
-			pending = nil
-			i = i + 1
+			pendingKey = nil
+			position = position + 1
 		else
 			-- a string: quoted, or up to whitespace / brace / quote
-			local s, e, inner, quoted
-			if c == '"' then
-				local close = text:find('"', i + 1, true) or (n + 1)
-				s, e, inner, quoted = i + 1, close - 1, text:sub(i + 1, close - 1), true
-				i = close + 1
+			local valueStart, valueEnd, inner, quoted
+			if character == '"' then
+				local closingQuote = text:find('"', position + 1, true) or (textLength + 1)
+				valueStart, valueEnd, inner, quoted = position + 1, closingQuote - 1, text:sub(position + 1, closingQuote - 1), true
+				position = closingQuote + 1
 			else
-				local stop = text:find('[%s{}"]', i) or (n + 1)
-				s, e, inner, quoted = i, stop - 1, text:sub(i, stop - 1), false
-				i = stop
+				local tokenEnd = text:find('[%s{}"]', position) or (textLength + 1)
+				valueStart, valueEnd, inner, quoted = position, tokenEnd - 1, text:sub(position, tokenEnd - 1), false
+				position = tokenEnd
 			end
 			if inner:sub(1, 1) == "[" and not quoted then
 				-- a platform conditional ([$WIN32]) after a value: not a key or a value
-			elseif not pending then
-				pending = { v = inner }
+			elseif not pendingKey then
+				pendingKey = { text = inner }
 			else
-				local top = stack[#stack]
-				local lkey = pending.v:lower()
-				top.keys[lkey] = (top.keys[lkey] or 0) + 1
+				local currentBlock = stack[#stack]
+				local lowerKey = pendingKey.text:lower()
+				currentBlock.keys[lowerKey] = (currentBlock.keys[lowerKey] or 0) + 1
 				-- the block path without the root ("vehicle")
 				local parts, labels = {}, {}
-				for d = 3, #stack do
-					parts[#parts + 1] = stack[d].name
-					local f = stack[d]
-					local count = stack[d - 1].children[f.name] or 1
-					labels[#labels + 1] = (f.name == "axle" or count > 1) and (f.name .. " " .. f.occ) or f.name
+				for depth = 3, #stack do
+					parts[#parts + 1] = stack[depth].name
+					local blockFrame = stack[depth]
+					local count = stack[depth - 1].children[blockFrame.name] or 1
+					labels[#labels + 1] = (blockFrame.name == "axle" or count > 1) and (blockFrame.name .. " " .. blockFrame.occurrence) or blockFrame.name
 				end
 				entries[#entries + 1] = {
-					idx = #entries + 1,
+					index = #entries + 1,
 					path = table.concat(parts, "/"),
 					label = #labels > 0 and table.concat(labels, " > ") or (stack[2] and stack[2].name or ""),
-					key = pending.v, lkey = lkey, occ = top.keys[lkey], axle = top.axle,
-					value = inner, vs = s, ve = e, quoted = quoted,
-					comment = lineEndComment(i),
+					key = pendingKey.text, lowerKey = lowerKey, occurrence = currentBlock.keys[lowerKey], axle = currentBlock.axle,
+					value = inner, valueStart = valueStart, valueEnd = valueEnd, quoted = quoted,
+					comment = lineEndComment(position),
 				}
-				pending = nil
+				pendingKey = nil
 			end
 		end
 	end
@@ -103,23 +103,23 @@ function KV.Parse(text)
 end
 
 -- the text with new values put in: values[idx] = new value (unchanged entries left out)
-function KV.Rebuild(text, entries, values)
-	local order = {}
-	for _, e in ipairs(entries) do
-		if values[e.idx] ~= nil and values[e.idx] ~= e.value then order[#order + 1] = e end
+function KeyValues.Rebuild(text, entries, values)
+	local changed = {}
+	for _, entry in ipairs(entries) do
+		if values[entry.index] ~= nil and values[entry.index] ~= entry.value then changed[#changed + 1] = entry end
 	end
-	table.sort(order, function(a, b) return a.vs > b.vs end)
-	for _, e in ipairs(order) do
-		text = text:sub(1, e.vs - 1) .. values[e.idx] .. text:sub(e.ve + 1)
+	table.sort(changed, function(first, second) return first.valueStart > second.valueStart end)
+	for _, entry in ipairs(changed) do
+		text = text:sub(1, entry.valueStart - 1) .. values[entry.index] .. text:sub(entry.valueEnd + 1)
 	end
 	return text
 end
 
 -- do two parses describe the same file shape (same keys in the same blocks)?
-function KV.SameShape(a, b)
-	if #a ~= #b then return false end
-	for i = 1, #a do
-		if a[i].path ~= b[i].path or a[i].lkey ~= b[i].lkey or a[i].occ ~= b[i].occ then return false end
+function KeyValues.SameShape(first, second)
+	if #first ~= #second then return false end
+	for i = 1, #first do
+		if first[i].path ~= second[i].path or first[i].lowerKey ~= second[i].lowerKey or first[i].occurrence ~= second[i].occurrence then return false end
 	end
 	return true
 end
@@ -129,7 +129,7 @@ end
 	(mph in the file, inches/s in the params), "bool", "vec" (x y z), "list" (the n-th gear).
 	Keys left out (wheel radius, materials, offsets, sounds) only take effect on a fresh spawn.
 ]]
-KV.PARAMS = {
+KeyValues.PARAMS = {
 	body = {
 		massoverride = { "massOverride" }, addgravity = { "addGravity" }, maxangularvelocity = { "maxAngularVelocity" },
 		countertorquefactor = { "counterTorqueFactor" }, masscenteroverride = { "massCenterOverride", "vec" },
@@ -168,33 +168,33 @@ KV.PARAMS = {
 }
 
 -- the params table an entry's field lives in, and its mapping (or nil: not settable live)
-function KV.Target(params, e)
-	local m = KV.PARAMS[e.path] and KV.PARAMS[e.path][e.lkey]
-	if not m or not params then return nil end
-	local t
-	if e.path == "body" then t = params.body
-	elseif e.path == "engine" or e.path == "engine/boost" then t = params.engine
-	elseif e.path == "steering" then t = params.steering
-	elseif e.axle then t = params.axles and params.axles[e.axle] end
-	if type(t) ~= "table" then return nil end
-	if m[2] == "list" then
-		if type(t[m[1]]) ~= "table" or t[m[1]][e.occ] == nil then return nil end
-	elseif t[m[1]] == nil then
+function KeyValues.Target(params, entry)
+	local mapping = KeyValues.PARAMS[entry.path] and KeyValues.PARAMS[entry.path][entry.lowerKey]
+	if not mapping or not params then return nil end
+	local section
+	if entry.path == "body" then section = params.body
+	elseif entry.path == "engine" or entry.path == "engine/boost" then section = params.engine
+	elseif entry.path == "steering" then section = params.steering
+	elseif entry.axle then section = params.axles and params.axles[entry.axle] end
+	if type(section) ~= "table" then return nil end
+	if mapping[2] == "list" then
+		if type(section[mapping[1]]) ~= "table" or section[mapping[1]][entry.occurrence] == nil then return nil end
+	elseif section[mapping[1]] == nil then
 		return nil
 	end
-	return t, m[1], m[2]
+	return section, mapping[1], mapping[2]
 end
 
-local function vec3(s)
-	local x, y, z = tostring(s or ""):match("^%s*(%S+)%s+(%S+)%s+(%S+)")
+local function parseVector(text)
+	local x, y, z = tostring(text or ""):match("^%s*(%S+)%s+(%S+)%s+(%S+)")
 	x, y, z = tonumber(x), tonumber(y), tonumber(z)
 	if x and y and z then return x, y, z end
 end
 
-local function truthy(s)
-	local l = tostring(s):lower()
-	if l == "true" then return true end
-	return (tonumber(s) or 0) ~= 0
+local function truthy(text)
+	local lower = tostring(text):lower()
+	if lower == "true" then return true end
+	return (tonumber(text) or 0) ~= 0
 end
 
 --[[
@@ -203,43 +203,49 @@ end
 	result is right. An original of 0 can't be scaled: the new value is taken as it is (mph turned
 	into inches/s for speeds). Returns true if it was set.
 ]]
-function KV.ApplyValue(params, e, orig, new)
-	local t, field, kind = KV.Target(params, e)
-	if not t then return false end
+function KeyValues.ApplyValue(params, entry, original, newValue)
+	local section, field, kind = KeyValues.Target(params, entry)
+	if not section then return false end
 	if kind == "bool" then
-		t[field] = truthy(new)
+		section[field] = truthy(newValue)
 		return true
 	elseif kind == "vec" then
-		local ox, oy, oz = vec3(orig)
-		local nx, ny, nz = vec3(new)
-		local cur = t[field]
-		if not (nx and cur and cur.x) then return false end
+		local originalX, originalY, originalZ = parseVector(original)
+		local newX, newY, newZ = parseVector(newValue)
+		local current = section[field]
+		if not (newX and current and current.x) then return false end
 		-- the unit, from any component that isn't 0
-		local k = 1
-		if ox and ox ~= 0 then k = cur.x / ox elseif oy and oy ~= 0 then k = cur.y / oy elseif oz and oz ~= 0 then k = cur.z / oz end
-		t[field] = Vector(nx * k, ny * k, nz * k)
+		local unitScale = 1
+		if originalX and originalX ~= 0 then
+			unitScale = current.x / originalX
+		elseif originalY and originalY ~= 0 then
+			unitScale = current.y / originalY
+		elseif originalZ and originalZ ~= 0 then
+			unitScale = current.z / originalZ
+		end
+		section[field] = Vector(newX * unitScale, newY * unitScale, newZ * unitScale)
 		return true
 	end
-	local o, nv = tonumber(orig), tonumber(new)
-	if not nv then return false end
-	local function scaled(p)
-		if type(p) ~= "number" then return nv end
-		if o and o ~= 0 then return p * nv / o end
-		return nv * (kind == "speed" and (E.HU_PER_MPH or 17.6) or 1)
+	local originalNumber, newNumber = tonumber(original), tonumber(newValue)
+	if not newNumber then return false end
+	local function scaled(paramValue)
+		if type(paramValue) ~= "number" then return newNumber end
+		if originalNumber and originalNumber ~= 0 then return paramValue * newNumber / originalNumber end
+		return newNumber * (kind == "speed" and (AudioEngine.HU_PER_MPH or 17.6) or 1)
 	end
 	if kind == "list" then
-		t[field][e.occ] = scaled(t[field][e.occ])
+		section[field][entry.occurrence] = scaled(section[field][entry.occurrence])
 	else
-		t[field] = scaled(t[field])
+		section[field] = scaled(section[field])
 	end
 	return true
 end
 
 -- how a number reads back in a file ("%g", no exponent for ordinary values)
-function KV.Num(x)
-	if math.abs(x) >= 1e6 or (x ~= 0 and math.abs(x) < 1e-4) then return string.format("%g", x) end
-	local s = string.format("%.4f", x):gsub("0+$", ""):gsub("%.$", "")
-	return s
+function KeyValues.Num(value)
+	if math.abs(value) >= 1e6 or (value ~= 0 and math.abs(value) < 1e-4) then return string.format("%g", value) end
+	local text = string.format("%.4f", value):gsub("0+$", ""):gsub("%.$", "")
+	return text
 end
 
-return KV
+return KeyValues

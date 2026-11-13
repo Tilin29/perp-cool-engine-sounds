@@ -12,15 +12,15 @@
 
 	Colours by the car's scheme (NW2 audio_lightscheme): on the bar per side, built-in lamps keep
 	their lens's own colour. A car whose audio_lightbar is itself has built-in lamps
-	(E.BUILTIN_LIGHTS), placed by its body bone.
+	(AudioEngine.BUILTIN_LIGHTS), placed by its body bone.
 ]]
-local E = AUDIO_ENGINE
+local AudioEngine = AUDIO_ENGINE
 
-local cvLightKey = CreateClientConVar("audio_engine_lightkey", "lshift", true, false,
+local lightKeyConVar = CreateClientConVar("audio_engine_lightkey", "lshift", true, false,
 	"Key that switches the emergency lights of the car you drive (a key name such as lshift, l or f2; none = off)")
 
-local CODE2 = { period = 1.2, on = 0.4 }
-local CODE3 = { period = 0.5, flash = 0.0625, flashOn = 0.04, white = 0.035 }
+local CODE2 = { period = 1.2, onTime = 0.4 }
+local CODE3 = { period = 0.5, flashPeriod = 0.0625, flashOnTime = 0.04, centreFlashTime = 0.035 }
 local LIST_REFRESH = 0.5
 local DRAW_DIST = 6000
 local DLIGHT_DIST = 2500
@@ -33,10 +33,10 @@ local GLOW_MAX = 90
 local GLOW_OUT = 2
 local PHASE_PER_INDEX = 0.37
 local DLIGHT = { brightness = 2, decay = 4000, size = 300, life = 0.05 }
-local SIDE_LIGHT_POS = { [-1] = Vector(0, -20, 14), [1] = Vector(0, 20, 14) }
+local SIDE_LIGHT_OFFSETS = { [-1] = Vector(0, -20, 14), [1] = Vector(0, 20, 14) }
 
-local GLOW = Material("sprites/light_glow02_add")
-local LENS = CreateMaterial("audio_engine_lightbar_lens", "UnlitGeneric", {
+local GLOW_MATERIAL = Material("sprites/light_glow02_add")
+local LENS_MATERIAL = CreateMaterial("audio_engine_lightbar_lens", "UnlitGeneric", {
 	["$basetexture"] = "color/white",
 	["$additive"] = "1",
 	["$vertexcolor"] = "1",
@@ -57,204 +57,204 @@ local SCHEME_SIDES = {
 local glowColor = Color(255, 255, 255)
 
 -- which half of the wig-wag a module flashes in: -1 or 1 (the centre modules have their own timing)
-local function halfOf(m)
-	if m.group == "i" then return -m.side end
+local function wigWagHalf(lamp)
+	if lamp.group == "i" then return -lamp.side end
 
-	return m.side
+	return lamp.side
 end
 
-local function isLit(m, mode, t)
+local function isLit(lamp, mode, phaseTime)
 	if mode == 1 then
-		local p = t % CODE2.period
-		local half = p < CODE2.period / 2 and -1 or 1
-		if m.side == 0 or halfOf(m) ~= half then return false end
+		local phase = phaseTime % CODE2.period
+		local litHalf = phase < CODE2.period / 2 and -1 or 1
+		if lamp.side == 0 or wigWagHalf(lamp) ~= litHalf then return false end
 
-		return p % (CODE2.period / 2) < CODE2.on
+		return phase % (CODE2.period / 2) < CODE2.onTime
 	end
-	local p = t % CODE3.period
-	local inHalf = p % (CODE3.period / 2)
-	if m.side == 0 then
-		return inHalf < CODE3.white or (inHalf > 2 * CODE3.white and inHalf < 3 * CODE3.white)
+	local phase = phaseTime % CODE3.period
+	local timeInHalf = phase % (CODE3.period / 2)
+	if lamp.side == 0 then
+		return timeInHalf < CODE3.centreFlashTime or (timeInHalf > 2 * CODE3.centreFlashTime and timeInHalf < 3 * CODE3.centreFlashTime)
 	end
-	local half = p < CODE3.period / 2 and -1 or 1
-	if halfOf(m) ~= half then return false end
+	local litHalf = phase < CODE3.period / 2 and -1 or 1
+	if wigWagHalf(lamp) ~= litHalf then return false end
 
-	return inHalf % CODE3.flash < CODE3.flashOn
+	return timeInHalf % CODE3.flashPeriod < CODE3.flashOnTime
 end
 
 -- cars with lights near enough to matter, refreshed now and then rather than searched every frame
-local police = {}
+local emergencyCars = {}
 local nextRefresh = 0
 
 local function refreshList()
-	police = {}
-	for _, veh in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
-		local bar = veh:GetNW2Entity("audio_lightbar")
-		if IsValid(bar) then
-			local entry = { veh = veh, bar = bar, sides = SCHEME_SIDES[veh:GetNW2String("audio_lightscheme", "police")] or SCHEME_SIDES.police }
-			if bar == veh then
-				local set = E.BUILTIN_LIGHTS[string.lower(veh:GetModel() or "")]
-				local bone = set and veh:LookupBone(set.bone)
+	emergencyCars = {}
+	for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
+		local lightbar = vehicle:GetNW2Entity("audio_lightbar")
+		if IsValid(lightbar) then
+			local entry = { vehicle = vehicle, lightbar = lightbar, sides = SCHEME_SIDES[vehicle:GetNW2String("audio_lightscheme", "police")] or SCHEME_SIDES.police }
+			if lightbar == vehicle then
+				local builtinSet = AudioEngine.BUILTIN_LIGHTS[string.lower(vehicle:GetModel() or "")]
+				local bone = builtinSet and vehicle:LookupBone(builtinSet.bone)
 				if bone then
-					entry.lamps, entry.bone = set.lamps, bone
-					table.insert(police, entry)
+					entry.lamps, entry.bone = builtinSet.lamps, bone
+					table.insert(emergencyCars, entry)
 				end
 			else
-				table.insert(police, entry)
+				table.insert(emergencyCars, entry)
 			end
 		end
 	end
 end
 
-local function lightsOf(entry)
-	local veh, bar = entry.veh, entry.bar
-	if not IsValid(veh) or not IsValid(bar) or bar:IsDormant() then return 0 end
+local function lightModeOf(entry)
+	local vehicle, lightbar = entry.vehicle, entry.lightbar
+	if not IsValid(vehicle) or not IsValid(lightbar) or lightbar:IsDormant() then return 0 end
 
-	return veh:GetNW2Int("audio_lights", 0)
+	return vehicle:GetNW2Int("audio_lights", 0)
 end
 
-local function drawLens(wp, wn, w, h, col, eye)
-	render.SetMaterial(LENS)
-	render.DrawQuadEasy(wp, wn, w, h, col, 0)
-	local toEye = eye - wp
-	local dist = toEye:Length()
-	local facing = wn:Dot(toEye) / math.max(dist, 1)
+local function drawLens(worldPosition, worldNormal, width, height, color, eyePosition)
+	render.SetMaterial(LENS_MATERIAL)
+	render.DrawQuadEasy(worldPosition, worldNormal, width, height, color, 0)
+	local toEye = eyePosition - worldPosition
+	local distance = toEye:Length()
+	local facing = worldNormal:Dot(toEye) / math.max(distance, 1)
 	if facing <= 0 then return end
-	local size = math.min(GLOW_SIZE + dist * GLOW_PER_UNIT, GLOW_MAX) * (0.35 + 0.65 * facing)
-	glowColor.r, glowColor.g, glowColor.b, glowColor.a = col.r, col.g, col.b, 255 * facing
-	render.SetMaterial(GLOW)
-	render.DrawSprite(wp + wn * GLOW_OUT, size, size, glowColor)
+	local size = math.min(GLOW_SIZE + distance * GLOW_PER_UNIT, GLOW_MAX) * (0.35 + 0.65 * facing)
+	glowColor.r, glowColor.g, glowColor.b, glowColor.a = color.r, color.g, color.b, 255 * facing
+	render.SetMaterial(GLOW_MATERIAL)
+	render.DrawSprite(worldPosition + worldNormal * GLOW_OUT, size, size, glowColor)
 end
 
 -- a direction in a frame given by its forward / right / up (right = -y, as Entity:GetRight)
-local function turned(fwd, right, up, n)
-	return fwd * n.x - right * n.y + up * n.z
+local function turned(forward, right, up, direction)
+	return forward * direction.x - right * direction.y + up * direction.z
 end
 
-local function drawBar(entry, mode, t, eye)
-	local bar = entry.bar
-	local ang = bar:GetAngles()
-	local fwd, right, up = ang:Forward(), ang:Right(), ang:Up()
-	for _, m in ipairs(E.LIGHTBAR_MODULES) do
-		if isLit(m, mode, t) then
-			drawLens(bar:LocalToWorld(m.pos), turned(fwd, right, up, m.n), m.w, LENS_HEIGHT, entry.sides[m.side], eye)
+local function drawBar(entry, mode, phaseTime, eyePosition)
+	local lightbar = entry.lightbar
+	local angles = lightbar:GetAngles()
+	local forward, right, up = angles:Forward(), angles:Right(), angles:Up()
+	for _, lamp in ipairs(AudioEngine.LIGHTBAR_MODULES) do
+		if isLit(lamp, mode, phaseTime) then
+			drawLens(lightbar:LocalToWorld(lamp.position), turned(forward, right, up, lamp.normal), lamp.width, LENS_HEIGHT, entry.sides[lamp.side], eyePosition)
 		end
 	end
 end
 
 -- built-in lamps follow the body bone (nil while the car hasn't set up its bones: not drawn)
-local function drawBuiltin(entry, mode, t, eye)
-	local mat = entry.veh:GetBoneMatrix(entry.bone)
-	if not mat then return end
-	local fwd, right, up = mat:GetForward(), mat:GetRight(), mat:GetUp()
-	for _, m in ipairs(entry.lamps) do
-		if isLit(m, mode, t) then
-			drawLens(mat * m.pos, turned(fwd, right, up, m.n), m.w, m.h, COLORS[m.color] or COLORS.white, eye)
+local function drawBuiltin(entry, mode, phaseTime, eyePosition)
+	local boneMatrix = entry.vehicle:GetBoneMatrix(entry.bone)
+	if not boneMatrix then return end
+	local forward, right, up = boneMatrix:GetForward(), boneMatrix:GetRight(), boneMatrix:GetUp()
+	for _, lamp in ipairs(entry.lamps) do
+		if isLit(lamp, mode, phaseTime) then
+			drawLens(boneMatrix * lamp.position, turned(forward, right, up, lamp.normal), lamp.width, lamp.height, COLORS[lamp.color] or COLORS.white, eyePosition)
 		end
 	end
 end
 
-hook.Add("PostDrawTranslucentRenderables", "audio_engine_police", function(depth, skybox)
-	if depth or skybox then return end
-	local eye = EyePos()
-	local t0 = CurTime()
-	for _, entry in ipairs(police) do
-		local mode = lightsOf(entry)
-		if mode > 0 and entry.bar:GetPos():DistToSqr(eye) < DRAW_DIST * DRAW_DIST then
-			local t = t0 + entry.veh:EntIndex() * PHASE_PER_INDEX
-			if entry.lamps then drawBuiltin(entry, mode, t, eye) else drawBar(entry, mode, t, eye) end
+hook.Add("PostDrawTranslucentRenderables", "audio_engine_police", function(drawingDepth, drawingSkybox)
+	if drawingDepth or drawingSkybox then return end
+	local eyePosition = EyePos()
+	local now = CurTime()
+	for _, entry in ipairs(emergencyCars) do
+		local mode = lightModeOf(entry)
+		if mode > 0 and entry.lightbar:GetPos():DistToSqr(eyePosition) < DRAW_DIST * DRAW_DIST then
+			local phaseTime = now + entry.vehicle:EntIndex() * PHASE_PER_INDEX
+			if entry.lamps then drawBuiltin(entry, mode, phaseTime, eyePosition) else drawBar(entry, mode, phaseTime, eyePosition) end
 		end
 	end
 end)
 
 -- the colour a side lights its surroundings with right now, or nil
-local function sideLit(entry, side, mode, t)
+local function sideColor(entry, side, mode, phaseTime)
 	if entry.lamps then
-		for _, m in ipairs(entry.lamps) do
-			if m.side == side and m.group == "o" and isLit(m, mode, t) then return COLORS[m.color] or COLORS.white end
+		for _, lamp in ipairs(entry.lamps) do
+			if lamp.side == side and lamp.group == "o" and isLit(lamp, mode, phaseTime) then return COLORS[lamp.color] or COLORS.white end
 		end
 
 		return nil
 	end
-	for _, m in ipairs(E.LIGHTBAR_MODULES) do
-		if m.side == side and m.group == "o" and isLit(m, mode, t) then return entry.sides[side] end
+	for _, lamp in ipairs(AudioEngine.LIGHTBAR_MODULES) do
+		if lamp.side == side and lamp.group == "o" and isLit(lamp, mode, phaseTime) then return entry.sides[side] end
 	end
 
 	return nil
 end
 
 -- where a side's light comes from: beside the bar, or the middle of that side's built-in lamps
-local function sideLightPos(entry, side)
-	if not entry.lamps then return entry.bar:LocalToWorld(SIDE_LIGHT_POS[side]) end
-	entry.sidePos = entry.sidePos or {}
-	local p = entry.sidePos[side]
-	if not p then
-		local n = 0
-		p = Vector(0, 0, 0)
-		for _, m in ipairs(entry.lamps) do
-			if m.side == side then p, n = p + m.pos, n + 1 end
+local function sideLightPosition(entry, side)
+	if not entry.lamps then return entry.lightbar:LocalToWorld(SIDE_LIGHT_OFFSETS[side]) end
+	entry.sidePositions = entry.sidePositions or {}
+	local localPosition = entry.sidePositions[side]
+	if not localPosition then
+		local lampCount = 0
+		localPosition = Vector(0, 0, 0)
+		for _, lamp in ipairs(entry.lamps) do
+			if lamp.side == side then localPosition, lampCount = localPosition + lamp.position, lampCount + 1 end
 		end
-		p = n > 0 and p / n or p
-		entry.sidePos[side] = p
+		localPosition = lampCount > 0 and localPosition / lampCount or localPosition
+		entry.sidePositions[side] = localPosition
 	end
-	local mat = entry.veh:GetBoneMatrix(entry.bone)
+	local boneMatrix = entry.vehicle:GetBoneMatrix(entry.bone)
 
-	return mat and mat * p
+	return boneMatrix and boneMatrix * localPosition
 end
 
-local function lightUp(entry, mode, t)
-	local veh = entry.veh
-	for side in pairs(SIDE_LIGHT_POS) do
-		local col = sideLit(entry, side, mode, t)
-		local pos = col and sideLightPos(entry, side)
-		if pos then
-			local dl = DynamicLight(DLIGHT_BASE + veh:EntIndex() * 2 + (side + 1) / 2)
-			if dl then
-				dl.pos = pos
-				dl.r, dl.g, dl.b = col.r, col.g, col.b
-				dl.brightness = DLIGHT.brightness
-				dl.decay = DLIGHT.decay
-				dl.size = DLIGHT.size
-				dl.dietime = CurTime() + DLIGHT.life
+local function lightSurroundings(entry, mode, phaseTime)
+	local vehicle = entry.vehicle
+	for side in pairs(SIDE_LIGHT_OFFSETS) do
+		local color = sideColor(entry, side, mode, phaseTime)
+		local position = color and sideLightPosition(entry, side)
+		if position then
+			local dynamicLight = DynamicLight(DLIGHT_BASE + vehicle:EntIndex() * 2 + (side + 1) / 2)
+			if dynamicLight then
+				dynamicLight.pos = position
+				dynamicLight.r, dynamicLight.g, dynamicLight.b = color.r, color.g, color.b
+				dynamicLight.brightness = DLIGHT.brightness
+				dynamicLight.decay = DLIGHT.decay
+				dynamicLight.size = DLIGHT.size
+				dynamicLight.dietime = CurTime() + DLIGHT.life
 			end
 		end
 	end
 end
 
-local byDistance = {}
+local litCarsByDistance = {}
 hook.Add("Think", "audio_engine_police", function()
 	local now = CurTime()
 	if now >= nextRefresh then
 		nextRefresh = now + LIST_REFRESH
 		refreshList()
 	end
-	if #police == 0 then return end
-	local eye = EyePos()
-	table.Empty(byDistance)
-	for _, entry in ipairs(police) do
-		if lightsOf(entry) > 0 then
-			entry.dist = entry.bar:GetPos():DistToSqr(eye)
-			if entry.dist < DLIGHT_DIST * DLIGHT_DIST then table.insert(byDistance, entry) end
+	if #emergencyCars == 0 then return end
+	local eyePosition = EyePos()
+	table.Empty(litCarsByDistance)
+	for _, entry in ipairs(emergencyCars) do
+		if lightModeOf(entry) > 0 then
+			entry.distanceSqr = entry.lightbar:GetPos():DistToSqr(eyePosition)
+			if entry.distanceSqr < DLIGHT_DIST * DLIGHT_DIST then table.insert(litCarsByDistance, entry) end
 		end
 	end
-	table.sort(byDistance, function(a, b) return a.dist < b.dist end)
-	for i = 1, math.min(#byDistance, MAX_DLIGHT_CARS) do
-		local entry = byDistance[i]
-		lightUp(entry, lightsOf(entry), now + entry.veh:EntIndex() * PHASE_PER_INDEX)
+	table.sort(litCarsByDistance, function(first, second) return first.distanceSqr < second.distanceSqr end)
+	for i = 1, math.min(#litCarsByDistance, MAX_DLIGHT_CARS) do
+		local entry = litCarsByDistance[i]
+		lightSurroundings(entry, lightModeOf(entry), now + entry.vehicle:EntIndex() * PHASE_PER_INDEX)
 	end
 end)
 
 -- the light key, sent as a console command like the start key (cl_engine.lua)
-local keyHeld = false
+local lightKeyHeld = false
 hook.Add("Think", "audio_engine_lightkey", function()
-	local key = _G["KEY_" .. string.upper(cvLightKey:GetString())]
-	local down = key ~= nil and input.IsKeyDown(key)
-	local pressed = down and not keyHeld
-	keyHeld = down
+	local keyCode = _G["KEY_" .. string.upper(lightKeyConVar:GetString())]
+	local isDown = keyCode ~= nil and input.IsKeyDown(keyCode)
+	local pressed = isDown and not lightKeyHeld
+	lightKeyHeld = isDown
 	if not pressed then return end
-	local ply = LocalPlayer()
-	local veh = IsValid(ply) and ply:GetVehicle()
-	if not IsValid(veh) or not IsValid(veh:GetNW2Entity("audio_lightbar")) or ply:IsTyping() then return end
+	local player = LocalPlayer()
+	local vehicle = IsValid(player) and player:GetVehicle()
+	if not IsValid(vehicle) or not IsValid(vehicle:GetNW2Entity("audio_lightbar")) or player:IsTyping() then return end
 	if gui.IsGameUIVisible() or IsValid(vgui.GetKeyboardFocus()) then return end
 	RunConsoleCommand("audio_engine_lights")
 end)

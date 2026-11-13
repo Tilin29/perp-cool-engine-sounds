@@ -7,45 +7,45 @@
 	medical cars have tones of their own); the driver's tone key overrides it until the light mode
 	changes (NW2 siren_tone + siren_at, the light mode it was chosen in).
 ]]
-local PS = POLICE_SIREN
+local PoliceSiren = POLICE_SIREN
 
-PS.LIGHTBAR_NW = "audio_lightbar"
-PS.LIGHTS_NW = "audio_lights"
-PS.SCHEME_NW = "audio_lightscheme"
+PoliceSiren.LIGHTBAR_NW = "audio_lightbar"
+PoliceSiren.LIGHTS_NW = "audio_lights"
+PoliceSiren.SCHEME_NW = "audio_lightscheme"
 
-function PS.HasSiren(veh)
-	return IsValid(veh) and IsValid(veh:GetNW2Entity(PS.LIGHTBAR_NW))
+function PoliceSiren.HasSiren(vehicle)
+	return IsValid(vehicle) and IsValid(vehicle:GetNW2Entity(PoliceSiren.LIGHTBAR_NW))
 end
 
 -- the car's tone set: its scheme's lightTones and cycle, else the police ones
-function PS.Scheme(veh)
-	local schemes = PS.CONFIG.schemes
+function PoliceSiren.Scheme(vehicle)
+	local schemes = PoliceSiren.CONFIG.schemes
 
-	return schemes and schemes[veh:GetNW2String(PS.SCHEME_NW, "")] or PS.CONFIG
+	return schemes and schemes[vehicle:GetNW2String(PoliceSiren.SCHEME_NW, "")] or PoliceSiren.CONFIG
 end
 
 -- the tone the lights or the driver chose: an id of CONFIG.tones, or "" for none
-function PS.ChosenTone(veh)
-	local lights = veh:GetNW2Int(PS.LIGHTS_NW, 0)
-	if lights == 0 then return "" end
-	if veh:GetNW2Int("siren_at", -1) == lights then return veh:GetNW2String("siren_tone", "") end
+function PoliceSiren.ChosenTone(vehicle)
+	local lightMode = vehicle:GetNW2Int(PoliceSiren.LIGHTS_NW, 0)
+	if lightMode == 0 then return "" end
+	if vehicle:GetNW2Int("siren_at", -1) == lightMode then return vehicle:GetNW2String("siren_tone", "") end
 
-	return PS.Scheme(veh).lightTones[lights] or ""
+	return PoliceSiren.Scheme(vehicle).lightTones[lightMode] or ""
 end
 
 -- what the car sounds right now: a tone id, or nil
-function PS.SoundingTone(veh)
-	local id = PS.ChosenTone(veh)
-	if id == "" or not PS.CONFIG.tones[id] then return nil end
+function PoliceSiren.SoundingTone(vehicle)
+	local toneId = PoliceSiren.ChosenTone(vehicle)
+	if toneId == "" or not PoliceSiren.CONFIG.tones[toneId] then return nil end
 
-	return id
+	return toneId
 end
 
 -- the tone after `id` for the tone key: through the car's cycle, then off, then round again
-function PS.NextTone(veh, id)
-	local cycle = PS.Scheme(veh).cycle
-	for i, c in ipairs(cycle) do
-		if c == id then return cycle[i + 1] or "" end
+function PoliceSiren.NextTone(vehicle, toneId)
+	local cycle = PoliceSiren.Scheme(vehicle).cycle
+	for index, cycleTone in ipairs(cycle) do
+		if cycleTone == toneId then return cycle[index + 1] or "" end
 	end
 
 	return cycle[1] or ""
