@@ -52,10 +52,15 @@ local function generate(tone, toneId, inside)
 	local samples, sampleRate, sampleCount = Synth.Render(tone, config, coroutine.yield, inside)
 	local keyName = string.format("police_siren_%d_%s_%s", PoliceSiren.Serial, toneId, inside and "in" or "out")
 	local playbackRate = sampleRate / 2   -- an octave low (BASE_PITCH)
-	sound.Generate(keyName, playbackRate, sampleCount / playbackRate, function(sampleIndex)
-		return samples[(sampleIndex % sampleCount) + 1] or 0
+	-- the game loops from sample 1, never 0 (as the engine's loops, cl_soundbank.lua): one pre-roll
+	-- sample (the loop's last), then the loop, [y_L, y_1 .. y_L]. Without it every pass skipped y_1:
+	-- a tick at the seam, plain to hear on a near-pure tone
+	local storedCount = sampleCount + 1
+	sound.Generate(keyName, playbackRate, storedCount / playbackRate, function(sampleIndex)
+		local index = sampleIndex % storedCount
+		return samples[index == 0 and sampleCount or index] or 0
 	end, 1)
-	builtSamples = builtSamples + sampleCount
+	builtSamples = builtSamples + storedCount
 	coroutine.yield()
 
 	return keyName
