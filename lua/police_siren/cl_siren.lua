@@ -203,6 +203,27 @@ local function dopplerRatio(sourcePosition, sourceVelocity)
 	return 1 + (ratio - 1) * strength
 end
 
+--[[
+	The siren's own fade with distance (CONFIG.distance), on top of the game's: the game keeps an 85 dB
+	sound at full volume for its first ~16 m and halves it per doubling after, and on a near-pure tone
+	that didn't tell how far a siren was. Full volume up to `full` m, then even in dB over the log of the
+	distance down to `volume` at `at` m, and on at that slope. Inside the car: none.
+]]
+local UNITS_PER_METER = 1 / 0.0254
+local VOLUME_GLIDE = 0.1
+local VOLUME_STEP = 0.005   -- volume changes under this aren't sent
+
+local function distanceGain(vehicle)
+	local falloff = PoliceSiren.CONFIG.distance
+	if not falloff then return 1 end
+	local meters = listenerPosition:Distance(vehicle:GetPos()) / UNITS_PER_METER
+	local full = math.max(falloff.full or 20, 1)
+	if meters <= full then return 1 end
+	local at = math.max(falloff.at or 150, full * 1.01)
+
+	return (falloff.volume or 0.4) ^ (math.log(meters / full) / math.log(at / full))
+end
+
 local function startTone(vehicle, toneId, inside, fadeTime)
 	local config = PoliceSiren.CONFIG
 	local name = inside and soundNames[toneId].inside or soundNames[toneId].out
@@ -217,10 +238,12 @@ local function startTone(vehicle, toneId, inside, fadeTime)
 	local patch = CreateSound(vehicle, name)
 	patch:SetSoundLevel(config.soundLevels[string.lower(vehicle:GetModel() or "")] or config.soundLevel)
 	patch:PlayEx(0, BASE_PITCH)
-	local volume = config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
+	local baseVolume = config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
+	local volume = baseVolume * (inside and 1 or distanceGain(vehicle))
 
 	return {
-		toneId = toneId, name = name, vehicle = vehicle, inside = inside, patch = patch, volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
+		toneId = toneId, name = name, vehicle = vehicle, inside = inside, patch = patch, baseVolume = baseVolume,
+		volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
 		pitch = BASE_PITCH, dopplerRatio = 1, velocityTrack = {}, nextReviveCheck = RealTime() + REVIVE_EVERY,
 	}
 end
@@ -243,9 +266,15 @@ local function update(vehicle)
 	local listenerInside = wantedTone ~= nil and insideOf(vehicle)
 	if state and state.toneId == wantedTone and state.inside == listenerInside then
 		-- (a volume change in the frame the sound started doesn't take: the fade-in goes a frame later)
+		local volume = state.baseVolume * (state.inside and 1 or distanceGain(vehicle))
 		if state.fadeInVolume then
-			state.patch:ChangeVolume(state.fadeInVolume, state.fadeTime)
+			state.patch:ChangeVolume(volume, state.fadeTime)
 			state.fadeInVolume = nil
+			state.volume = volume
+		elseif math.abs(volume - state.volume) > VOLUME_STEP then
+			-- (the distance fade, CONFIG.distance)
+			state.patch:ChangeVolume(volume, VOLUME_GLIDE)
+			state.volume = volume
 		end
 		-- the game only mixes so many sounds: with many cars driving around it takes a channel back,
 		-- and a siren it dropped stayed silent. Started again at its full volume, it holds on to one

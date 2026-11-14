@@ -5,6 +5,8 @@
 	soundLevel   Source sound level in dB: how far it carries. The cars' engines play at 85, high-powered
 	             ones at 92: a few dB over the car's own keeps the siren heard first, but not much further
 	soundLevels  the same per car model, for cars whose engine is louder (lower-case model path)
+	distance     the siren's own fade with distance, on top of the game's: full volume up to `full` m, falling
+	             evenly to `volume` at `at` m and on (the game's alone hardly told how far a siren was)
 	doppler      Doppler pitch shift of passing cars: 0 = off, 1 = real, 0.5 = half (capped at +4 / -5 semitones).
 	             Each player scales it with audio_engine_police_doppler (1 = this)
 	attack       seconds a tone takes to fade in when it starts
@@ -40,15 +42,13 @@ POLICE_SIREN = POLICE_SIREN or {}
 
 POLICE_SIREN.CONFIG = {
 	volume = 0.75,
-	soundLevel = 88,
+	soundLevel = 85,
 	soundLevels = {
-		["models/tdmcars/bmw_340i.mdl"] = 94,
-		["models/tdmcars/bmwm5e60.mdl"] = 94,
-		["models/tdmcars/cayenne.mdl"] = 94,
-		["models/tdmcars/chargersrt8.mdl"] = 94,
-		["models/tdmcars/sl65amg.mdl"] = 94,
+		["models/tdmcars/cayenne.mdl"] = 89,
+		["models/tdmcars/sl65amg.mdl"] = 92,
 	},
-	doppler = 0.5,
+	distance = { full = 20, at = 150, volume = 0.4 },
+	doppler = 0.375,
 	attack = 0.05,
 	release = 0.08,
 	stopPitch = 1,

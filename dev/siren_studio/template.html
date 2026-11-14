@@ -175,7 +175,7 @@ const el = (tag, props, ...kids) => {
   return e
 }
 const clone = (x) => JSON.parse(JSON.stringify(x))
-const STORE = 'siren_studio_settings_v3'   // (v3: new cycles and the honk tones: older saves are left behind)
+const STORE = 'siren_studio_settings_v4'   // (v4: the levels, Doppler and distance fade the user set in the file: older saves are left behind)
 
 let DEFAULTS = null, CFG = null, SEL = null
 
@@ -202,6 +202,7 @@ function normalize(c) {
   const d = DEFAULTS
   if (!c.soundLevels || typeof c.soundLevels !== 'object' || Array.isArray(c.soundLevels)) c.soundLevels = clone(d.soundLevels || {})
   for (const k of ['volume', 'soundLevel', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate']) if (c[k] === undefined) c[k] = d[k]
+  c.distance = Object.assign(clone(d.distance || { full: 20, at: 150, volume: 0.4 }), c.distance || {})
   c.cabin = Object.assign(clone(d.cabin || { volume: 0.35, muffle: 1400 }), c.cabin || {})
   delete c.horn
   if (!Array.isArray(c.lightTones)) c.lightTones = clone(d.lightTones)
@@ -414,6 +415,13 @@ function passEnd() {
   master.gain.setTargetAtTime(+$('monitor').value, ctx.currentTime, 0.05)
   if (voice && voice.src) voice.src.playbackRate.setTargetAtTime(1, ctx.currentTime, 0.05)
 }
+// the siren's own fade at `meters` (cl_siren.lua's distanceGain)
+function distanceGain(meters) {
+  const f = CFG.distance, full = Math.max(f.full, 1)
+  if (meters <= full) return 1
+  const at = Math.max(f.at, full * 1.01)
+  return Math.pow(f.volume, Math.log(meters / full) / Math.log(at / full))
+}
 $('passBy').onclick = () => {
   if ($('inside').checked) { $('inside').checked = false; $('inside').onchange() }
   if (!voice) {
@@ -430,7 +438,7 @@ $('passBy').onclick = () => {
     ratio = 1 + (ratio - 1) * CFG.doppler
     ratio = Math.min(Math.max(Math.round(200 * ratio), 150), 255) / 200   // as in game: half-percent steps, at most +4 semitones
     if (voice && voice.src) voice.src.playbackRate.setTargetAtTime(ratio, ctx.currentTime, 0.02)
-    master.gain.setTargetAtTime(+$('monitor').value * Math.min(1, 6 / d), ctx.currentTime, 0.03)
+    master.gain.setTargetAtTime(+$('monitor').value * Math.min(1, 16 / d) * distanceGain(d), ctx.currentTime, 0.03)
   }, 30)
 }
 $('inside').onchange = () => {
@@ -580,6 +588,10 @@ function buildGlobals() {
     field('Sound level', CFG, 'soundLevel', { min: 60, max: 140, step: 1, unit: 'dB', change: onGlobal }),
     buildLevels(),
     el('p', { class: 'hint' }, 'How far it carries in game (Source sound level). The engines play at 85, high-powered cars at 92: a few dB over the car\'s own engine keeps the siren heard first.'),
+    field('Full volume to', CFG.distance, 'full', { min: 1, max: 100, step: 1, unit: 'm', change: onGlobal }),
+    field('Down to', CFG.distance, 'volume', { min: 0.05, max: 1, step: 0.01, unit: '×', change: onGlobal }),
+    field('at', CFG.distance, 'at', { min: 20, max: 600, step: 5, unit: 'm', change: onGlobal }),
+    el('p', { class: 'hint' }, 'The siren's own fade with distance, on top of the game's, so you can tell how far away it is: full volume up to the first distance, falling evenly to the given volume at the second, and on. "Drive past" plays it.'),
     field('Doppler', CFG, 'doppler', { min: 0, max: 2, step: 0.05, unit: '×', change: onGlobal }),
     el('p', { class: 'hint' }, 'Pitch shift of passing cars: 0 = off, 1 = real, 0.5 = half (players scale it with audio_engine_police_doppler, 1 = this). "Drive past" at the top plays a pass-by.'),
     field('Fade in', CFG, 'attack', { min: 0, max: 2, step: 0.01, unit: 's', change: onGlobal }),
@@ -931,12 +943,12 @@ window.addEventListener('resize', () => drawPattern())
 // ---------------------------------------------------------------------------------------------
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
-const GLOBAL_ORDER = ['volume', 'soundLevel', 'soundLevels', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'honkTone', 'schemes', 'cabin', 'keys', 'tones']
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'soundLevels', 'distance', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'honkTone', 'schemes', 'cabin', 'keys', 'tones']
 const TONE_ORDER = ['name', 'level', 'pattern', 'logGlide', 'harmonics', 'voice2', 'vibrato', 'tremolo', 'speaker']
 const SUB_ORDER = {
   pattern: ['f', 'glide', 'hold', 'curve'], voice2: ['on', 'semitones', 'cents', 'level', 'offset'], vibrato: ['rate', 'depth'],
   tremolo: ['rate', 'depth'], speaker: ['highpass', 'lowpass', 'drive', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['tone'],
-  cabin: ['volume', 'muffle'],
+  cabin: ['volume', 'muffle'], distance: ['full', 'at', 'volume'],
 }
 const luaKey = (k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '[' + JSON.stringify(k) + ']')
 function luaNum(v) { return String(+(+v).toFixed(4)) }
