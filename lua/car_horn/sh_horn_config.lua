@@ -48,7 +48,7 @@ CAR_HORN.CONFIG = {
 	sampleRate = 44100,
 	doppler = 1,
 	distance = { full = 0.1, at = 0.6, volume = 0.3, silent = 1 },
-	limit = { charge = 5, pressCost = 0.3, refill = 0.25, weakBelow = 0.3, weakVolume = 0.35, weakPitch = 0.94, croak = 0.15, resume = 1, relaxAfter = 4, relaxVolume = 0.6, relaxTime = 2 },
+	limit = { charge = 8, pressCost = 0.15, refill = 0.75, weakBelow = 0.3, weakVolume = 0.35, weakPitch = 0.94, croak = 0.15, resume = 0.5, relaxAfter = 4, relaxVolume = 0.6, relaxTime = 2 },
 	cabin = { volume = 0.45, muffle = 1800 },
 	keys = { honk = "lalt" },
 	default = "dual",
