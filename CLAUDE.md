@@ -247,9 +247,13 @@ keeps playing. startTone cuts a fading patch of the same name on the car first (
 The siren studio plays it too (hold Alt with the lights on) and exports `honkTone` (scheme lines too).
 In a siren car the spawn menu (Q) is blocked (`SpawnMenuOpen`), and the tone shows after the light mode on the engine's HUD through
 the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still never names the siren).
-- `sh_siren_config.lua`: `PoliceSiren.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (88 = the engines' 85 + 3) and
-  `soundLevels[model]` (94 on the police cars on CAR_EMOTION (95 a touch far), engine 92: the user wants the siren heard before the engine, not much
-  further; 94 for all carried too far on the others, 86 lost to the SL65's engine), doppler (1 = real), attack/release (release 0.08: an electronic siren cuts off; 0.5 s with stopPitch 0.7, a motor wind-down, sounded wonky), stopPitch (pitch drop on fade-out, 1 = none), pitch,
+- `sh_siren_config.lua`: `PoliceSiren.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (85, the engines' own: it was 88 = 85 + 3, the user lowered it, sirens carried too far) and
+  `soundLevels[model]` (the user's: Cayenne 89, SL65 92; the 340i, M5 E60 and Charger SRT-8 were 94, then the base (88, now 85)
+  (the user found the sirens carried a bit far); 95 was a touch far, 94 for all carried too far on the others, 86 lost to the SL65's engine), `distance` { full 20 m, at 150 m, volume 0.4 }: the siren's own fade on top of the game's (the user: "you can't really tell the
+  distance"; the game keeps 85 dB at full volume ~16 m then 1/distance, and a near-pure tone gives no other cue; a muffled far
+  version was ruled out: little change on a pure tone, and two copies cross-faded would partly cancel), even in dB over log
+  distance, none inside; cl_siren `distanceGain`, sent when it moves over 0.005, glided 0.1 s; the studio's Drive past uses it,
+  doppler (1 = real), attack/release (release 0.08: an electronic siren cuts off; 0.5 s with stopPitch 0.7, a motor wind-down, sounded wonky), stopPitch (pitch drop on fade-out, 1 = none), pitch,
   sampleRate, `lightTones` { CODE 2, CODE 3 }, `cycle`, `schemes[name]` { lightTones, cycle } (fire, medical; the studio keeps them
   through its export but plays the police rules), `cabin` { volume, muffle Hz }, `keys` { tone }, `tones[id]` (pattern of
   points { f, glide, hold, curve }, logGlide, harmonics, voice2, vibrato, tremolo, speaker). Must stay plain Lua (the studio runs it).
@@ -270,7 +274,8 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on
   the near-pure tone 1 % Doppler steps were audible; so the pitch stays within 150..255 (-5..+4 semitones). Key `police_siren_tonekey` (q; alt/shift/ctrl = left one),
-  `police_siren_volume`, `audio_engine_police_doppler` (0-2, x CONFIG.doppler 0.5 = half of real: the user wanted that strength as the cvar's 1; the user
+  `police_siren_volume`, `audio_engine_police_doppler` (0-2, x CONFIG.doppler 0.375: the user rescaled twice so the cvar's 1 is what they liked,
+  first half of real (0.5), then that x 0.75; the user
   picked the name, it is the siren's).
 - `dev/siren_studio/build.js [--test]` builds `dev/siren_studio.html` (wasmoon from dev/baker, opens from disk; Chrome automation needs
   it served over http). `--test` renders every tone in Node and checks length, peak and the loop seam. The page mirrors sh_siren's rules
@@ -288,15 +293,16 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
 - Hooks for other modules (the horn never names them): `car_horn/replace` (vehicle) -> true = something else plays this car's
   honk (the siren's horn override): no horn sound, no charge, horn_on still set so it hears the key; `car_horn/held`
   (vehicle or nil, held), client: your own key the moment it changes.
-- Overuse (the user's pick; replicated `car_horn_limit` 1, `CONFIG.limit`): each player has `charge` 5 s of horn, drained
-  while sounding + `pressCost` 0.3 s per press, refilled at 0.25 s/s; under `weakBelow` 0.3 of it the horn weakens to
+- Overuse (the user's pick; replicated `car_horn_limit` 1, `CONFIG.limit`): each player has `charge` 8 s of horn, drained
+  while sounding + `pressCost` 0.15 s per press, refilled at 0.75 s/s (the user found the first 5 s / 0.3 / 0.25 / resume 1
+  "way too much"); under `weakBelow` 0.3 of it the horn weakens to
   `weakVolume` 0.35 x / `weakPitch` 0.94 x (dying battery); run dry it's exhausted at once, croaks `croak` 0.15 s at its
-  weakest, then presses are refused until `resume` 1 s is back; held over `relaxAfter` 4 s it eases to `relaxVolume` 0.6.
+  weakest, then presses are refused until `resume` 0.5 s is back; held over `relaxAfter` 4 s it eases to `relaxVolume` 0.6.
   The rules live in sh_horn.lua (`CarHorn.PressCharge/HoldCharge/ReleaseCharge/ChargeStrength/WeakFactors/RelaxFactor`),
   run by the server (Tick, only while someone honks; NW2 `horn_power` on the car, `horn_charge`/`horn_charge_at`/
   `horn_exhausted` on the player) and by the driver's client to predict their own horn. The studio mirrors them in JS (charge
-  meter, "Overuse limit" box). No listener-side damping (the user said skip it). With charge 5 s a single hold runs dry at
-  ~4.85 s, so relaxAfter 4 s only touches its last moments.
+  meter, "Overuse limit" box). No listener-side damping (the user said skip it). A single hold runs dry at ~8 s, easing
+  down from 4 s.
 - `cl_horn.lua`: builds horns ahead in a coroutine (4 ms/frame): the out version of every car within the silent range, the
   inside version of the car you sit in; a horn wanted before it's built goes next in the queue. One CSoundPatch per honking car:
   PlayEx at its volume (the attack is in the sound), loop while held, release = ChangeVolume(0, release.time) +
