@@ -236,6 +236,15 @@ No horn (the user removed it). Tones copied from the reference recording the use
 Effect"), measured with an analyser in the browser: wail 613 <-> 1190 Hz, rise 1.5 s (spin-up, curve 0.25), fall 3.15 s (even in
 log pitch), cycle 4.7 s; nearly pure: harmonics 2-10 at -25, -22, -34, -32, -42, -42, -54, -54, -61 dB, so a clean speaker (no drive,
 no resonance). Yelp and phaser use the same range and colour. Easy to listen to for long, which the user asked for.
+Tone sets (the user's): police cycle wail, yelp; EMS emswail, hilo; fire firewail, fireyelp. Horn override (`honkTone`, top
+level for police and per scheme): police phaser, EMS emsyelp, fire firephaser. While a siren tone sounds, the car horn's key
+(Alt) plays the honkTone instead of the horn, back to the siren tone on letting go; lights alone (no tone) = the horn.
+`PoliceSiren.HonkTone(vehicle)` (sh_siren) answers the horn module's `car_horn/replace` hook (shared: the server then doesn't
+charge that honk against the spam limit); cl_siren reads the key from the horn's NW2 `horn_on` / `horn_presses`
+(`PoliceSiren.HORN_NW` / `HORN_PRESSES_NW`, a press = at least `HONK_MIN_OVERRIDE` 0.15 s) and, for your own car, the horn's
+`car_horn/held` hook (no wait for the server). The honk tone is built as soon as the siren sounds; until then the siren tone
+keeps playing. startTone cuts a fading patch of the same name on the car first (same entity + name = one sound to the game).
+The siren studio plays it too (hold Alt with the lights on) and exports `honkTone` (scheme lines too).
 In a siren car the spawn menu (Q) is blocked (`SpawnMenuOpen`), and the tone shows after the light mode on the engine's HUD through
 the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still never names the siren).
 - `sh_siren_config.lua`: `PoliceSiren.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (88 = the engines' 85 + 3) and
@@ -276,6 +285,18 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
   aren't: only the driver honks). NW2 `horn_on` + `horn_presses` (counted per press, wraps at 1024): a tap's press and release
   can land in one tick, the count still reaches every client.
 - `sv_horn.lua`: net `car_horn` (bool, press/release), driver only, presses under 0.06 s apart ignored; off on PlayerLeaveVehicle.
+- Hooks for other modules (the horn never names them): `car_horn/replace` (vehicle) -> true = something else plays this car's
+  honk (the siren's horn override): no horn sound, no charge, horn_on still set so it hears the key; `car_horn/held`
+  (vehicle or nil, held), client: your own key the moment it changes.
+- Overuse (the user's pick; replicated `car_horn_limit` 1, `CONFIG.limit`): each player has `charge` 5 s of horn, drained
+  while sounding + `pressCost` 0.3 s per press, refilled at 0.25 s/s; under `weakBelow` 0.3 of it the horn weakens to
+  `weakVolume` 0.35 x / `weakPitch` 0.94 x (dying battery); run dry it's exhausted at once, croaks `croak` 0.15 s at its
+  weakest, then presses are refused until `resume` 1 s is back; held over `relaxAfter` 4 s it eases to `relaxVolume` 0.6.
+  The rules live in sh_horn.lua (`CarHorn.PressCharge/HoldCharge/ReleaseCharge/ChargeStrength/WeakFactors/RelaxFactor`),
+  run by the server (Tick, only while someone honks; NW2 `horn_power` on the car, `horn_charge`/`horn_charge_at`/
+  `horn_exhausted` on the player) and by the driver's client to predict their own horn. The studio mirrors them in JS (charge
+  meter, "Overuse limit" box). No listener-side damping (the user said skip it). With charge 5 s a single hold runs dry at
+  ~4.85 s, so relaxAfter 4 s only touches its last moments.
 - `cl_horn.lua`: builds horns ahead in a coroutine (4 ms/frame): the out version of every car within the silent range, the
   inside version of the car you sit in; a horn wanted before it's built goes next in the queue. One CSoundPatch per honking car:
   PlayEx at its volume (the attack is in the sound), loop while held, release = ChangeVolume(0, release.time) +

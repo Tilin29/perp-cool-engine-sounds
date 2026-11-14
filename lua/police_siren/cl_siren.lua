@@ -111,6 +111,57 @@ local cars = {}
 local fading = {}
 local overBudget = {}   -- vehicle -> true: past the nearest police_siren_maxcars sounding cars (rankSirens)
 
+--[[
+	The horn override (sh_siren.lua's HonkTone): held honk key = the scheme's honkTone. Other cars'
+	key is their networked horn state; a press always overrides at least HONK_MIN_OVERRIDE s (a tap's
+	press and release can arrive together: the press count still changed). Your own car follows the
+	horn's car_horn/held hook, so the override starts at once rather than after the server's echo
+]]
+local HONK_MIN_OVERRIDE = 0.15
+local honkSeen = setmetatable({}, { __mode = "k" })   -- vehicle -> { presses, untilTime }
+local ownHonkCar, ownHonkUntil = nil, 0
+
+hook.Add("car_horn/held", "police_siren", function(vehicle, held)
+	if held then
+		ownHonkCar, ownHonkUntil = vehicle, RealTime() + HONK_MIN_OVERRIDE
+	else
+		ownHonkCar = nil
+	end
+end)
+
+local function honkHeld(vehicle, now)
+	local seen = honkSeen[vehicle]
+	local presses = vehicle:GetNW2Int(PoliceSiren.HORN_PRESSES_NW, 0)
+	if not seen then
+		seen = { presses = presses, untilTime = 0 }
+		honkSeen[vehicle] = seen
+	elseif presses ~= seen.presses then
+		seen.presses, seen.untilTime = presses, now + HONK_MIN_OVERRIDE
+	end
+	local seat = LocalPlayer():GetVehicle()
+	if seat == vehicle then
+		-- (your own car: your key, not the server's echo of it)
+		return ownHonkCar == vehicle or now < ownHonkUntil
+	end
+
+	return vehicle:GetNW2Bool(PoliceSiren.HORN_NW, false) or now < seen.untilTime
+end
+
+-- what the car plays: its siren tone, or the honk tone while the honk key overrides it. The honk
+-- tone is built as soon as the siren sounds (a first tap would otherwise go by while it's built)
+local function playingTone(vehicle, now)
+	local toneId = PoliceSiren.SoundingTone(vehicle)
+	if not toneId then return nil end
+	local honkTone = PoliceSiren.HonkTone(vehicle)
+	if not honkTone then return toneId end
+	if not soundNames[honkTone] then
+		requestTone(honkTone)
+		return toneId
+	end
+
+	return honkHeld(vehicle, now) and honkTone or toneId
+end
+
 -- a moving point's velocity, from its position now and then
 local function trackVelocity(track, position, now)
 	if not track.time then
@@ -154,13 +205,22 @@ end
 
 local function startTone(vehicle, toneId, inside, fadeTime)
 	local config = PoliceSiren.CONFIG
-	local patch = CreateSound(vehicle, inside and soundNames[toneId].inside or soundNames[toneId].out)
+	local name = inside and soundNames[toneId].inside or soundNames[toneId].out
+	-- the game knows a playing sound by entity + name: a fading one of this name on this car would take
+	-- the new one down with it when it stops (a tone back right after the honk override): cut it now
+	for i = #fading, 1, -1 do
+		if fading[i].vehicle == vehicle and fading[i].name == name then
+			fading[i].patch:Stop()
+			table.remove(fading, i)
+		end
+	end
+	local patch = CreateSound(vehicle, name)
 	patch:SetSoundLevel(config.soundLevels[string.lower(vehicle:GetModel() or "")] or config.soundLevel)
 	patch:PlayEx(0, BASE_PITCH)
 	local volume = config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
 
 	return {
-		toneId = toneId, inside = inside, patch = patch, volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
+		toneId = toneId, name = name, vehicle = vehicle, inside = inside, patch = patch, volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
 		pitch = BASE_PITCH, dopplerRatio = 1, velocityTrack = {}, nextReviveCheck = RealTime() + REVIVE_EVERY,
 	}
 end
@@ -169,13 +229,13 @@ local function stopTone(state, fadeTime, pitchDrop)
 	local patch = state.patch
 	patch:ChangeVolume(0, fadeTime)
 	if pitchDrop and PoliceSiren.CONFIG.stopPitch < 1 then patch:ChangePitch(state.pitch * PoliceSiren.CONFIG.stopPitch, fadeTime) end
-	table.insert(fading, { patch = patch, stopAt = RealTime() + fadeTime })
+	table.insert(fading, { vehicle = state.vehicle, name = state.name, patch = patch, stopAt = RealTime() + fadeTime })
 end
 
 local function update(vehicle)
 	local config = PoliceSiren.CONFIG
 	local state = cars[vehicle]
-	local wantedTone = not vehicle:IsDormant() and not overBudget[vehicle] and PoliceSiren.SoundingTone(vehicle) or nil
+	local wantedTone = not vehicle:IsDormant() and not overBudget[vehicle] and playingTone(vehicle, RealTime()) or nil
 	if wantedTone and not soundNames[wantedTone] then
 		requestTone(wantedTone)
 		wantedTone = nil

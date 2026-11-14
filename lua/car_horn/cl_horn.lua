@@ -12,6 +12,9 @@
 	Loudness: Source's own falloff at CONFIG.soundLevel, times the horn's fall-off (CONFIG.distance)
 	over the engine's audible range: loud close up, fading to CONFIG.distance.volume at its `at`
 	share and silent at `silent`. Inside the car: CONFIG.cabin, no fall-off, no Doppler.
+
+	Overuse (car_horn_limit, CONFIG.limit): a horn running low plays quieter and lower (its car's
+	horn_power from the server, or your own charge predicted here), and one held long eases down.
 ]]
 local CarHorn = CAR_HORN
 local Synth = CarHorn.Synth
@@ -217,6 +220,29 @@ local range = audibleRange()
 
 -- your own honk key (polled below): your car follows it at once, not after the server's echo
 local ownCar, ownHeld, ownPresses, ownHoldUntil = nil, false, 0, 0
+-- your horn charge (sh_horn.lua's, in CurTime()), the server's time of the last one taken from it,
+-- and whether this press is silent (run dry, or pressed while exhausted)
+local ownCharge, ownChargeSyncedAt, ownMuted = nil, -1, false
+
+local function syncOwnCharge(player, serverNow)
+	ownCharge = ownCharge or CarHorn.NewCharge(serverNow)
+	local at = player:GetNW2Float(CarHorn.CHARGE_AT_NW, -1)
+	if at <= ownChargeSyncedAt then return end
+	ownChargeSyncedAt = at
+	ownCharge.charge, ownCharge.at = player:GetNW2Float(CarHorn.CHARGE_NW, CarHorn.CONFIG.limit.charge), at
+	ownCharge.exhausted = player:GetNW2Bool(CarHorn.EXHAUSTED_NW, false)
+	-- (the server let it run dry or turned the press away: so does this)
+	if ownCharge.exhausted and ownCharge.honking then
+		ownCharge.honking, ownCharge.croakUntil = false, nil
+		ownMuted = true
+	end
+end
+
+local function ownPower()
+	if not CarHorn.Limited() or not ownCharge then return 1 end
+
+	return CarHorn.ChargeStrength(ownCharge)
+end
 
 local function honkVolume(car, inside, distanceGain)
 	local config = CarHorn.CONFIG
@@ -262,11 +288,14 @@ local function update(vehicle, car, now)
 	-- (the server's count is followed in your car too, so getting out doesn't read your last press as a new one)
 	local held, presses
 	local networkPresses = vehicle:GetNW2Int(CarHorn.PRESSES_NW, 0)
+	-- (power: how strong the horn still is, CONFIG.limit: predicted for yours, the server's for the others)
+	local held, presses, power
 	if vehicle == ownCar then
-		held, presses = ownHeld or now < ownHoldUntil, ownPresses
+		held, presses, power = not ownMuted and (ownHeld or now < ownHoldUntil), ownPresses, ownPower()
 	else
 		if car.presses and networkPresses ~= car.presses then car.holdUntil = now + MIN_HONK end
 		held, presses = vehicle:GetNW2Bool(CarHorn.ON_NW, false) or now < (car.holdUntil or 0), networkPresses
+		power = CarHorn.Limited() and vehicle:GetNW2Float(CarHorn.POWER_NW, 1) or 1
 	end
 	car.presses = networkPresses
 
@@ -274,6 +303,8 @@ local function update(vehicle, car, now)
 	-- (followed while silent too, so a honk starts at the right Doppler pitch)
 	local velocity = trackVelocity(car.velocityTrack, position, now)
 	if not held and not car.honk then return end
+	-- something else plays this car's honk (the police siren's horn override): the horn stays silent
+	if held and hook.Run("car_horn/replace", vehicle) then held = false end
 	local inside = insideOf(vehicle)
 	local distanceGain = inside and 1 or distanceVolume(listenerPosition:Distance(position) / range)
 	local audible = held and distanceGain > 0 and not vehicle:IsDormant() and not overBudget[vehicle]
@@ -292,12 +323,16 @@ local function update(vehicle, car, now)
 	else
 		car.dopplerRatio = targetRatio
 	end
-	local pitch = math.Clamp(math.Round(BASE_PITCH * car.dopplerRatio), PITCH_MIN, PITCH_MAX)
-	local volume = audible and honkVolume(car, inside, distanceGain) or 0
+	-- overused: weaker (quieter, its pitch sagging); held long: easing down
+	local weakVolume, weakPitch = CarHorn.WeakFactors(power)
+	local relax = (honk and CarHorn.Limited()) and CarHorn.RelaxFactor(now - honk.startedAt) or 1
+	local pitch = math.Clamp(math.Round(BASE_PITCH * car.dopplerRatio * weakPitch), PITCH_MIN, PITCH_MAX)
+	local volume = audible and honkVolume(car, inside, distanceGain) * weakVolume * relax or 0
 
 	if audible and not honk then
 		if isBuilt(car.hornId, inside) then
 			car.honk = startHonk(vehicle, car, inside, volume, pitch, presses)
+			car.honk.startedAt = now
 		else
 			-- (the horns around you are built ahead: this is a horn that wasn't, or the inside version)
 			requestBuild(car.hornId, inside, true)
@@ -389,23 +424,38 @@ local function isKeyDown(conVar)
 end
 
 -- the driver's key, sent on press and release (a passenger's seat isn't a car: no horn). Not while
--- typing, in a menu or with the game in the background (alt-tab lets go of it)
+-- typing, in a menu or with the game in the background (alt-tab lets go of it).
+-- With car_horn_limit, your charge is worked out here with the server's rules (sh_horn.lua), so your
+-- horn weakens, croaks and stays silent when it does for everyone, and set right whenever the server
+-- sends a newer one
 local function pollKey(now)
 	local player = LocalPlayer()
 	local seat = player:GetVehicle()
 	local driving = CarHorn.HornOf(seat) ~= nil
 	ownCar = driving and seat or nil
+	local limited = CarHorn.Limited()
+	local serverNow = CurTime()
+	if limited then syncOwnCharge(player, serverNow) end
 	local down = driving and system.HasFocus() and not player:IsTyping() and not gui.IsGameUIVisible()
 		and not IsValid(vgui.GetKeyboardFocus()) and isKeyDown(keyConVar)
-	if down == ownHeld then return end
-	ownHeld = down
-	if down then
-		ownPresses = ownPresses + 1
-		ownHoldUntil = now + MIN_HONK
+	if down ~= ownHeld then
+		ownHeld = down
+		if down then
+			ownPresses = ownPresses + 1
+			ownHoldUntil = now + MIN_HONK
+			-- (a honk something else plays isn't the horn's: it costs no charge, as on the server)
+			local replaced = hook.Run("car_horn/replace", seat) == true
+			ownMuted = limited and not replaced and not CarHorn.PressCharge(ownCharge, serverNow)
+		elseif limited and ownCharge.honking then
+			CarHorn.ReleaseCharge(ownCharge, serverNow)
+		end
+		net.Start("car_horn")
+		net.WriteBool(down)
+		net.SendToServer()
+		-- your key, at once, for whatever plays this car's honk instead (car_horn/replace)
+		hook.Run("car_horn/held", driving and seat or nil, down)
 	end
-	net.Start("car_horn")
-	net.WriteBool(down)
-	net.SendToServer()
+	if limited and ownCharge.honking and not CarHorn.HoldCharge(ownCharge, serverNow) then ownMuted = true end
 end
 
 local nextRefresh = 0

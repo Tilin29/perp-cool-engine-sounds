@@ -41,6 +41,28 @@ function PoliceSiren.SoundingTone(vehicle)
 	return toneId
 end
 
+--[[
+	The horn override: while the siren sounds, the car horn's key plays the scheme's honkTone instead
+	(police phaser, EMS yelp, fire phaser) and the horn stays silent. The horn is its own module: it
+	asks its car_horn/replace hook whether anything takes a car's honk over, and this answers. The
+	key's state is the horn's networked one (HORN_NW / HORN_PRESSES_NW, read by name like the lights').
+]]
+PoliceSiren.HORN_NW = "horn_on"
+PoliceSiren.HORN_PRESSES_NW = "horn_presses"
+
+-- the tone the honk key plays on this car right now, or nil (no siren sounding, or no honkTone)
+function PoliceSiren.HonkTone(vehicle)
+	if not PoliceSiren.HasSiren(vehicle) or not PoliceSiren.SoundingTone(vehicle) then return nil end
+	local toneId = PoliceSiren.Scheme(vehicle).honkTone
+	if not toneId or toneId == "" or not PoliceSiren.CONFIG.tones[toneId] then return nil end
+
+	return toneId
+end
+
+hook.Add("car_horn/replace", "police_siren", function(vehicle)
+	if PoliceSiren.HonkTone(vehicle) then return true end
+end)
+
 -- the tone after `id` for the tone key: through the car's cycle, then off, then round again
 function PoliceSiren.NextTone(vehicle, toneId)
 	local cycle = PoliceSiren.Scheme(vehicle).cycle

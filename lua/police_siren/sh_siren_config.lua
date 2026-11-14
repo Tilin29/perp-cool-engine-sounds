@@ -14,8 +14,10 @@
 	sampleRate   44100 or 22050
 	lightTones   the tone each light mode starts: [1] = CODE 2, [2] = CODE 3 ("" = none)
 	cycle        the tones the tone key steps through, in order (then off, then the first again)
-	schemes      lightTones and cycle for the other light schemes (the lights' NW2 audio_lightscheme:
-	             fire, medical); a police car, or any scheme not listed, uses the two above
+	honkTone     the tone the car horn's key plays while the siren sounds, instead of the horn (as a real
+	             siren's horn override; "" = the horn honks as ever). Lights alone (no tone): the horn
+	schemes      lightTones, cycle and honkTone for the other light schemes (the lights' NW2
+	             audio_lightscheme: fire, medical); a police car, or any scheme not listed, uses the ones above
 	cabin        inside the car (driver and passengers): volume x this, muffled above `muffle` Hz
 	keys         default keys (players can rebind: police_siren_tonekey)
 
@@ -53,10 +55,11 @@ POLICE_SIREN.CONFIG = {
 	pitch = 1,
 	sampleRate = 44100,
 	lightTones = { "", "wail" },
-	cycle = { "wail", "yelp", "phaser", "hilo" },
+	cycle = { "wail", "yelp" },
+	honkTone = "phaser",
 	schemes = {
-		fire = { lightTones = { "", "firewail" }, cycle = { "firewail", "fireyelp", "firephaser" } },
-		medical = { lightTones = { "", "emswail" }, cycle = { "emswail", "emsyelp", "hilo" } },
+		fire = { lightTones = { "", "firewail" }, cycle = { "firewail", "fireyelp" }, honkTone = "firephaser" },
+		medical = { lightTones = { "", "emswail" }, cycle = { "emswail", "hilo" }, honkTone = "emsyelp" },
 	},
 	cabin = { volume = 0.35, muffle = 1400 },
 	keys = { tone = "q" },

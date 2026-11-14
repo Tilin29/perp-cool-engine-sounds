@@ -175,7 +175,7 @@ const el = (tag, props, ...kids) => {
   return e
 }
 const clone = (x) => JSON.parse(JSON.stringify(x))
-const STORE = 'siren_studio_settings_v2'   // (v2: horn removed, softer tones: older saves are left behind)
+const STORE = 'siren_studio_settings_v3'   // (v3: new cycles and the honk tones: older saves are left behind)
 
 let DEFAULTS = null, CFG = null, SEL = null
 
@@ -207,15 +207,18 @@ function normalize(c) {
   if (!Array.isArray(c.lightTones)) c.lightTones = clone(d.lightTones)
   while (c.lightTones.length < 2) c.lightTones.push('')
   if (!Array.isArray(c.cycle)) c.cycle = []
+  if (typeof c.honkTone !== 'string') c.honkTone = d.honkTone || ''
   // the fire / medical tone sets (edited in the file: the page plays the police rules); an older save
   // gets the file's sets and the tones they name
   if (!c.schemes || typeof c.schemes !== 'object' || Array.isArray(c.schemes)) c.schemes = clone(d.schemes || {})
+  for (const [name, sc] of Object.entries(c.schemes)) if (sc && sc.honkTone === undefined && d.schemes && d.schemes[name]) sc.honkTone = d.schemes[name].honkTone
   if (!c.tones || typeof c.tones !== 'object' || Array.isArray(c.tones)) c.tones = {}
   for (const sc of Object.values(c.schemes)) {
     if (!Array.isArray(sc.lightTones)) sc.lightTones = []
     while (sc.lightTones.length < 2) sc.lightTones.push('')
     if (!Array.isArray(sc.cycle)) sc.cycle = []
-    for (const id of [...sc.lightTones, ...sc.cycle]) if (id && !c.tones[id] && d.tones && d.tones[id]) c.tones[id] = clone(d.tones[id])
+    if (typeof sc.honkTone !== 'string') sc.honkTone = ''
+    for (const id of [...sc.lightTones, ...sc.cycle, sc.honkTone]) if (id && !c.tones[id] && d.tones && d.tones[id]) c.tones[id] = clone(d.tones[id])
   }
   c.keys = { tone: (c.keys && c.keys.tone) || (d.keys && d.keys.tone) || 'q' }
   // Lua doesn't keep the file's order: the cycle's tones first, then the rest
@@ -297,7 +300,7 @@ function onHost(m) {
 let ctx = null, master = null
 let voice = null        // { id, src, gain, start, dur } or { id, waiting: true }
 let mode = null         // 'preview' | 'sim' | null
-const sim = { lights: 0, tone: '', at: -1 }
+const sim = { lights: 0, tone: '', at: -1, honk: false }
 
 function audio() {
   if (!ctx) {
@@ -374,7 +377,10 @@ function chosenTone() {
 }
 function soundingTone() {
   const id = chosenTone()
-  return id && CFG.tones[id] ? id : null
+  if (!id || !CFG.tones[id]) return null
+  // the horn override (sh_siren.lua's HonkTone): the honk key held while the siren sounds
+  if (sim.honk && CFG.honkTone && CFG.tones[CFG.honkTone]) return CFG.honkTone
+  return id
 }
 function nextTone(id) {
   const c = CFG.cycle
@@ -446,9 +452,18 @@ document.addEventListener('keydown', (e) => {
   const k = e.key.toLowerCase()
   if (e.key === 'Shift') simLights()
   else if (k === pageKey(CFG.keys.tone)) simTone()
+  else if (e.key === 'Alt') { sim.honk = true; if (sim.lights) simUpdate() }
   else return
   e.preventDefault()
 })
+// the car horn's key (Alt, lua/car_horn): while held with the siren sounding, the honk tone plays
+document.addEventListener('keyup', (e) => {
+  if (e.key !== 'Alt') return
+  e.preventDefault()
+  sim.honk = false
+  if (sim.lights) simUpdate()
+})
+window.addEventListener('blur', () => { if (sim.honk) { sim.honk = false; if (sim.lights) simUpdate() } })
 
 // ---------------------------------------------------------------------------------------------
 // controls
@@ -546,9 +561,11 @@ $('delTone').onclick = () => {
   delete CFG.tones[id]
   CFG.lightTones = CFG.lightTones.map((x) => (x === id ? '' : x))
   CFG.cycle = CFG.cycle.filter((x) => x !== id)
+  if (CFG.honkTone === id) CFG.honkTone = ''
   for (const sc of Object.values(CFG.schemes)) {
     sc.lightTones = sc.lightTones.map((x) => (x === id ? '' : x))
     sc.cycle = sc.cycle.filter((x) => x !== id)
+    if (sc.honkTone === id) sc.honkTone = ''
   }
   if (voice && voice.id === id) sound(null)
   save()
@@ -580,13 +597,15 @@ function buildGlobals() {
     toneSelect('Lights CODE 3', () => CFG.lightTones[1], (v) => { CFG.lightTones[1] = v }, true),
     el('h3', null, 'Tone key cycle (in order, then off)'),
     buildCycle(),
+    toneSelect('Honk key plays', () => CFG.honkTone, (v) => { CFG.honkTone = v }, true),
+    el('p', { class: 'hint' }, 'While the siren sounds, the car horn's key (Alt) plays this instead of the horn, and letting go returns to the siren tone. Lights alone: the horn honks. Fire and medical cars have their own in the file (schemes).'),
     el('h3', null, 'Inside the car (driver and passengers)'),
     field('Volume inside', CFG.cabin, 'volume', { min: 0, max: 1, step: 0.01, unit: '×', change: onGlobal }),
     field('Muffled above', CFG.cabin, 'muffle', { min: 300, max: 8000, step: 10, log: true, unit: 'Hz', change: onGlobalRender }),
     el('p', { class: 'hint' }, 'The car body between you and the speaker. Tick "Inside the car" at the top to hear it.'),
     el('h3', null, 'Key (players can rebind)'),
     keyField('Tone key', 'tone'),
-    el('p', { class: 'hint' }, 'A key name as the game knows it: q, j, f2, kp_enter, lalt/ralt (alt = left)… Here on the page: Shift = lights (as in game), then the tone key.'),
+    el('p', { class: 'hint' }, 'A key name as the game knows it: q, j, f2, kp_enter, lalt/ralt (alt = left)… Here on the page: Shift = lights (as in game), the tone key, and hold Alt (the car horn's key) for the honk tone.'),
   )
 }
 // sound level per car model (cars whose engine carries further get a louder siren)
@@ -912,7 +931,7 @@ window.addEventListener('resize', () => drawPattern())
 // ---------------------------------------------------------------------------------------------
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
-const GLOBAL_ORDER = ['volume', 'soundLevel', 'soundLevels', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'schemes', 'cabin', 'keys', 'tones']
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'soundLevels', 'doppler', 'attack', 'release', 'stopPitch', 'pitch', 'sampleRate', 'lightTones', 'cycle', 'honkTone', 'schemes', 'cabin', 'keys', 'tones']
 const TONE_ORDER = ['name', 'level', 'pattern', 'logGlide', 'harmonics', 'voice2', 'vibrato', 'tremolo', 'speaker']
 const SUB_ORDER = {
   pattern: ['f', 'glide', 'hold', 'curve'], voice2: ['on', 'semitones', 'cents', 'level', 'offset'], vibrato: ['rate', 'depth'],
@@ -962,7 +981,8 @@ function exportLua() {
       out.push(tab(1) + 'schemes = {')
       for (const [name, sc] of Object.entries(v)) {
         const list = (a) => '{ ' + a.map(luaScalar).join(', ') + ' }'
-        out.push(tab(2) + luaKey(name) + ' = { lightTones = ' + list(sc.lightTones) + ', cycle = ' + list(sc.cycle) + ' },')
+        out.push(tab(2) + luaKey(name) + ' = { lightTones = ' + list(sc.lightTones) + ', cycle = ' + list(sc.cycle)
+          + (sc.honkTone ? ', honkTone = ' + luaScalar(sc.honkTone) : '') + ' },')
       }
       out.push(tab(1) + '},')
     } else if (k === 'soundLevels') {

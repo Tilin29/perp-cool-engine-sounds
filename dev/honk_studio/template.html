@@ -61,6 +61,10 @@
   kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 11px; }
   #sounding { font-weight: 600; min-width: 90px; color: var(--dim); }
   #sounding.on { color: var(--green); }
+  .meter { width: 90px; height: 10px; background: #0d1014; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 100%; background: var(--green); }
+  .meter i.weak { background: var(--amber); }
+  .meter i.out { background: var(--red); }
 </style>
 </head>
 <body>
@@ -75,6 +79,8 @@
   <div class="bar">
     <span style="color:var(--dim)">Hold <kbd id="keyName">Alt</kbd> to honk, as in game</span>
     <label class="bar" style="gap:4px;color:var(--dim)" title="Hear it as the driver and passengers do: muffled and quieter"><input id="inside" type="checkbox"> Inside the car</label>
+    <label class="bar" style="gap:4px;color:var(--dim)" title="The overuse limit as in game (car_horn_limit): spam the horn to hear it weaken, croak and go quiet"><input id="limitOn" type="checkbox" checked> Overuse limit</label>
+    <span class="bar" style="gap:4px;color:var(--dim)" title="Your horn charge (In game: the overuse limit)">Charge <span class="meter"><i id="chargeBar"></i></span></span>
     <span id="sounding">silent</span>
   </div>
   <span id="status">Loading the synth…</span>
@@ -193,6 +199,7 @@ function normalize(c) {
   const d = DEFAULTS
   for (const k of ['volume', 'soundLevel', 'sampleRate', 'default', 'doppler']) if (c[k] === undefined) c[k] = d[k]
   c.distance = Object.assign(clone(d.distance || { full: 0.1, at: 0.6, volume: 0.3, silent: 1 }), c.distance || {})
+  c.limit = Object.assign(clone(d.limit), c.limit || {})
   c.cabin = Object.assign(clone(d.cabin || { volume: 0.45, muffle: 1800 }), c.cabin || {})
   c.keys = { honk: (c.keys && c.keys.honk) || (d.keys && d.keys.honk) || 'lalt' }
   if (!c.horns || typeof c.horns !== 'object' || Array.isArray(c.horns) || !Object.keys(c.horns).length) c.horns = clone(d.horns)
@@ -313,6 +320,59 @@ function bufferOf(id) {
 }
 function levelOf(id) { const h = CFG.horns[id]; return CFG.volume * (h ? h.level : 1) * (inside ? CFG.cabin.volume : 1) }
 
+// the overuse limit, as lua/car_horn/sh_horn.lua works it out (the charge in seconds of horn)
+const charge = { charge: null, at: 0, honking: false, exhausted: false, croakUntil: null }
+let muted = false   // this press is silent: run dry, or pressed while exhausted
+const nowSeconds = () => performance.now() / 1000
+const limiting = () => $('limitOn').checked
+function advanceCharge(now) {
+  const limit = CFG.limit
+  if (charge.charge === null) charge.charge = limit.charge
+  const elapsed = Math.max(now - charge.at, 0)
+  charge.charge = charge.honking ? Math.max(0, charge.charge - elapsed) : Math.min(limit.charge, charge.charge + limit.refill * elapsed)
+  charge.at = now
+  if (charge.exhausted && !charge.honking && charge.charge >= limit.resume) charge.exhausted = false
+}
+function pressCharge(now) {
+  advanceCharge(now)
+  if (charge.exhausted) return false
+  charge.charge = Math.max(0, charge.charge - CFG.limit.pressCost)
+  charge.honking = true
+  charge.croakUntil = null
+  return true
+}
+function releaseCharge(now) { advanceCharge(now); charge.honking = false; charge.croakUntil = null }
+function holdCharge(now) {
+  advanceCharge(now)
+  if (charge.charge > 0) return true
+  if (charge.croakUntil === null) { charge.croakUntil = now + CFG.limit.croak; charge.exhausted = true; return true }
+  if (now < charge.croakUntil) return true
+  charge.honking = false
+  charge.croakUntil = null
+  return false
+}
+function chargeStrength() {
+  if (charge.croakUntil !== null) return 0
+  const limit = CFG.limit, weakFrom = limit.charge * limit.weakBelow
+  return weakFrom <= 0 || charge.charge >= weakFrom ? 1 : charge.charge / weakFrom
+}
+function weakFactors(strength) {
+  const limit = CFG.limit
+  return [limit.weakVolume + (1 - limit.weakVolume) * strength, limit.weakPitch + (1 - limit.weakPitch) * strength]
+}
+function relaxFactor(heldFor) {
+  const limit = CFG.limit
+  if (heldFor <= limit.relaxAfter) return 1
+  const p = Math.min((heldFor - limit.relaxAfter) / Math.max(limit.relaxTime, 0.01), 1)
+  return 1 - (1 - limit.relaxVolume) * p * p * (3 - 2 * p)
+}
+// the voice's level and pitch now: weakened by the charge, eased down on a long hold
+function voiceTargets(v) {
+  if (!limiting()) return [levelOf(v.id), 1]
+  const [weakVolume, weakPitch] = weakFactors(chargeStrength())
+  return [levelOf(v.id) * weakVolume * relaxFactor(ctx.currentTime - v.startedAt), weakPitch]
+}
+
 // fromLoop: start at the loop (a re-rendered horn swapped in while held), not the attack
 function startVoice(id, fromLoop) {
   const buf = bufferOf(id)
@@ -325,11 +385,14 @@ function startVoice(id, fromLoop) {
   src.loopStart = r.loopStart / r.sr
   src.loopEnd = buf.duration
   const gain = ctx.createGain()
+  const voice = { id, src, gain, startedAt: now }
+  const [level, rate] = voiceTargets(voice)
+  src.playbackRate.value = rate
   gain.gain.setValueAtTime(0, now)
-  gain.gain.linearRampToValueAtTime(levelOf(id), now + (fromLoop ? 0.03 : 0.003))
+  gain.gain.linearRampToValueAtTime(level, now + (fromLoop ? 0.03 : 0.003))
   src.connect(gain).connect(master)
   src.start(now, fromLoop ? src.loopStart : 0)
-  return { id, src, gain }
+  return voice
 }
 function releaseVoice(v, quick) {
   if (!v || v.waiting) return
@@ -340,8 +403,10 @@ function releaseVoice(v, quick) {
   v.gain.gain.setValueAtTime(v.gain.gain.value, now)
   v.gain.gain.linearRampToValueAtTime(0, now + fade)
   if (!quick && h.release.pitch !== 1) {
-    v.src.playbackRate.setValueAtTime(1, now)
-    v.src.playbackRate.linearRampToValueAtTime(Math.max(h.release.pitch, 0.05), now + fade)
+    const rate = v.src.playbackRate.value
+    v.src.playbackRate.cancelScheduledValues(now)
+    v.src.playbackRate.setValueAtTime(rate, now)
+    v.src.playbackRate.linearRampToValueAtTime(Math.max(rate * h.release.pitch, 0.05), now + fade)
   }
   v.src.stop(now + fade + 0.05)
 }
@@ -350,16 +415,41 @@ function press() {
   wantHeld = true
   audio()
   releaseVoice(voice, true)
-  voice = startVoice(SEL)
+  muted = limiting() && !pressCharge(nowSeconds())
+  voice = muted ? null : startVoice(SEL)
   showSounding()
 }
 function letGo() {
   if (!wantHeld) return
   wantHeld = false
+  if (charge.honking) releaseCharge(nowSeconds())
   releaseVoice(voice)
   voice = null
   showSounding()
 }
+// the charge drains while held and refills while not; a horn run dry croaks and goes quiet
+setInterval(() => {
+  if (!CFG) return
+  const now = nowSeconds()
+  if (limiting() && wantHeld && charge.honking) {
+    if (!holdCharge(now)) {
+      releaseVoice(voice)
+      voice = null
+      muted = true
+      showSounding()
+    }
+  } else {
+    advanceCharge(now)
+  }
+  if (voice && !voice.waiting && wantHeld) {
+    const [level, rate] = voiceTargets(voice)
+    voice.gain.gain.setTargetAtTime(level, ctx.currentTime, 0.03)
+    voice.src.playbackRate.setTargetAtTime(rate, ctx.currentTime, 0.03)
+  }
+  const bar = $('chargeBar'), limit = CFG.limit
+  bar.style.width = (100 * charge.charge / limit.charge).toFixed(1) + '%'
+  bar.className = charge.exhausted ? 'out' : charge.charge < limit.charge * limit.weakBelow ? 'weak' : ''
+}, 30)
 // a horn re-rendered while held: swapped in at its loop
 function onRendered(id) {
   if (!voice || voice.id !== id || !ctx || !wantHeld) return
@@ -369,11 +459,12 @@ function onRendered(id) {
   showSounding()
 }
 function retargetLevel() {
-  if (voice && !voice.waiting && wantHeld) voice.gain.gain.setTargetAtTime(levelOf(voice.id), ctx.currentTime, 0.02)
+  if (voice && !voice.waiting && wantHeld) voice.gain.gain.setTargetAtTime(voiceTargets(voice)[0], ctx.currentTime, 0.02)
 }
 function showSounding() {
   const s = $('sounding')
-  s.textContent = voice ? (CFG.horns[voice.id] ? CFG.horns[voice.id].name : voice.id) + (voice.waiting ? ' (rendering)' : '') : 'silent'
+  s.textContent = voice ? (CFG.horns[voice.id] ? CFG.horns[voice.id].name : voice.id) + (voice.waiting ? ' (rendering)' : '')
+    : wantHeld && muted ? 'silent (out of breath)' : 'silent'
   s.className = voice ? 'on' : ''
   $('honk').className = voice ? 'on' : ''
 }
@@ -530,6 +621,19 @@ function buildGlobals() {
     field('at', CFG.distance, 'at', { min: 0.1, max: 1, step: 0.01, unit: 'range', change: onFalloff }),
     field('Silent at', CFG.distance, 'silent', { min: 0.2, max: 2, step: 0.01, unit: 'range', change: onFalloff }),
     el('p', { class: 'hint', id: 'falloffHint' }),
+    el('h3', null, 'Overuse (honk spam)'),
+    field('Horn charge', CFG.limit, 'charge', { min: 1, max: 20, step: 0.5, unit: 's', change: onGlobal }),
+    field('Cost per press', CFG.limit, 'pressCost', { min: 0, max: 2, step: 0.05, unit: 's', change: onGlobal }),
+    field('Refill', CFG.limit, 'refill', { min: 0.05, max: 2, step: 0.05, unit: 's/s', change: onGlobal }),
+    field('Weak below', CFG.limit, 'weakBelow', { min: 0, max: 1, step: 0.05, unit: 'of it', change: onGlobal }),
+    field('Weakest volume', CFG.limit, 'weakVolume', { min: 0, max: 1, step: 0.01, unit: '×', change: onGlobal }),
+    field('Weakest pitch', CFG.limit, 'weakPitch', { min: 0.7, max: 1, step: 0.01, unit: '×', change: onGlobal }),
+    field('Croak', CFG.limit, 'croak', { min: 0, max: 1, step: 0.01, unit: 's', change: onGlobal }),
+    field('Back at', CFG.limit, 'resume', { min: 0, max: 10, step: 0.1, unit: 's', change: onGlobal }),
+    field('Long hold after', CFG.limit, 'relaxAfter', { min: 0.5, max: 20, step: 0.5, unit: 's', change: onGlobal }),
+    field('…eases to', CFG.limit, 'relaxVolume', { min: 0.1, max: 1, step: 0.01, unit: '×', change: onGlobal }),
+    field('…over', CFG.limit, 'relaxTime', { min: 0.1, max: 10, step: 0.1, unit: 's', change: onGlobal }),
+    el('p', { class: 'hint' }, 'Each player has this much horn (s): sounding uses it up, each press costs extra (tapping costs more than one blast), and it refills while silent. Running low, the horn gets quieter and its pitch sags (a dying battery); empty, it croaks once at its weakest and stays silent until refilled to "Back at". Server switch: car_horn_limit. Spam Alt here to hear it.'),
     (() => {
       const s = el('select', { onchange: () => { CFG.sampleRate = +s.value; onGlobalRender() } },
         el('option', { value: 44100, textContent: '44100 Hz' }), el('option', { value: 22050, textContent: '22050 Hz (half the memory)' }))
@@ -790,11 +894,12 @@ window.addEventListener('resize', () => drawWave())
 // ---------------------------------------------------------------------------------------------
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
-const GLOBAL_ORDER = ['volume', 'soundLevel', 'sampleRate', 'doppler', 'distance', 'cabin', 'keys', 'default', 'models', 'horns']
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'sampleRate', 'doppler', 'distance', 'limit', 'cabin', 'keys', 'default', 'models', 'horns']
 const HORN_ORDER = ['name', 'level', 'units', 'harmonics', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'attack', 'release', 'speaker']
 const SUB_ORDER = {
   units: ['f', 'level'], flutter: ['rate', 'depth'], jitter: ['rate', 'depth'], attack: ['time', 'pitch', 'curve'], release: ['time', 'pitch'],
   speaker: ['highpass', 'lowpass', 'drive', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['honk'], cabin: ['volume', 'muffle'], distance: ['full', 'at', 'volume', 'silent'],
+  limit: ['charge', 'pressCost', 'refill', 'weakBelow', 'weakVolume', 'weakPitch', 'croak', 'resume', 'relaxAfter', 'relaxVolume', 'relaxTime'],
 }
 const luaKey = (k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '[' + JSON.stringify(k) + ']')
 function luaNum(v) { return String(+(+v).toFixed(4)) }

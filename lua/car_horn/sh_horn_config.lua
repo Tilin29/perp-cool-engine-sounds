@@ -8,6 +8,12 @@
 	distance     the horn's own fall-off with distance, on top of the game's, in shares of the engine's audible
 	             range (audio_engine_range, for a car at this soundLevel): full volume up to `full`, falling
 	             evenly to `volume` at `at` and on, silent at `silent`
+	limit        overuse (server convar car_horn_limit 1 = on): each player has `charge` s of horn, used up while
+	             it sounds and `pressCost` s per press (tapping costs more than one blast), back at `refill` s per
+	             second. Under `weakBelow` of a full charge it weakens, down to `weakVolume` x the volume and
+	             `weakPitch` x the pitch at empty (a horn on a dying battery); empty, it croaks `croak` s at its
+	             weakest and is silent until the charge is back to `resume` s. Held over `relaxAfter` s, it eases
+	             down to `relaxVolume` x over `relaxTime` s (a stuck horn doesn't stay at full blast)
 	cabin        inside the car (driver and passengers): volume x this, muffled above `muffle` Hz
 	keys         default keys (honk: held down to sound the horn)
 	default      the horn of a car not listed in `models`
@@ -42,6 +48,7 @@ CAR_HORN.CONFIG = {
 	sampleRate = 44100,
 	doppler = 1,
 	distance = { full = 0.1, at = 0.6, volume = 0.3, silent = 1 },
+	limit = { charge = 5, pressCost = 0.3, refill = 0.25, weakBelow = 0.3, weakVolume = 0.35, weakPitch = 0.94, croak = 0.15, resume = 1, relaxAfter = 4, relaxVolume = 0.6, relaxTime = 2 },
 	cabin = { volume = 0.45, muffle = 1800 },
 	keys = { honk = "lalt" },
 	default = "dual",
