@@ -114,8 +114,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   speed ripple, a bearing/air hiss; housing response passes 0.3-7 kHz (`evBodyResponse`); level follows torque (regen softer) and
   speed (0.35 + 0.65 x share^0.5, so there's a whine from pulling away); orders whole/half for the 720 deg loop. Bands 1.35x apart;
   electric bands keep natural levels, no per-band loudness matching, the top band's on loop is set to `TARGET_EV_DB` -22 dB rms full band;
-  cl_engine plays EVs and their warning sound at `AudioEngine.EV_VOLUME` 0.5. (Before: one tone capped at 450 Hz, -32 dB and 0.1:
-  ~30 dB under the engines, "no sound" in the Tesla.) Measured A-weighted in dev/drive_demo, the Tesla runs ~3-5 dB under a BMW 1M.
+  cl_engine plays EVs and their warning sound at `AudioEngine.EV_VOLUME` 0.2 (0.5 was too loud: the user had it lowered by 60%). (Before: one tone capped at 450 Hz, -32 dB and 0.1:
+  ~30 dB under the engines, "no sound" in the Tesla.) Measured A-weighted in dev/drive_demo, the Tesla runs ~7-9 dB under a BMW 1M (at 0.5: 3-5 dB).
   No inverter (PWM carrier) tone: it doesn't follow the revs, so it can't live in the pitched band loops. `RenderEVHumLoop`: the
   pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and 1.25 kHz in a breath of air (two third-octave
   bands, as UN R138 / FMVSS 141 ask); cl_engine plays it full to 20 km/h, gone by 30, pitch +0.8% per km/h (the UN rule).

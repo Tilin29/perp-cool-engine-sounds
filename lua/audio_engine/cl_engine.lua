@@ -185,7 +185,7 @@ local function superchargerBandNames(env, variant)
 end
 -- electric motors (and their low-speed warning sound) play at this fraction of their banks: a
 -- real EV is quieter than an engine, though its whine sits where the ear is keenest (1-8 kHz)
-AudioEngine.EV_VOLUME = 0.5
+AudioEngine.EV_VOLUME = 0.2   -- (0.5 was too loud)
 local function glide(current, target, deltaTime)
 	local nextValue = current + (target - current) * min(1, deltaTime * 18)
 	local maxStep = VOLUME_SLEW * deltaTime
