@@ -183,9 +183,11 @@ local function superchargerBandNames(env, variant)
 	end
 	return names or nil
 end
--- electric motors (and their low-speed warning sound) play at this fraction of their banks: a
--- real EV is quieter than an engine, though its whine sits where the ear is keenest (1-8 kHz)
+-- electric motors play at this fraction of their banks: a real EV is quieter than an engine,
+-- though its whine sits where the ear is keenest (1-8 kHz)
 AudioEngine.EV_VOLUME = 0.1   -- (0.5 and 0.2 were too loud, 0.05 too quiet)
+-- and their warning sound at walking pace, what you hear from an EV idling (set apart from the whine)
+AudioEngine.EV_HUM_VOLUME = 0.2
 local function glide(current, target, deltaTime)
 	local nextValue = current + (target - current) * min(1, deltaTime * 18)
 	local maxStep = VOLUME_SLEW * deltaTime
@@ -585,7 +587,7 @@ local function updateSound(car, deltaTime)
 		-- quiet standing still (everyone around a parked EV hears it), up once it moves
 		-- (was 0.6 x (0.6 .. 1): too loud idling)
 		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)
-		humVolume = loopVolume * 0.35 * humFade * (0.35 + 0.65 * movingShare)
+		humVolume = loopVolume / AudioEngine.EV_VOLUME * AudioEngine.EV_HUM_VOLUME * 0.35 * humFade * (0.35 + 0.65 * movingShare)
 	end
 	--[[
 		Supercharger (sh_carlist CAR_SUPERCHARGER): belt-driven, so its whine follows the revs, not

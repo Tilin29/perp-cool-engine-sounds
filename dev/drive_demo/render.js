@@ -14,7 +14,9 @@ const ADDON = path.resolve(__dirname, '../..'), LUA = path.join(ADDON, 'lua/audi
 const OUT = path.join(__dirname, 'out'); fs.mkdirSync(OUT, { recursive: true })
 const SR = 44100, FPS = 60
 // electric motors play at this share of their banks in game (cl_engine.lua)
-const EV_VOLUME = +(fs.readFileSync(path.join(LUA, 'cl_engine.lua'), 'utf8').match(/AudioEngine\.EV_VOLUME = ([\d.]+)/) || [0, 1])[1]
+const CL_ENGINE = fs.readFileSync(path.join(LUA, 'cl_engine.lua'), 'utf8')
+const EV_VOLUME = +(CL_ENGINE.match(/AudioEngine\.EV_VOLUME = ([\d.]+)/) || [0, 1])[1]
+const EV_HUM_VOLUME = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_VOLUME = ([\d.]+)/) || [0, 1])[1]
 
 function readWav(f) {
   const b = fs.readFileSync(f); let o = 12, sr = 44100, ch = 1, bits = 16, data
@@ -147,7 +149,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       const rv = voice('road', road, true); rv.target = 0.5 * rrd ** 1.2 * 0.7 * (1 - 0.45 * Math.min(1, Math.max(0, (kmh - 60) / 100))) * loopGain; rv.pitch = 0.8 + 0.3 * rrd
       if (+electric) {   // the pedestrian warning sound (cl_engine): full to 20 km/h, gone by 30, +0.8% pitch per km/h
         const hv = voice('evhum', W(path.join(env, 'evhum.wav')), true)
-        hv.target = g * 0.35 * (1 - Math.min(1, Math.max(0, (kmh - 20) / 10))) * (0.35 + 0.65 * Math.min(1, v / 2)) * (+run ? 1 : 0)
+        hv.target = g / EV_VOLUME * EV_HUM_VOLUME * 0.35 * (1 - Math.min(1, Math.max(0, (kmh - 20) / 10))) * (0.35 + 0.65 * Math.min(1, v / 2)) * (+run ? 1 : 0)
         hv.pitch = 1 + 0.008 * Math.min(kmh, 30)
       }
       const wv = voice('wind', wind, true); wv.target = 0.5 * Math.min(1, Math.max(0, (kmh - 80) / 240)) ** 2 * 0.015; wv.pitch = 1

@@ -115,11 +115,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   hiss (1.5-3.5 kHz); housing response passes 0.3-4 kHz, steep above (`evBodyResponse`); level follows torque (regen softer) and
   speed (0.35 + 0.65 x share^0.5, so there's a whine from pulling away); orders whole/half for the 720 deg loop. Bands 1.35x apart;
   electric bands keep natural levels, no per-band loudness matching, the top band's on loop is set to `TARGET_EV_DB` -22 dB rms full band;
-  cl_engine plays EVs and their warning sound at `AudioEngine.EV_VOLUME` 0.1 (the user's: 0.5, then 0.2, were too loud, 0.05 too quiet). (Before: one tone capped at 450 Hz, -32 dB and 0.1:
+  cl_engine plays EVs at `AudioEngine.EV_VOLUME` 0.1 (the user's: 0.5, then 0.2, were too loud, 0.05 too quiet) and their warning sound at `AudioEngine.EV_HUM_VOLUME` 0.2 (the user's). (Before: one tone capped at 450 Hz, -32 dB and 0.1:
   ~30 dB under the engines, "no sound" in the Tesla.) Measured A-weighted in dev/drive_demo, the Tesla ran 3-5 dB under a BMW 1M at 0.5, 7-9 dB at 0.2; at 0.1 the motor is ~6 dB under that, and at speed the road noise (not scaled) is much of what you hear.
   No inverter (PWM carrier) tone: it doesn't follow the revs, so it can't live in the pitched band loops. `RenderEVHumLoop`: the
   pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and a faint 800 Hz in a little air (two third-octave
-  bands, as UN R138 / FMVSS 141 ask; 1.25 kHz and more air was a loud "idle fan" to the user); cl_engine plays it at 0.35 x (0.35
+  bands, as UN R138 / FMVSS 141 ask; 1.25 kHz and more air was a loud "idle fan" to the user); cl_engine plays it at EV_HUM_VOLUME x 0.35 x (0.35
   standing .. 1 moving), full to 20 km/h, gone by 30, pitch +0.8% per km/h (the UN rule). `RenderEVChime`: "ding ding ding" as an
   EV powers up (the user's idea), three 880 Hz bell tones 0.32 s apart (env bank `evchime`); cl_engine `playIgnitionChime` plays it
   only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
