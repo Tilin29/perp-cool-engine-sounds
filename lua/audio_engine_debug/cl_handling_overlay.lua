@@ -26,12 +26,11 @@ local COLORS = {
 	changed = Color(70, 52, 25), bad = Color(90, 30, 30), green = Color(95, 211, 138),
 }
 local WIDTH, ROW_HEIGHT, HEADER_HEIGHT, FOOTER_HEIGHT = 340, 22, 24, 18
-local APPLY_DELAY = 0.3   -- s after the last edit before it goes onto the car
+local STEP_APPLY_DELAY = 0.3   -- s after the last - / + / scroll step before it goes onto the car
+local TYPING_APPLY_DELAY = 1   -- s after the last key typed (Enter or clicking away applies at once)
 
 local editPanel          -- the editable copy, a child of the context menu (shown while C is held)
 local editPanelKey       -- which car / rows it was built for
--- rows shown once stay while you sit in that car (stepping a value back to the file's doesn't take it away), until x
-local stickyRows = { vehicle = nil, indices = nil }
 
 -- the car you drive, when the overlay may show for it
 local function overlayCar()
@@ -65,8 +64,8 @@ local function stepFor(data, index)
 	return nice * power
 end
 
-local function scheduleApply(vehicle)
-	timer.Create("audio_dbg_overlay_apply", APPLY_DELAY, 1, function()
+local function scheduleApply(vehicle, delay)
+	timer.Create("audio_dbg_overlay_apply", delay or STEP_APPLY_DELAY, 1, function()
 		if IsValid(vehicle) then EngineDebug.ApplyScript(vehicle, true) end
 	end)
 end
@@ -90,6 +89,8 @@ local function buildEditPanel(vehicle, data, indices)
 	if IsValid(editPanel) then editPanel:Remove() end
 	local x, y, width, height = position(#indices)
 	editPanel = vgui.Create("DPanel", g_ContextMenu)
+	-- (a panel in the context menu takes no clicks unless it asks for them)
+	editPanel:SetMouseInputEnabled(true)
 	editPanel:SetPos(x, y)
 	editPanel:SetSize(width, height)
 	editPanel:DockPadding(6, HEADER_HEIGHT, 6, FOOTER_HEIGHT)
@@ -137,7 +138,6 @@ local function buildEditPanel(vehicle, data, indices)
 		local removeButton = smallButton(row, "x", function()
 			local current = EngineDebug.ScriptData(vehicle)
 			if not current then return end
-			if stickyRows.indices then stickyRows.indices[index] = nil end
 			EngineDebug.RemoveFromOverlay(current, index)
 		end, "Take it off the overlay (unpin; a changed value comes back once it changes again)")
 		removeButton:Dock(RIGHT)
@@ -146,11 +146,15 @@ local function buildEditPanel(vehicle, data, indices)
 
 		local valueEntry = vgui.Create("DTextEntry")
 		local isNumber = tonumber(data.values[index]) ~= nil
-		local function setValue(value)
+		local function setValue(value, delay)
 			local current = EngineDebug.ScriptData(vehicle)
 			if not (current and KeyValues.ValidValue(value)) then return end
 			current.values[index] = value
-			scheduleApply(vehicle)
+			scheduleApply(vehicle, delay)
+		end
+		local function applyNow()
+			timer.Remove("audio_dbg_overlay_apply")
+			EngineDebug.ApplyScript(vehicle, true)
 		end
 		local function step(direction)
 			local current = EngineDebug.ScriptData(vehicle)
@@ -187,11 +191,16 @@ local function buildEditPanel(vehicle, data, indices)
 			draw.RoundedBox(3, 0, 0, entryWidth, entryHeight, background)
 			self:DrawTextEntryText(COLORS.text, COLORS.amber, COLORS.text)
 		end
-		valueEntry.OnChange = function(self) setValue(self:GetValue()) end
+		-- typing: a half-typed number isn't sent while you're still on it
+		valueEntry.OnChange = function(self) setValue(self:GetValue(), TYPING_APPLY_DELAY) end
 		valueEntry.OnEnter = function(self)
 			setValue(self:GetValue())
-			timer.Remove("audio_dbg_overlay_apply")
-			EngineDebug.ApplyScript(vehicle, true)
+			applyNow()
+		end
+		valueEntry.OnLoseFocus = function(self)
+			local current = EngineDebug.ScriptData(vehicle)
+			if current and current.values[index] ~= current.applied[index] then applyNow() end
+			hook.Run("OnTextEntryLoseFocus", self)
 		end
 		valueEntry.OnMouseWheeled = function(self, delta)
 			if not isNumber then return false end
@@ -225,17 +234,9 @@ local function update()
 		local requestedAt = EngineDebug.ScriptRequestedAt(vehicle)
 		if not requestedAt or RealTime() - requestedAt > 10 then EngineDebug.RequestScript(vehicle) end
 	end
+	-- got out or into another car: the rows kept for the last one go
+	if shownCar ~= vehicle then EngineDebug.ClearOverlayKept(shownCar) end
 	local indices = data and EngineDebug.OverlayIndices(data) or {}
-	if stickyRows.vehicle ~= vehicle or stickyRows.data ~= nil and data and #data.entries ~= stickyRows.entryCount then
-		stickyRows.vehicle, stickyRows.indices = vehicle, {}
-	end
-	stickyRows.data, stickyRows.entryCount = data, data and #data.entries or 0
-	if data then
-		for _, index in ipairs(indices) do stickyRows.indices[index] = true end
-		indices = {}
-		for index in pairs(stickyRows.indices) do indices[#indices + 1] = index end
-		table.sort(indices)
-	end
 	shownCar, shownData, shownIndices = vehicle, data, indices
 	local key = (#indices > 0 and IsValid(vehicle)) and (vehicle:EntIndex() .. ":" .. table.concat(indices, ",")) or nil
 	if not key or not IsValid(g_ContextMenu) then

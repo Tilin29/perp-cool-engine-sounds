@@ -311,19 +311,38 @@ local function isChanged(data, index)
 end
 EngineDebug.IsChanged = isChanged
 
--- the overlay's rows for a car: pinned, plus changed values not taken off it, in the script's order
+-- a row the overlay has shown stays on it while you sit in that car (stepping a changed value back to the
+-- file's doesn't take it away), until it's taken off: { [vehicle] = { [entry index] = true } }
+local overlayKept = setmetatable({}, { __mode = "k" })
+function EngineDebug.ClearOverlayKept(vehicle) if vehicle then overlayKept[vehicle] = nil end end
+
+-- pinned, or changed and not taken off
+local function wantsOverlay(data, index)
+	local id = data.ids[index]
+	if overlayPicks.pinned[id] then return true end
+	if not isChanged(data, index) then return false end
+	local dismissed = overlayPicks.dismissed[data.path]
+	return not (dismissed and dismissed[id] == data.values[index])
+end
+
+-- the overlay's rows for a car, in the script's order
 function EngineDebug.OverlayIndices(data)
-	local dismissed = overlayPicks.dismissed[data.path] or {}
+	local kept = overlayKept[data.vehicle]
+	if not kept or kept.path ~= data.path then
+		kept = { path = data.path, indices = {} }
+		overlayKept[data.vehicle] = kept
+	end
 	local indices = {}
 	for _, entry in ipairs(data.entries) do
-		local id = data.ids[entry.index]
-		local shown = overlayPicks.pinned[id]
-		if not shown and isChanged(data, entry.index) then
-			shown = dismissed[id] == nil or dismissed[id] ~= data.values[entry.index]
-		end
-		if shown then indices[#indices + 1] = entry.index end
+		if wantsOverlay(data, entry.index) then kept.indices[entry.index] = true end
+		if kept.indices[entry.index] then indices[#indices + 1] = entry.index end
 	end
 	return indices
+end
+
+function EngineDebug.IsOnOverlay(data, index)
+	local kept = overlayKept[data.vehicle]
+	return wantsOverlay(data, index) or (kept ~= nil and kept.path == data.path and kept.indices[index] == true)
 end
 
 -- take a row off the overlay: unpin it, and a changed value stays off until it changes again
@@ -334,8 +353,19 @@ function EngineDebug.RemoveFromOverlay(data, index)
 		overlayPicks.dismissed[data.path] = overlayPicks.dismissed[data.path] or {}
 		overlayPicks.dismissed[data.path][id] = data.values[index]
 	end
+	local kept = overlayKept[data.vehicle]
+	if kept then kept.indices[index] = nil end
 	saveOverlayPicks()
 	notifyScript(data.vehicle)
+end
+
+-- the menu's dot: on the overlay -> off it (pinned or changed alike), else pin it
+function EngineDebug.ToggleOverlay(data, index)
+	if EngineDebug.IsOnOverlay(data, index) then
+		EngineDebug.RemoveFromOverlay(data, index)
+	else
+		EngineDebug.SetPinned(data.ids[index], true)
+	end
 end
 
 --[[
@@ -817,14 +847,18 @@ local function buildScriptPage(pagePanel)
 		pinButton:SetWide(18)
 		pinButton:DockMargin(0, 2, 4, 2)
 		pinButton:SetText("")
-		pinButton:SetTooltip("Pin to the C overlay (the value on screen while driving, editable with C held)")
+		pinButton:SetTooltip("On the C overlay (the value on screen while driving, editable with C held): click to add or take off.\nChanged values go on by themselves.")
 		pinButton.Paint = function(self, width, height)
-			local pinned = EngineDebug.IsPinned(id)
-			local color = pinned and COLORS.amber or (self:IsHovered() and COLORS.muted or COLORS.line)
+			local latest = data()
+			local shown = latest and EngineDebug.IsOnOverlay(latest, entry.index)
+			local color = shown and (EngineDebug.IsPinned(id) and COLORS.amber or COLORS.amberDim) or (self:IsHovered() and COLORS.muted or COLORS.line)
 			draw.RoundedBox(height / 2, 2, 1, width - 4, height - 2, color)
-			if not pinned then draw.RoundedBox(height / 2 - 2, 4, 3, width - 8, height - 6, COLORS.panel) end
+			if not shown then draw.RoundedBox(height / 2 - 2, 4, 3, width - 8, height - 6, COLORS.panel) end
 		end
-		pinButton.DoClick = function() EngineDebug.SetPinned(id, not EngineDebug.IsPinned(id)) end
+		pinButton.DoClick = function()
+			local latest = data()
+			if latest then EngineDebug.ToggleOverlay(latest, entry.index) end
+		end
 		local keyLabel = label(row, entry.key .. (entry.occurrence > 1 and ("  #" .. entry.occurrence) or ""), COLORS.text)
 		keyLabel:Dock(LEFT)
 		keyLabel:SetWide(210)

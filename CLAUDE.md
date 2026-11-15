@@ -368,9 +368,12 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   save history: every Apply live / Save to data/ / overlay Save version adds v<n> + time + values changed from the file (unchanged = no new
   version) to data/audio_engine_debug/history/<script>.json, hover = changes from the previous version, click = load into the editor), Gearing (shift speeds, chart, audibility
   check, copies an AudioEngine.CAR_GEARING entry), Rev response (copies AudioEngine.CAR_REV / Drivetrain.REV), Handling (PERP default handling = handling/traction/stability 0), Settings.
-- `cl_handling_overlay.lua`: while driving, the pinned (the dot by a menu row) and changed values on the right of the HUD; holding C (sandbox
-  context menu) shows an editable copy parented to `g_ContextMenu` (- / +, scroll, Shift finer; applied live 0.3 s after the last edit, chat quiet),
-  x unpins / dismisses (a changed value comes back when it changes again; rows shown stay while you sit in that car). `audio_engine_debug_overlay`
+- `cl_handling_overlay.lua`: while driving, the pinned and changed values on the right of the HUD; holding C (sandbox
+  context menu) shows an editable copy parented to `g_ContextMenu` (it needs `SetMouseInputEnabled(true)`: a context-menu child takes no clicks
+  otherwise, the first version's buttons did nothing; keyboard via sandbox's OnTextEntryGetFocus/LoseFocus hooks). - / + / scroll (Shift finer) apply
+  0.3 s after the last step, typing 1 s after the last key or at once on Enter / clicking away; chat quiet. Rows shown stay while you sit in
+  that car (`overlayKept` in cl_debug, cleared on leaving it) until x or the menu's dot (= on the overlay or not: `EngineDebug.ToggleOverlay`)
+  takes them off; a dismissed changed value comes back when it changes again. `audio_engine_debug_overlay`
   (client, 1; Hide sets 0, the menu's "C overlay in the car" box). Pins/dismissals: data/audio_engine_debug/overlay.json.
 - `cl_perf.lua` / `sv_perf.lua`: profiler. Measures nothing until turned on (the user's rule): the wrappers on the addon's hooks
   (names `audio_engine*` / `police_siren*`), util.Trace*, CreateSound / CSoundPatch methods, DynamicLight, render quads/sprites,
