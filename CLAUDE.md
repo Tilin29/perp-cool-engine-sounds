@@ -131,9 +131,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   apart, mellow detuned bells, ~1.6 s; was three equal 880 Hz dings 0.32 s apart, which the user heard as an error warning) (env bank `evchime`); cl_engine `playIgnitionChime` plays it
   once the car is ready (phase run, `car.chimeAtReady`; it was at the key) only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
   real start (not one skipped on joining). `RenderEVPowerUp` (env bank `evpowerup`, 3.4 s, played at the key at the car,
-  `AudioEngine.EV_POWERUP_VOLUME` 0.03, sound level `EV_POWERUP_SOUNDLEVEL` 65): pre-charge relay tick + capacitor whine (1.4-2.2 kHz),
-  main contactor clunk at 0.5 s, then the motor energising 165 -> 330 Hz into the warning hum's notes, fading as the hum comes in at ready
-  (its end ~4 dB over the standing hum; at 0.1 it was 15 dB over).
+  `AudioEngine.EV_POWERUP_VOLUME` 0.06 (the user: 0.03 a bit quiet), sound level `EV_POWERUP_SOUNDLEVEL` 65): pre-charge relay tick + capacitor whine (1.4-2.2 kHz),
+  main contactor clunk at 0.5 s, then the motor energising 165 -> 330 Hz into the warning hum's notes, easing back 6 dB from 2.2 s and fading
+  as the hum comes in at ready, so its end stays a few dB over the standing hum (without the ease, 0.1 was 15 dB over).
   dev/drive_demo applies EV_VOLUME and the warning sound like cl_engine (`STEMS=1` also writes motor / hum / road / other tracks + speeds). Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
   a ~1 ms thump + 35-100 ms muffler scatter, body peak 140-190 Hz, low-passed (a 0.4 ms click with light saturation sounded like
   firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over;

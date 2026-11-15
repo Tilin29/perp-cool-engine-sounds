@@ -283,8 +283,9 @@ end
 AudioEngine.EV_CHIME_VOLUME = 0.3
 -- and its power-up (contactors clunking, the motor energising into the warning hum: env bank
 -- evpowerup), at the car, for anyone near: a quiet sound level, so it carries only a few meters
--- (its swell ends ~4 dB over the standing warning hum it turns into: at 0.1 it was 15 dB over)
-AudioEngine.EV_POWERUP_VOLUME = 0.03
+-- (the user: 0.03 was a bit quiet; the swell eases back 6 dB at its end, so it still meets the
+-- standing warning hum it turns into, ~4 dB over it)
+AudioEngine.EV_POWERUP_VOLUME = 0.06
 AudioEngine.EV_POWERUP_SOUNDLEVEL = 65
 local function playPowerUp(car, volume)
 	local sharedBank = Bank.env

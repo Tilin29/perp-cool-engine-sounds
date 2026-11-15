@@ -1644,8 +1644,8 @@ end
 	  0.50 s  the main contactor closes: a low clunk with a click on top, the whine stops
 	  0.6-2.6 s  the inverter energises the motor: a soft tone rising an octave, 165 -> 330 Hz,
 	          and swelling, with its octave above
-	  2.6-3 s  it holds on 330 Hz + 660 Hz, the warning sound's own notes (RenderEVHumLoop), and
-	          fades as the warning sound comes in at ready: the power-up turns into the hum
+	  2.2-3 s  it eases back 6 dB onto 330 Hz + 660 Hz, the warning sound's own notes (RenderEVHumLoop),
+	          and fades as the warning sound comes in at ready: the power-up turns into the hum
 ]]
 Synth.EV_POWERUP_HZ = 330
 function Synth.RenderEVPowerUp(sampleRate, yieldFn)
@@ -1657,7 +1657,7 @@ function Synth.RenderEVPowerUp(sampleRate, yieldFn)
 	local contactorClick = biquad("bandpass", 2200, sampleRate, 1.2)
 	local lowpass = biquad("lowpass", 2500, sampleRate, 0)
 	local relayAt, contactorAt = 0.06, 0.5
-	local swellFrom, swellTo, fadeFrom = 0.6, 2.6, 2.9
+	local swellFrom, swellTo, handoverFrom, fadeFrom = 0.6, 2.6, 2.2, 2.9
 	local topHz = Synth.EV_POWERUP_HZ
 	local phase, whinePhase = 0, 0
 	for i = 1, sampleCount do
@@ -1690,6 +1690,9 @@ function Synth.RenderEVPowerUp(sampleRate, yieldFn)
 			local frequency = topHz * 0.5 * 2 ^ ease
 			phase = phase + TAU * frequency / sampleRate
 			local level = 0.08 + 0.92 * ease
+			-- eases back to half (-6 dB) for the hand-over, so it meets the standing warning hum's level
+			local handover = min(1, max(0, (time - handoverFrom) / (fadeFrom - handoverFrom)))
+			level = level * (1 - 0.5 * handover * handover * (3 - 2 * handover))
 			if time > fadeFrom then level = level * 0.5 * (1 + cos(pi * min(1, (time - fadeFrom) / (duration - fadeFrom)))) end
 			local attack = min(1, (time - swellFrom) / 0.15)
 			sample = sample + attack * level * (0.42 * sin(phase) + 0.14 * ease * sin(2 * phase + 0.3))
