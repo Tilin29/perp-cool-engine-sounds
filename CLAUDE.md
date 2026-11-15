@@ -120,7 +120,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   No inverter (PWM carrier) tone: it doesn't follow the revs, so it can't live in the pitched band loops. `RenderEVHumLoop`: the
   pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and a faint 800 Hz in a little air (two third-octave
   bands, as UN R138 / FMVSS 141 ask; 1.25 kHz and more air was a loud "idle fan" to the user); cl_engine plays it at EV_HUM_VOLUME x 0.35 x (0.35
-  standing .. 1 moving), full to 20 km/h, gone by 30, pitch +0.8% per km/h (the UN rule). `RenderEVChime`: "ding ding ding" as an
+  standing .. 1 moving), heard only near the car (the user: ~5 m; `EV_HUM_FULL_DISTANCE` 3 to `EV_HUM_SILENT_DISTANCE` 5 m from
+  the body, `NearestPoint`, smoothstep; not for whoever sits in it), full to 20 km/h, gone by 30, pitch +0.8% per km/h (the UN rule). `RenderEVChime`: "ding ding ding" as an
   EV powers up (the user's idea), three 880 Hz bell tones 0.32 s apart (env bank `evchime`); cl_engine `playIgnitionChime` plays it
   only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
   real start (not one skipped on joining).

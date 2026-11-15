@@ -188,6 +188,10 @@ end
 AudioEngine.EV_VOLUME = 0.1   -- (0.5 and 0.2 were too loud, 0.05 too quiet)
 -- and their warning sound at walking pace, what you hear from an EV idling (set apart from the whine)
 AudioEngine.EV_HUM_VOLUME = 0.2
+-- heard only close by (meters from the car's body): full up to EV_HUM_FULL_DISTANCE, silent from
+-- EV_HUM_SILENT_DISTANCE (about three player heights). Sitting in the car it plays as it is
+AudioEngine.EV_HUM_FULL_DISTANCE = 3
+AudioEngine.EV_HUM_SILENT_DISTANCE = 5
 local function glide(current, target, deltaTime)
 	local nextValue = current + (target - current) * min(1, deltaTime * 18)
 	local maxStep = VOLUME_SLEW * deltaTime
@@ -588,6 +592,12 @@ local function updateSound(car, deltaTime)
 		-- (was 0.6 x (0.6 .. 1): too loud idling)
 		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)
 		humVolume = loopVolume / AudioEngine.EV_VOLUME * AudioEngine.EV_HUM_VOLUME * 0.35 * humFade * (0.35 + 0.65 * movingShare)
+		if not car.listenerInside and listener.valid then
+			local bodyDistance = entity:NearestPoint(listener.position):Distance(listener.position) * 0.0254   -- meters
+			local nearShare = math.Clamp((AudioEngine.EV_HUM_SILENT_DISTANCE - bodyDistance)
+				/ (AudioEngine.EV_HUM_SILENT_DISTANCE - AudioEngine.EV_HUM_FULL_DISTANCE), 0, 1)
+			humVolume = humVolume * nearShare * nearShare * (3 - 2 * nearShare)   -- (smoothstep)
+		end
 	end
 	--[[
 		Supercharger (sh_carlist CAR_SUPERCHARGER): belt-driven, so its whine follows the revs, not
@@ -1059,6 +1069,7 @@ local function updateCar(car, deltaTime)
 	car.speedAlongNose = car.speedAlongNose + (car.measuredSpeedAlongNose - car.speedAlongNose) * min(1, deltaTime * 10)
 	-- driving it but watching from a camera, you hear it from outside like anyone else
 	local listenerInside = isOwnCar and GetViewEntity() == player
+	car.listenerInside = listenerInside
 	dopplerFactor(car, deltaTime, listenerInside)
 	car.passbyGain = proximityGain(car, listenerInside, noseDirection)
 
