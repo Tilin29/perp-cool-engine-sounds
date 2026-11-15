@@ -110,15 +110,20 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
   gurgle, flow grit, bark. `Synth.EVRender` for the electric motor, after the e-NVH literature (the user asked for real EV
   sound): orders per motor turn `EV_PARTIALS` 9.5 (reduction gear 2nd stage mesh, the classic whine: ~1 kHz at 60 mph), 19, 24 (motor
-  electromagnetic), 31 (1st stage mesh), 48, gear meshes rattling at the shaft rate (`EV_MESH_RATTLE`, side tones +-1 order), a slight
-  speed ripple, a bearing/air hiss; housing response passes 0.3-7 kHz (`evBodyResponse`); level follows torque (regen softer) and
+  electromagnetic), 31 (1st stage mesh), 48 (31/48 kept faint, 0.16/0.08: at 0.30/0.24 the top of the revs whistled at 7-11 kHz, the user
+  said too high), gear meshes rattling at the shaft rate (`EV_MESH_RATTLE`, side tones +-1 order), a slight speed ripple, a bearing/air
+  hiss (1.5-3.5 kHz); housing response passes 0.3-4 kHz, steep above (`evBodyResponse`); level follows torque (regen softer) and
   speed (0.35 + 0.65 x share^0.5, so there's a whine from pulling away); orders whole/half for the 720 deg loop. Bands 1.35x apart;
   electric bands keep natural levels, no per-band loudness matching, the top band's on loop is set to `TARGET_EV_DB` -22 dB rms full band;
   cl_engine plays EVs and their warning sound at `AudioEngine.EV_VOLUME` 0.2 (0.5 was too loud: the user had it lowered by 60%). (Before: one tone capped at 450 Hz, -32 dB and 0.1:
   ~30 dB under the engines, "no sound" in the Tesla.) Measured A-weighted in dev/drive_demo, the Tesla runs ~7-9 dB under a BMW 1M (at 0.5: 3-5 dB).
   No inverter (PWM carrier) tone: it doesn't follow the revs, so it can't live in the pitched band loops. `RenderEVHumLoop`: the
-  pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and 1.25 kHz in a breath of air (two third-octave
-  bands, as UN R138 / FMVSS 141 ask); cl_engine plays it full to 20 km/h, gone by 30, pitch +0.8% per km/h (the UN rule).
+  pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and a faint 800 Hz in a little air (two third-octave
+  bands, as UN R138 / FMVSS 141 ask; 1.25 kHz and more air was a loud "idle fan" to the user); cl_engine plays it at 0.35 x (0.35
+  standing .. 1 moving), full to 20 km/h, gone by 30, pitch +0.8% per km/h (the UN rule). `RenderEVChime`: "ding ding ding" as an
+  EV powers up (the user's idea), three 880 Hz bell tones 0.32 s apart (env bank `evchime`); cl_engine `playIgnitionChime` plays it
+  only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
+  real start (not one skipped on joining).
   dev/drive_demo applies EV_VOLUME and the warning sound like cl_engine. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
   a ~1 ms thump + 35-100 ms muffler scatter, body peak 140-190 Hz, low-passed (a 0.4 ms click with light saturation sounded like
   firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over;

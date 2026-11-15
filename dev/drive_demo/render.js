@@ -122,6 +122,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     const spf = SR / FPS; let thrS = 0, limW = 0, xr = null, loopGain = 0, scThr = 0, lastThr = 0, popUntil = -1, nextPop = 0, rr = Math.random
     let seed = 7; rr = () => (seed = (seed * 16807) % 2147483647) / 2147483647
     shots.push({ w: start, pos: 0, vol: 0.9, pitch: 1 })
+    if (+electric) shots.push({ w: W(path.join(env, 'evchime.wav')), pos: 0, vol: 0.3, pitch: 1 })   // cl_engine EV_CHIME_VOLUME
     let tPhase = null
     for (let fi = 0; fi < frames.length; fi++) {
       const [rpm0, sThr, gear, v, limT, boost, bovE, run, cut] = frames[fi]; const dt = 1 / FPS, t = fi * dt
@@ -146,7 +147,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       const rv = voice('road', road, true); rv.target = 0.5 * rrd ** 1.2 * 0.7 * (1 - 0.45 * Math.min(1, Math.max(0, (kmh - 60) / 100))) * loopGain; rv.pitch = 0.8 + 0.3 * rrd
       if (+electric) {   // the pedestrian warning sound (cl_engine): full to 20 km/h, gone by 30, +0.8% pitch per km/h
         const hv = voice('evhum', W(path.join(env, 'evhum.wav')), true)
-        hv.target = g * 0.6 * (1 - Math.min(1, Math.max(0, (kmh - 20) / 10))) * (0.6 + 0.4 * Math.min(1, v / 2)) * (+run ? 1 : 0)
+        hv.target = g * 0.35 * (1 - Math.min(1, Math.max(0, (kmh - 20) / 10))) * (0.35 + 0.65 * Math.min(1, v / 2)) * (+run ? 1 : 0)
         hv.pitch = 1 + 0.008 * Math.min(kmh, 30)
       }
       const wv = voice('wind', wind, true); wv.target = 0.5 * Math.min(1, Math.max(0, (kmh - 80) / 240)) ** 2 * 0.015; wv.pitch = 1

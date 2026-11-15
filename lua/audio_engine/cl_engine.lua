@@ -264,6 +264,20 @@ local function playOneShot(car, kind, name, volume, pitch, fadeAt, duration)
 	car.oneShot = { kind = kind, patch = patch, startTime = RealTime(), fadeAt = fadeAt or 0, duration = duration }
 end
 
+-- an electric car's dash chime as it powers up ("ding ding ding"), for whoever sits in it only:
+-- a client-side sound on the local player, 2D (sound level 0), so nobody outside hears it
+AudioEngine.EV_CHIME_VOLUME = 0.3
+local function playIgnitionChime(car)
+	local sharedBank = Bank.env
+	local player = LocalPlayer()
+	if not (sharedBank and sharedBank.ready and sharedBank.evchime and IsValid(player)) then return end
+	if car.chimePatch then car.chimePatch:Stop() end
+	local patch = CreateSound(player, sharedBank.evchime)
+	patch:SetSoundLevel(0)
+	patch:PlayEx(min(1, settings.volume * AudioEngine.EV_CHIME_VOLUME), 100)
+	car.chimePatch = patch
+end
+
 local function playPop(car, volume, isBang)
 	local bank = car.bank
 	local sounds = isBang and bank.bangs or bank.pops
@@ -568,8 +582,10 @@ local function updateSound(car, deltaTime)
 	local humVolume = 0
 	if config.electric and sharedBank and sharedBank.ready and sharedBank.evhum and engineState.on and engineState.phase == "run" then
 		local humFade = 1 - math.Clamp((evSpeedKmh - 20) / 10, 0, 1)
-		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)   -- softer standing still
-		humVolume = loopVolume * 0.6 * humFade * (0.6 + 0.4 * movingShare)
+		-- quiet standing still (everyone around a parked EV hears it), up once it moves
+		-- (was 0.6 x (0.6 .. 1): too loud idling)
+		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)
+		humVolume = loopVolume * 0.35 * humFade * (0.35 + 0.65 * movingShare)
 	end
 	--[[
 		Supercharger (sh_carlist CAR_SUPERCHARGER): belt-driven, so its whine follows the revs, not
@@ -1014,6 +1030,7 @@ local function updateCar(car, deltaTime)
 			else
 				Drivetrain.Start(engineState, entity:GetNW2Bool("audio_emo", false))
 				car.loopGain = 0
+				if config.electric and isOwnCar then playIgnitionChime(car) end
 				if car.bank and car.bank.ready and not car.outOfRange then
 					local startSound = engineState.emotion and car.bank.startEmo or car.bank.start
 					playOneShot(car, "start", startSound.name, oneShotVolume, 100, startSound.fadeAt, startSound.dur)

@@ -261,19 +261,20 @@ local EV_PARTIALS = {
 	{ 9.5, 1.00, 0.6, true },     -- reduction gear, 2nd stage mesh
 	{ 19,  0.22, 0.7, true },     -- its harmonic
 	{ 24,  0.50, 0.9, false },    -- motor electromagnetic order
-	{ 31,  0.30, 0.6, true },     -- 1st stage mesh (the motor's pinion)
-	{ 48,  0.24, 0.9, false },    -- motor electromagnetic order, 2nd
+	{ 31,  0.16, 0.6, true },     -- 1st stage mesh (the motor's pinion)
+	{ 48,  0.08, 0.9, false },    -- motor electromagnetic order, 2nd
+	-- (31 and 48 were 0.30 / 0.24: near the top they reached 7-11 kHz, a piercing whistle)
 }
 local EV_MESH_RATTLE = 0.3   -- shaft-rate level ripple on the gear meshes (side tones at +-1 order)
 
 -- how the drive unit's housing and the body pass a tone on: little below ~300 Hz, housing
--- resonances around 1.2 and 3 kHz, rolled off above ~7 kHz; nothing near the file's top
--- (the band loops are pitched up to ~1.2x in game)
+-- resonances around 1.2 and 3 kHz, rolled off steeply above ~4 kHz (from 7 kHz the top of the
+-- revs whistled); nothing near the file's top (the band loops are pitched up to ~1.2x in game)
 local function evBodyResponse(partialHz, sampleRate)
 	if partialHz > 0.4 * sampleRate then return 0 end
 	local offset1, offset2 = (partialHz - 1200) / 500, (partialHz - 3000) / 1000
 	local resonance = 0.8 + 0.35 / (1 + offset1 * offset1) + 0.25 / (1 + offset2 * offset2)
-	local highRolloff = partialHz / 7000
+	local highRolloff = partialHz / 4000
 	return resonance * partialHz * partialHz / (partialHz * partialHz + 90000) / (1 + highRolloff * highRolloff * highRolloff * highRolloff)
 end
 
@@ -300,7 +301,7 @@ function Synth.EVRender(generator, out, offset, count)
 	local driftNorm = 1 / (0.28 * sqrt(driftCoefficient))              -- makes the twice-smoothed noise ~1 rms
 	local rippleCoefficient = 1 - exp(-TAU * 25 / sampleRate)            -- speed ripple, ~25 Hz
 	local rippleNorm = 1 / (0.28 * sqrt(rippleCoefficient))
-	local hissCoefficient1, hissCoefficient2 = 1 - exp(-TAU * 1800 / sampleRate), 1 - exp(-TAU * 6000 / sampleRate)
+	local hissCoefficient1, hissCoefficient2 = 1 - exp(-TAU * 1500 / sampleRate), 1 - exp(-TAU * 3500 / sampleRate)
 	local radiansPerSample = TAU / sampleRate
 	local partialCount = #EV_PARTIALS
 	local brightness = 0.5 + tone   -- the higher orders follow the profile's tone
@@ -337,10 +338,10 @@ function Synth.EVRender(generator, out, offset, count)
 			sample = sample + partialLevel * evBodyResponse(partialHz, sampleRate) * sin(phase)
 		end
 		sample = sample * level
-		-- bearings and cooling air: a band of noise around 2-6 kHz
+		-- bearings and cooling air: a band of noise around 1.5-3.5 kHz
 		hiss1 = hiss1 + (random - hiss1) * hissCoefficient1
 		hiss2 = hiss2 + ((random - hiss1) - hiss2) * hissCoefficient2
-		sample = sample + hiss2 * 0.1 * speedShare ^ 1.2 * (0.6 + 0.4 * load)
+		sample = sample + hiss2 * 0.07 * speedShare ^ 1.2 * (0.6 + 0.4 * load)
 		out[offset + i] = sample * gain * 0.6
 	end
 	generator.rpm, generator.throttle, generator.gain = smoothedRpm, smoothedThrottle, gain
@@ -1607,8 +1608,8 @@ end
 --[[
 	Electric low-speed sound, the pedestrian warning sound (AVAS) EVs must play at walking pace
 	(UN R138 up to 20 km/h, FMVSS 141 up to 30): tones in two separate third-octave bands of the
-	315 Hz-5 kHz range the rules ask for, a soft 330 Hz hum (and its octave) and a thin 1.25 kHz
-	tone, in a breath of air, with a slow shimmer. cl_engine raises its pitch with speed (the UN
+	315 Hz-5 kHz range the rules ask for, a soft 330 Hz hum (and its octave) and a faint 800 Hz
+	tone, in a little air, with a slow shimmer (1.25 kHz and more air sounded like a loud fan). cl_engine raises its pitch with speed (the UN
 	rule: ~0.8% per km/h) and fades it out by 30 km/h, as the motor whine takes over. Every tone and
 	the shimmer run whole cycles over the 2 s loop. Shared by every electric car (env bank).
 ]]
@@ -1618,21 +1619,55 @@ function Synth.RenderEVHumLoop(sampleRate, yieldFn)
 	local crossfadeLength = floor(sampleRate * 0.2)
 	local totalSamples = loopLength + crossfadeLength
 	local buffer = {}
-	local lowHz, highHz = 330, 1250
-	local airFilter = biquad("bandpass", 1100, sampleRate, 0.9)
-	local lowpass = biquad("lowpass", 3000, sampleRate, 0)
+	local lowHz, highHz = 330, 800
+	local airFilter = biquad("bandpass", 700, sampleRate, 0.9)
+	local lowpass = biquad("lowpass", 1800, sampleRate, 0)
 	for i = 1, totalSamples do
 		local time = i / sampleRate
 		-- two slightly detuned voices beat slowly (0.5 Hz): a living hum, not a test tone
 		local shimmer = 1 + 0.15 * sin(TAU * 0.5 * time)
 		local tone = 0.42 * sin(TAU * lowHz * time)
 			+ 0.12 * sin(TAU * (lowHz * 2 + 0.5) * time) * shimmer
-			+ 0.16 * sin(TAU * highHz * time) * (2 - shimmer)
-			+ 0.06 * sin(TAU * (highHz + 0.5) * time)
-		buffer[i] = runBiquad(lowpass, tone * 0.6 + runBiquad(airFilter, random()) * 0.2)
+			+ 0.08 * sin(TAU * highHz * time) * (2 - shimmer)
+			+ 0.03 * sin(TAU * (highHz + 0.5) * time)
+		buffer[i] = runBiquad(lowpass, tone * 0.6 + runBiquad(airFilter, random()) * 0.07)
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
 	return makeLoop(buffer, loopLength, crossfadeLength), loopLength
+end
+
+--[[
+	Electric car's dash chime as it powers up: "ding ding ding", three soft electronic bell tones
+	(880 Hz with a faint octave and twelfth that die away faster, so each ding rounds off) 0.32 s
+	apart, each fading out over ~0.4 s. cl_engine plays it only for the player sitting in the car
+	(2D, at the player): no one outside hears it. Env bank `evchime`.
+]]
+Synth.EV_CHIME_HZ = 880
+Synth.EV_CHIME_COUNT = 3
+Synth.EV_CHIME_SPACING = 0.32
+function Synth.RenderEVChime(sampleRate, yieldFn)
+	local duration = Synth.EV_CHIME_SPACING * (Synth.EV_CHIME_COUNT - 1) + 0.6
+	local sampleCount = floor(sampleRate * duration)
+	local buffer = {}
+	local frequency = Synth.EV_CHIME_HZ
+	for i = 1, sampleCount do
+		local time = (i - 1) / sampleRate
+		local sample = 0
+		for ding = 0, Synth.EV_CHIME_COUNT - 1 do
+			local dingTime = time - ding * Synth.EV_CHIME_SPACING
+			if dingTime >= 0 then
+				local attack = min(1, dingTime / 0.004)
+				local tail = max(0, 1 - dingTime / 0.6)     -- reaches silence before the sound ends
+				local phase = TAU * frequency * dingTime
+				sample = sample + attack * tail * (exp(-dingTime / 0.13) * sin(phase)
+					+ 0.15 * exp(-dingTime / 0.06) * sin(2 * phase)
+					+ 0.05 * exp(-dingTime / 0.04) * sin(3 * phase))
+			end
+		end
+		buffer[i] = sample * 0.5
+		if yieldFn and i % 8192 == 0 then yieldFn() end
+	end
+	return buffer, duration
 end
 
 --[[
