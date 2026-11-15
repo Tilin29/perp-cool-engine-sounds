@@ -124,8 +124,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   No inverter (PWM carrier) tone: it doesn't follow the revs, so it can't live in the pitched band loops. `RenderEVHumLoop`: the
   pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and a faint 800 Hz in a little air (two third-octave
   bands, as UN R138 / FMVSS 141 ask; 1.25 kHz and more air was a loud "idle fan" to the user); cl_engine plays it at EV_HUM_VOLUME x 0.35 x (0.35
-  standing .. `EV_HUM_MOVING_GAIN` 2 moving: the user wanted it louder driving slow, was 1), heard only near the car (the user: ~5 m; `EV_HUM_FULL_DISTANCE` 3 to `EV_HUM_SILENT_DISTANCE` 5 m from
-  the body, `NearestPoint`, smoothstep; not for whoever sits in it), full to `EV_HUM_FULL_MPH` 30 mph, gone by `EV_HUM_GONE_MPH` 35 (the user's; was 20 -> 30 km/h), pitch +0.8% per km/h (the UN rule). `RenderEVChime`: a chime as an
+  standing .. `EV_HUM_MOVING_GAIN` 2 moving: the user wanted it louder driving slow, was 1), standing still heard only near the car (the user: ~5 m; `EV_HUM_FULL_DISTANCE` 3 to `EV_HUM_SILENT_DISTANCE` 5 m from
+  the body, `NearestPoint`, smoothstep; not for whoever sits in it); moving it carries like the motor (the limit fades out by 2 m/s, `movingShare`:
+  the user, it was near-only at any speed; driving, it measures -43 dBA in dev/drive_demo, the motor -44..-49 at 20-80 mph), full to `EV_HUM_FULL_MPH` 30 mph, gone by `EV_HUM_GONE_MPH` 35 (the user's; was 20 -> 30 km/h), pitch +0.8% per km/h (the UN rule). `RenderEVChime`: a chime as an
   EV powers up (the user's idea): `Synth.EV_CHIME_NOTES` { hz, at, level }, soft rising notes ringing into each other (E5 A5 C#6, 0.14 s
   apart, mellow detuned bells, ~1.6 s; was three equal 880 Hz dings 0.32 s apart, which the user heard as an error warning) (env bank `evchime`); cl_engine `playIgnitionChime` plays it
   once the car is ready (phase run, `car.chimeAtReady`; it was at the key) only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
@@ -133,7 +134,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `AudioEngine.EV_POWERUP_VOLUME` 0.03, sound level `EV_POWERUP_SOUNDLEVEL` 65): pre-charge relay tick + capacitor whine (1.4-2.2 kHz),
   main contactor clunk at 0.5 s, then the motor energising 165 -> 330 Hz into the warning hum's notes, fading as the hum comes in at ready
   (its end ~4 dB over the standing hum; at 0.1 it was 15 dB over).
-  dev/drive_demo applies EV_VOLUME and the warning sound like cl_engine. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
+  dev/drive_demo applies EV_VOLUME and the warning sound like cl_engine (`STEMS=1` also writes motor / hum / road / other tracks + speeds). Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
   a ~1 ms thump + 35-100 ms muffler scatter, body peak 140-190 Hz, low-passed (a 0.4 ms click with light saturation sounded like
   firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over;
   played at 0.7 x (cl_engine `popVolume`, ~3 dB up on the 0.5 they used to play at).

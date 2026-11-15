@@ -122,7 +122,11 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     const N = Math.ceil(frames.length * SR / FPS) + SR, out = new Float32Array(N)
     // a voice: a loop (or one-shot) played at a pitch, its volume gliding per sample
     const voices = new Map()
-    function voice(key, w, loop) { let vo = voices.get(key); if (!vo) { vo = { w, pos: 0, vol: 0, loop, pitch: 1 }; voices.set(key, vo) } return vo }
+    function voice(key, w, loop) { let vo = voices.get(key); if (!vo) { vo = { key, w, pos: 0, vol: 0, loop, pitch: 1 }; voices.set(key, vo) } return vo }
+    // STEMS=1: the loops also go to one track each (motor / engine bands + limiter, hum, road + wind, other),
+    // written next to the mix as <car>_<stem>.wav, to compare their levels
+    const stems = process.env.STEMS ? { motor: new Float32Array(N), hum: new Float32Array(N), road: new Float32Array(N), other: new Float32Array(N) } : null
+    const stemOf = (vo) => /^(on|off)\d|^lim$/.test(vo.key) ? 'motor' : vo.key === 'evhum' ? 'hum' : vo.key === 'road' || vo.key === 'wind' ? 'road' : 'other'
     const shots = []
     const spf = SR / FPS; let thrS = 0, limW = 0, xr = null, loopGain = 0, scThr = 0, lastThr = 0, popUntil = -1, nextPop = 0, rr = Math.random
     let seed = 7; rr = () => (seed = (seed * 16807) % 2147483647) / 2147483647
@@ -189,7 +193,9 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
         if (tg === 0 && vo.vol < 1e-4) { vo.vol = 0; vo.pos = (vo.pos + step * (s1 - s0)) % len; continue }
         const dv = (tg - vo.vol) / (s1 - s0)
         for (let i = s0; i < s1; i++) { let p = vo.pos, k = Math.floor(p), fr = p - k
-          out[i] += vo.vol * (vo.w.s[k % len] * (1 - fr) + vo.w.s[(k + 1) % len] * fr)
+          const sample = vo.vol * (vo.w.s[k % len] * (1 - fr) + vo.w.s[(k + 1) % len] * fr)
+          out[i] += sample
+          if (stems) stems[stemOf(vo)][i] += sample
           vo.pos = (p + step) % len; vo.vol += dv }
       }
       for (const sh of shots) { if (sh.done || (sh.at != null && sh.at > fi)) continue
@@ -203,6 +209,10 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     const endS = Math.round(frames.length * spf); for (let i = 0; i < SR / 4; i++) { const j = endS - SR / 4 + i; if (j >= 0 && j < N) out[j] *= 1 - i / (SR / 4) }
     const file = path.join(OUT, name.replace(/[^\w]+/g, '_') + '.wav')
     writeWav(file, out.subarray(0, endS))
+    if (stems) {
+      for (const [stem, track] of Object.entries(stems)) writeWav(file.replace(/\.wav$/, `_${stem}.wav`), track.subarray(0, endS))
+      fs.writeFileSync(file.replace(/\.wav$/, '_speed.json'), JSON.stringify(frames.map((r) => r[3])))
+    }
     if (process.env.TRACE) for (let fi = 0; fi < frames.length; fi += 30) console.log((fi / FPS).toFixed(1), frames[fi].slice(0, 4).map(x => x.toFixed(2)).join(" "))
     const gearsUsed = new Set(frames.map(r => r[2]).filter(x => x > 0))
     console.log(`${name}: ${engine}, top ${top} km/h, gears end at ${ends} km/h, used ${Math.max(...gearsUsed)}; ${(endS / SR).toFixed(1)} s -> ${path.relative(ADDON, file)}`)

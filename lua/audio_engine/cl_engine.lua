@@ -188,8 +188,9 @@ end
 AudioEngine.EV_VOLUME = 0.1   -- (0.5 and 0.2 were too loud, 0.05 too quiet)
 -- and their warning sound at walking pace, what you hear from an EV idling (set apart from the whine)
 AudioEngine.EV_HUM_VOLUME = 0.2
--- heard only close by (meters from the car's body): full up to EV_HUM_FULL_DISTANCE, silent from
--- EV_HUM_SILENT_DISTANCE (about three player heights). Sitting in the car it plays as it is
+-- standing still, heard only close by (meters from the car's body): full up to EV_HUM_FULL_DISTANCE,
+-- silent from EV_HUM_SILENT_DISTANCE (about three player heights); moving (2 m/s and up) it carries
+-- like the motor's own sound. Sitting in the car it plays as it is
 AudioEngine.EV_HUM_FULL_DISTANCE = 3
 AudioEngine.EV_HUM_SILENT_DISTANCE = 5
 -- moving, the warning sound plays this much louder than standing (the user: louder driving slow;
@@ -616,11 +617,15 @@ local function updateSound(car, deltaTime)
 		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)
 		humVolume = loopVolume / AudioEngine.EV_VOLUME * AudioEngine.EV_HUM_VOLUME * 0.35 * humFade
 			* (0.35 + (AudioEngine.EV_HUM_MOVING_GAIN - 0.35) * movingShare)
-		if not car.listenerInside and listener.valid then
+		-- standing, it's heard only right by the car; moving, it carries like the motor (the user:
+		-- the short range is for a stationary car only. It was near-only at any speed, so a Tesla
+		-- driving by at 20 mph was all but silent past 5 m)
+		if not car.listenerInside and listener.valid and movingShare < 1 then
 			local bodyDistance = entity:NearestPoint(listener.position):Distance(listener.position) * 0.0254   -- meters
 			local nearShare = math.Clamp((AudioEngine.EV_HUM_SILENT_DISTANCE - bodyDistance)
 				/ (AudioEngine.EV_HUM_SILENT_DISTANCE - AudioEngine.EV_HUM_FULL_DISTANCE), 0, 1)
-			humVolume = humVolume * nearShare * nearShare * (3 - 2 * nearShare)   -- (smoothstep)
+			local nearGain = nearShare * nearShare * (3 - 2 * nearShare)   -- (smoothstep)
+			humVolume = humVolume * (nearGain + (1 - nearGain) * movingShare)
 		end
 	end
 	--[[
