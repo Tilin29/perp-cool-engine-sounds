@@ -10,14 +10,6 @@ Drop this folder into `garrysmod/addons/`. For the example car, also copy `addon
 - SL65 AMG (RTU Blue): skin 1
 - SL65 AMG (RTU Yellow): skin 2
 
-## Modules
-The engine sound is the core (`lua/audio_engine/`) and works on its own. These are separate, optional modules, each in its own folder: delete a folder to drop it, nothing else needs changing.
-- `lua/audio_engine_handling/`: handling assists (anti-spin setup, traction control, stability control), the speed limiter, PERP's physics on the test script, and the tuning menu's acceleration / top speed.
-- `lua/audio_engine_hud/`: the speed / rpm HUD.
-- `lua/audio_engine_debug/`: debug tools (below).
-
-The police siren (`lua/police_siren/`) and car horns (`lua/car_horn/`) have their own loaders and are separate from the engine too.
-
 ## Starting the engine
 The engine is off when you get in, and the car is silent and can't drive. Press **R** to start it: it cranks, catches, flares and settles to idle, and the car only drives once that has finished (about 2 s, or about 3.5 s with the rev flare). Press **R** again to switch it off.
 - Pick your own key with `audio_engine_startkey` (a key name such as `k` or `f1`, or `none`). `bind <key> audio_engine_toggle` also works.
@@ -118,7 +110,7 @@ Also remove the engine `Gear`/`State` sounds from that script, or they play on t
 - less rear brake bias and slight front drive
 - only a touch of power cut while steering
 
-On top of that, a server-side **stability control** (`lua/audio_engine_handling/sv_stability.lua`) works out how fast the car *should* be rotating for your steering keys at that speed, and compares it with how fast it *is* rotating:
+On top of that, a server-side **stability control** (`sv_stability.lua`) works out how fast the car *should* be rotating for your steering keys at that speed, and compares it with how fast it *is* rotating:
 - rotating more than you asked (a spin starting): it catches it. With the handbrake held it allows much more, so drifts still work.
 - rotating against your steering (counter-steering out of a slide): it helps stop the rotation
 - rotating less than you asked (pushing wide): it adds a little turn-in
@@ -177,7 +169,7 @@ Commands:
   - `topSpeed` (the gearing fit). `"auto"` reads MaxSpeed from the car's vehicle script.
   - `shift`: the gearbox shift points
   - `wheelRadius`, `soundLevel` and `volume`
-  - `stability`: the assist (`false` turns it off; handling module)
+  - `stability`: the assist (`false` turns it off)
 - `addons/sl65amg_rtu/scripts/vehicles/plpd/sl65amg_rtu.txt`: the example car's handling (power, grip, suspension, top speed); its engine settings are in `addons/sl65amg_rtu/lua/sl65amg_rtu/sh_car.lua`.
 
 To give another jeep-rigged car this engine, call `AUDIO_ENGINE.RegisterCar("models/....mdl", { ... })` in `sh_config.lua`.

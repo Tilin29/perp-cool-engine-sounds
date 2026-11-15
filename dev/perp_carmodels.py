@@ -2,7 +2,7 @@
 Builds the PERP car -> model / vehicle script table for lua/audio_engine/sh_carlist.lua.
 
   python -I perp_carmodels.py <extracted dev pack> <file index> > out.lua
-  python -I perp_carmodels.py <extracted dev pack> --physics ../lua/audio_engine_handling/sv_perp_physics.lua
+  python -I perp_carmodels.py <extracted dev pack> --physics ../lua/audio_engine/sv_perp_physics.lua
 
 <extracted dev pack>  folder holding scripts/vehicles/ from the PERP dev content (workshop 3792392486)
 <file index>          text file with one game path per line, of every mounted content pack (to check models exist)

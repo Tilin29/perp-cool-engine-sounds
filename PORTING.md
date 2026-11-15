@@ -62,15 +62,11 @@ Don't copy these files. They hold the extras:
 | File | What it does |
 |---|---|
 | `sv_engine.lua` | ignition key that holds the car until start-up ends, tuning net message, `!engine` |
+| `sv_handling.lua`, `sv_perp_physics.lua` | anti-spin, traction control, physics changes |
+| `sv_stability.lua` | stability assist |
+| `sv_cruise.lua` | speed limiter (middle mouse) |
 | `cl_menu.lua` | tuning menu |
-| `sh_police.lua`, `sv_police.lua`, `cl_police.lua` | emergency lights on the job vehicles |
-| `sv_seats.lua` | passenger seats |
-| `lua/audio_engine_handling/` | the handling module: anti-spin, traction control, stability assist, speed limiter, PERP physics on the test script, the menu's acceleration / top speed |
-| `lua/audio_engine_hud/` | the rpm/speed HUD module |
-| `lua/audio_engine_debug/` | debug tools |
-
-Handling and the HUD are separate modules (their own folders): the engine sound never calls
-them, so leaving them out needs no edits to the files you copy.
+| `cl_hud.lua` | rpm/speed HUD |
 | `scripts/` | the test script cars fall back on off the PERP server |
 | `addons/sl65amg_rtu/` | the example police car: a separate addon, not part of the port |
 

@@ -1,11 +1,11 @@
 /*
-  Offline checks of the handling module's sv_handling.lua (lua/audio_engine_handling/) with a fake vehicle (no Garry's Mod needed):
+  Offline checks of sv_handling.lua with a fake vehicle (no Garry's Mod needed):
     - a PERP car spawned on the generic test script gets its PERP base-script physics
     - the anti-spin setup (front brake bias, throttle cut, lower centre, grip, handbrake slide)
     - a spiked/ tier car is left alone; PERP cars get the stability assist with their own steering
 
     node test_handling.js
-  The fake keeps speeds in inches/s and takes mph in SetVehicleParams, like AudioEngine.SetParams assumes.
+  The fake keeps speeds in inches/s and takes mph in SetVehicleParams, like sv_engine assumes.
 */
 const fs = require('fs')
 const path = require('path')
@@ -13,7 +13,6 @@ const { LuaFactory } = require('wasmoon')
 
 const ADDON = path.resolve(__dirname, '..', '..')
 const LUA = path.join(ADDON, 'lua', 'audio_engine')
-const HANDLING = path.join(ADDON, 'lua', 'audio_engine_handling')
 
 ;(async () => {
   const L = await new LuaFactory().createEngine()
@@ -45,23 +44,9 @@ const HANDLING = path.join(ADDON, 'lua', 'audio_engine_handling')
     V.__tostring = function(a) return string.format("%g %g %g", a.x, a.y, a.z) end
     function V:LengthSqr() return self.x * self.x + self.y * self.y + self.z * self.z end
     function isvector(x) return getmetatable(x) == V end
-    -- what the engine core's sv_engine.lua needs to load, and working hooks (the handling module
-    -- follows the core's audio_engine/* hooks)
-    util.AddNetworkString = function() end
-    net = { Receive = function() end }
-    ents = { GetAll = function() return {} end }
-    HOOKS = {}
-    hook = {
-      Add = function(event, id, fn) HOOKS[event] = HOOKS[event] or {} HOOKS[event][id] = fn end,
-      Remove = function(event, id) if HOOKS[event] then HOOKS[event][id] = nil end end,
-      Run = function(event, ...) for _, fn in pairs(HOOKS[event] or {}) do fn(...) end end,
-    }
     AUDIO_ENGINE = {}`)
-  // the engine core first, then the handling module, as the loader does
-  for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'sv_engine.lua'])
+  for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'sv_perp_physics.lua', 'sv_handling.lua'])
     await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
-  for (const f of ['sv_perp_physics.lua', 'sv_handling.lua'])
-    await run(f, fs.readFileSync(path.join(HANDLING, f), 'utf8'))
 
   // a vehicle whose params start as a given script's values (speeds in inches/s)
   await run('fake vehicle', `
@@ -86,9 +71,6 @@ const HANDLING = path.join(ADDON, 'lua', 'audio_engine_handling')
         },
       }
       function veh:GetModel() return model end
-      veh.nw = {}
-      function veh:GetNW2String(k, d) local v = self.nw[k] if v == nil then return d end return v end
-      function veh:SetNW2Float(k, v) self.nw[k] = v end
       function veh:GetKeyValues() return self.kv end
       function veh:GetVehicleParams() return table.Copy(self.params) end
       function veh:SetVehicleParams(p)
@@ -187,22 +169,6 @@ const HANDLING = path.join(ADDON, 'lua', 'audio_engine_handling')
   console.log(`stability assist: ${on} of ${n} PERP cars (SL65 steering ${ss} / ${sf} degrees)`)
   check(+on === +n, 'every PERP car should get the stability assist')
   check(+ss === 38.5 && +sf === 11, 'SL65 steering angles from its script')
-
-  // 5. through the engine core's hooks, as in game: the core tracks the car, the handling module
-  // prepares it and applies the tuning profile's acceleration
-  await L.doString(`
-    local veh = NewCar("models/tdmcars/sl65amg.mdl", E.TEST_SCRIPT, TESTCAR)
-    hook.Run("audio_engine/car-tracked", veh)
-    local tracked = veh.params.engine.horsepower
-    hook.Run("audio_engine/profile-changed", veh, { accel = 2, vmax = 0 })
-    local tuned = veh.params.engine.horsepower
-    hook.Run("audio_engine/profile-changed", veh, nil)
-    __result(tracked .. "|" .. tuned .. "|" .. veh.params.engine.horsepower .. "|" .. tostring(veh.nw.audio_vmax))`)
-  const [trackedHp, tunedHp, stockHp, vmax] = res.split('|').map(Number)
-  console.log(`through the core's hooks: ${trackedHp} hp tracked, ${tunedHp} tuned x2, ${stockHp} back to stock, audio_vmax ${vmax.toFixed(1)} km/h`)
-  check(near(trackedHp, 260), 'car-tracked hook: PERP physics on the test script')
-  check(near(tunedHp, 520) && near(stockHp, 260), 'profile-changed hook: acceleration applied, then back to stock')
-  check(near(vmax, 94 * 1.609344), 'audio_vmax from the prepared physics')
 
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
   process.exit(fail ? 1 : 0)

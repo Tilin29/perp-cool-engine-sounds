@@ -1,13 +1,8 @@
 --[[
 	Audio Engine - handling (server)
 
-	The handling module (lua/audio_engine_handling/: this file, sv_perp_physics, sv_stability,
-	sv_cruise). Optional: the engine sound (lua/audio_engine/) never calls it, it only follows the
-	engine's audio_engine/car-tracked and audio_engine/profile-changed hooks. Delete the folder to
-	drive on the vehicle scripts alone.
-
 	Runs once on every registered car as it spawns, before its physics are captured as the
-	base for engine tuning (AudioEngine.ApplyPerformance below):
+	base for engine tuning (sv_engine.lua):
 
 	1. PERP physics on the test script. Off the PERP server, PERP's vehicle scripts aren't mounted
 	   and the spawn menu falls back to scripts/vehicles/audio_engine/test_car.txt (sh_perp.lua).
@@ -43,8 +38,9 @@ local handlingConVar = CreateConVar("audio_engine_handling", "0", FCVAR_ARCHIVE,
 ---------------------------------------------------------------------------
 -- setting vehicle params
 ---------------------------------------------------------------------------
-local HU_PER_MPH = AudioEngine.HU_PER_MPH   -- GetVehicleParams speeds are inches/s; SetVehicleParams takes mph (sv_engine.lua)
+local HU_PER_MPH = 17.6   -- GetVehicleParams speeds are inches/s; SetVehicleParams takes mph
 local SPEED_KEYS = { "maxSpeed", "maxRevSpeed", "boostMaxSpeed" }
+AudioEngine.HU_PER_MPH = HU_PER_MPH
 
 -- p is a table as GetVehicleParams returns it (speeds in its units). Sets it on the car, giving
 -- SetVehicleParams the speeds it wants, and checks the unit took.
@@ -73,7 +69,15 @@ end
 ---------------------------------------------------------------------------
 AudioEngine.TEST_SCRIPT = "scripts/vehicles/audio_engine/test_car.txt"
 
--- (AudioEngine.VehicleScriptOf, sv_engine.lua: which script it spawned with)
+function AudioEngine.VehicleScriptOf(vehicle)
+	local keyValues = vehicle:GetKeyValues() or {}
+	local script = keyValues.vehiclescript or keyValues.VehicleScript or keyValues.vehicleScript
+	if (not script or script == "") and istable(vehicle.VehicleTable) and istable(vehicle.VehicleTable.KeyValues) then
+		script = vehicle.VehicleTable.KeyValues.vehiclescript
+	end
+	if not isstring(script) or script == "" then return nil end
+	return (string.lower(script):gsub("\\", "/"))
+end
 
 ---------------------------------------------------------------------------
 -- 1. PERP physics on a car that's on the test script
@@ -237,7 +241,7 @@ function AudioEngine.PrepareHandling(vehicle)
 end
 
 --[[
-	Rebuild the car's base params (what AudioEngine.ApplyPerformance starts from) from its script
+	Rebuild the car's base params (what sv_engine's AudioEngine.ApplyPerformance starts from) from its script
 	handling (vehicle.audioScriptParams, or `scriptParams` to replace it, e.g. edited live by the debug
 	module), with the anti-spin setup only while audio_engine_handling is on. Switching that convar
 	runs this on every car, so it applies at once (it used to take effect on cars spawned after).
@@ -256,8 +260,8 @@ function AudioEngine.RebaseHandling(vehicle, scriptParams)
 		vehicle.audioAntiSpin, vehicle.audioFastSteerScale, vehicle.audioSteerLockScale, vehicle.audioSteerLockSent = nil, nil, nil, nil
 	end
 	vehicle.audioBase = params
-	AudioEngine.RefreshCarStats(vehicle, params)
-	AudioEngine.ApplyPerformance(vehicle, AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", "")))
+	if AudioEngine.RefreshCarStats then AudioEngine.RefreshCarStats(vehicle, params) end
+	if AudioEngine.ApplyPerformance then AudioEngine.ApplyPerformance(vehicle, AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", ""))) end
 	return true
 end
 
@@ -266,57 +270,6 @@ cvars.AddChangeCallback("audio_engine_handling", function()
 		if IsValid(vehicle) then AudioEngine.RebaseHandling(vehicle) end
 	end
 end, "audio_engine_rebase")
-
----------------------------------------------------------------------------
--- real performance: the profile's acceleration and top speed (engine tuning menu) are applied
--- to the car's physics, starting from what its own vehicle script set up
----------------------------------------------------------------------------
-local function captureBase(vehicle)
-	if vehicle.audioBase then return vehicle.audioBase end
-	local succeeded, params = pcall(vehicle.GetVehicleParams, vehicle)
-	if not succeeded or not istable(params) or not istable(params.engine) then return nil end
-	vehicle.audioBase = table.Copy(params)
-	AudioEngine.RefreshCarStats(vehicle, params)
-	return vehicle.audioBase
-end
-
-function AudioEngine.ApplyPerformance(vehicle, profile)
-	local base = captureBase(vehicle)
-	if not base then return end
-	local accelerationScale = profile and profile.accel or 1
-	local topSpeedOverride = profile and profile.vmax or 0
-	local adjusted = table.Copy(base)
-	-- audioLimiterPower: the speed limiter's power trim (sv_cruise.lua, the traction tick below)
-	-- audioTractionPower: launch traction control's power trim; audioSteerLockScale: the lock at speed (below)
-	adjusted.engine.horsepower = base.engine.horsepower * accelerationScale * (vehicle.audioTractionPower or 1) * (vehicle.audioLimiterPower or 1)
-	if adjusted.steering and adjusted.steering.degreesFast and vehicle.audioSteerLockScale then
-		adjusted.steering.degreesFast = base.steering.degreesFast * vehicle.audioSteerLockScale
-	end
-	if topSpeedOverride > 0 then adjusted.engine.maxSpeed = topSpeedOverride / 1.609344 * HU_PER_MPH end
-	AudioEngine.SetParams(vehicle, adjusted)
-end
-
--- a car the engine tracks (spawned, or a lua refresh): PERP physics on the test script and the
--- anti-spin setup, before its physics are captured as the base the tuning menu works from
-hook.Add("audio_engine/car-tracked", "audio_engine_handling", function(vehicle)
-	AudioEngine.PrepareHandling(vehicle)
-	captureBase(vehicle)
-	local profile = AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", ""))
-	if profile then AudioEngine.ApplyPerformance(vehicle, profile) end
-end)
-
--- retuned in the engine menu (nil = back to stock)
-hook.Add("audio_engine/profile-changed", "audio_engine_handling", function(vehicle, profile)
-	AudioEngine.ApplyPerformance(vehicle, profile)
-end)
-
--- lua refresh of this module alone: the engine's own refresh has run the hook already
-for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
-	if IsValid(vehicle) and not vehicle.audioBase then
-		AudioEngine.PrepareHandling(vehicle)
-		captureBase(vehicle)
-	end
-end
 
 ---------------------------------------------------------------------------
 -- 3. stability assist for the PERP cars, with their own steering angles

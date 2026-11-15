@@ -177,7 +177,7 @@ if (SERVER and #player.GetAll() > 0) or (CLIENT and IsValid(LocalPlayer())) then
 -- and can't drive, so off the server the cars fall back to a generic test script.
 -- Job vehicles (sh_carlist.lua AudioEngine.JOB_VEHICLES) get a tab of their own, each on its own script and in
 -- its livery skin; a car whose base script is a job's spawns from that tab only.
--- AudioPerpScript tells the handling module (sv_handling) which script's physics to put on a car that fell back to the
+-- AudioPerpScript tells sv_handling which script's physics to put on a car that fell back to the
 -- test script, AudioSkin is the skin (sandbox only passes whitelisted KeyValues on)
 local TEST_SCRIPT = "scripts/vehicles/audio_engine/test_car.txt"
 local fallbackCount = 0

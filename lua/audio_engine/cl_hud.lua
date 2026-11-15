@@ -2,10 +2,6 @@
 	Audio Engine - driver HUD (client)
 	Tachometer with red zone and shift lights, gear, speed, rpm, throttle and brake.
 	Same look as the Rev Bench instrument cluster.
-
-	Optional module (lua/audio_engine_hud/): delete the folder to drop it. The engine never calls it;
-	it only reads the engine's per-car state through AudioEngine.GetClientCar (cl_engine.lua), and
-	the NW2 vars of the speed limiter (audio_cruise) and police lights (audio_lights), when those exist.
 ]]
 
 local AudioEngine = AUDIO_ENGINE
@@ -219,7 +215,7 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		draw.SimpleText(message, "AudioHud_Num", panelX + panelWidth / 2, panelY - 10 * scale, engineState.on and COLORS.amber or COLORS.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
 	end
 
-	-- speed limiter (the handling module's sv_cruise.lua): the limit, in the HUD's units
+	-- speed limiter (sv_cruise.lua): the limit, in the HUD's units
 	local speedLimit = vehicle:GetNW2Float("audio_cruise", 0)
 	if speedLimit > 0 and engineState.on and engineState.phase == "run" then
 		local usesMph = unitsConVar:GetString() == "mph"
@@ -229,7 +225,7 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 
 	-- police lights (sv_police.lua). Other addons can add a word after the mode through the
 	-- audio_engine/lights-label hook (the police siren shows its tone)
-	local lightLabel = AudioEngine.LIGHT_MODES and AudioEngine.LIGHT_MODES[vehicle:GetNW2Int("audio_lights", 0)]
+	local lightLabel = AudioEngine.LIGHT_MODES[vehicle:GetNW2Int("audio_lights", 0)]
 	if lightLabel and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then
 		local extra = hook.Run("audio_engine/lights-label", vehicle)
 		if isstring(extra) and extra ~= "" then lightLabel = lightLabel .. " · " .. extra end

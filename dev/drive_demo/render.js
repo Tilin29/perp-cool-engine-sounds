@@ -86,7 +86,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     IsValid=function(e) return e~=nil end; ErrorNoHalt=print; CLIENT=true; SERVER=false; table.Copy=function(t) local r={} for k,v in pairs(t) do r[k]=v end return r end
     AUDIO_ENGINE={}; local E=AUDIO_ENGINE; E.Cars={}; function E.RegisterCar(m,c) c.model=m; E.Cars[m]=c; return c end`)
   for (const f of ['sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'cl_baked.lua']) await L.doString(fs.readFileSync(path.join(LUA, f), 'utf8'))
-  const phys = fs.readFileSync(path.join(ADDON, 'lua/audio_engine_handling/sv_perp_physics.lua'), 'utf8'); let pl = 'PHYS={}\n'
+  const phys = fs.readFileSync(path.join(LUA, 'sv_perp_physics.lua'), 'utf8'); let pl = 'PHYS={}\n'
   for (const b of phys.split('\n\t["').slice(1)) { const s = b.split('"]')[0], g = k => { const m = b.match(new RegExp(k + ' = ([\\d.]+)')); return m ? +m[1] : 0 }
     pl += `PHYS[${JSON.stringify(s)}]={hp=${g('horsepower')},mph=${g('maxspeed')},mass=${g('massoverride') || 1500}}\n` }
   await L.doString(pl)
