@@ -345,14 +345,24 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
 `lua/audio_engine_debug/`, loaded by audio_engine_init.lua when the folder exists (delete it to ship). On by default (`audio_engine_debug` 1, shared; 0 = off);
 superadmins, listen host or single player (`EngineDebug.Allowed`). `audio_engine_debug_menu`, `!enginedebug`, context menu. The core never refers to it:
 it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.BaseConfig` = the core's) and uses `AudioEngine.ApplyGearing`, `AudioEngine.RebaseHandling`, the E tables.
-- `sh_kv.lua`: Valve KeyValues parse into entries with value spans (`KeyValues.Rebuild` keeps the file byte for byte), `KeyValues.PARAMS` script key -> GetVehicleParams
+- `sh_kv.lua`: Valve KeyValues parse into entries with value spans (`KeyValues.Rebuild` keeps the file byte for byte; `root` = top block, `KeyValues.EntryId` = root/path|key|occurrence, the same across cars' scripts;
+  `KeyValues.IsHandling`: false for all of vehicle_sounds and `KeyValues.NOT_HANDLING` (steering dustcloud): this addon never uses the scripts' sounds), `KeyValues.PARAMS` script key -> GetVehicleParams
   field, `KeyValues.ApplyValue` scales by new / file value (unit-free; a file 0 is taken as is, mph -> in/s for speeds). Unmapped keys (wheel radius, materials, sounds) = respawn.
 - `sh_debug.lua`: `EngineDebug.SERVER_CVARS`, `EngineDebug.TUNABLES` (AudioEngine.TRACTION / STABILITY_DEFAULTS / ANTI_SPIN / HIGH_SPEED_STEER values set live), gearing text
   (`EngineDebug.EncodeGearing`), `EngineDebug.GearingFromConfig`, rev "rise,fall". Live overrides: NW2 `audio_dbg_gear` / `audio_dbg_rev` per car, Global2 `audio_dbg_rev` -> Drivetrain.REV.
-- `sv_debug.lua`: net `audio_dbg_*`. Script = the car's `vehiclescript`, or on test_car the PERP script it stands for, synthesized as test_car.txt with
+- `sv_debug.lua`: net `audio_dbg_*` (`audio_dbg_copy_req`/`audio_dbg_copy`: another car's script text for copying: a spawned car's, or a path under scripts/vehicles/, PERP_PHYSICS fallback). Script = the car's `vehiclescript`, or on test_car the PERP script it stands for, synthesized as test_car.txt with
   `AudioEngine.PERP_PHYSICS` values; baseline (`vehicle.audioDebugBaseline`: file text, params, mass) taken on first request, edits always scaled from it. `audio_engine_debug 0` undoes everything.
-- `cl_debug.lua`: pages Handling script (edit, apply live, copy, save to data/audio_engine_debug/scripts/), Gearing (shift speeds, chart, audibility
+- `cl_debug.lua`: script data per car (`EngineDebug.ScriptData(vehicle)`, `OnScript` listeners, `ApplyScript`; an apply's echo keeps edits made after it was sent).
+  Pages Handling script (edit, apply live, copy, save to data/audio_engine_debug/scripts/; blocks fold by hand-laid sections, Vehicle_Sounds and
+  non-handling "Effects" folded by default, fold state kept per session; "Copy handling from...": a spawned car or any CAR_MODELS / JOB_VEHICLES
+  script + tier, chosen parts (body, engine, steering, axles; wheel radius off) into the editor unapplied, only keys both scripts have;
+  save history: every Apply live / Save to data/ / overlay Save version adds v<n> + time + values changed from the file (unchanged = no new
+  version) to data/audio_engine_debug/history/<script>.json, hover = changes from the previous version, click = load into the editor), Gearing (shift speeds, chart, audibility
   check, copies an AudioEngine.CAR_GEARING entry), Rev response (copies AudioEngine.CAR_REV / Drivetrain.REV), Handling (PERP default handling = handling/traction/stability 0), Settings.
+- `cl_handling_overlay.lua`: while driving, the pinned (the dot by a menu row) and changed values on the right of the HUD; holding C (sandbox
+  context menu) shows an editable copy parented to `g_ContextMenu` (- / +, scroll, Shift finer; applied live 0.3 s after the last edit, chat quiet),
+  x unpins / dismisses (a changed value comes back when it changes again; rows shown stay while you sit in that car). `audio_engine_debug_overlay`
+  (client, 1; Hide sets 0, the menu's "C overlay in the car" box). Pins/dismissals: data/audio_engine_debug/overlay.json.
 - `cl_perf.lua` / `sv_perf.lua`: profiler. Measures nothing until turned on (the user's rule): the wrappers on the addon's hooks
   (names `audio_engine*` / `police_siren*`), util.Trace*, CreateSound / CSoundPatch methods, DynamicLight, render quads/sprites,
   NW2 setters (`audio_*`/`siren_*`, changes only), net.Start/Send, and `AudioEngine.PerfCar` (cl_engine's per-car timing point, a nil check

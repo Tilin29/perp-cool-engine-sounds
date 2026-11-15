@@ -31,11 +31,13 @@ end
 local debugFolder = "audio_engine_debug/"
 if file.Exists(debugFolder .. "sh_debug.lua", "LUA") then
 	if SERVER then
-		for _, fileName in ipairs({ "sh_kv.lua", "sh_debug.lua", "cl_debug.lua", "cl_perf.lua" }) do AddCSLuaFile(debugFolder .. fileName) end
+		for _, fileName in ipairs({ "sh_kv.lua", "sh_debug.lua", "cl_debug.lua", "cl_handling_overlay.lua", "cl_perf.lua" }) do AddCSLuaFile(debugFolder .. fileName) end
 	end
 	include(debugFolder .. "sh_kv.lua")
 	include(debugFolder .. "sh_debug.lua")
 	include(debugFolder .. (SERVER and "sv_debug.lua" or "cl_debug.lua"))
+	-- the handling values pinned / changed in the menu on screen in the car, edited with C held
+	if CLIENT then include(debugFolder .. "cl_handling_overlay.lua") end
 	-- the profiler (audio_engine_perf, audio_engine_perf_hud): measures nothing until it's turned on
 	include(debugFolder .. (SERVER and "sv_perf.lua" or "cl_perf.lua"))
 end

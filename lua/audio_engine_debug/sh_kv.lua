@@ -7,6 +7,7 @@
 	numbered by occurrence.
 
 	Entry fields:
+	  root    the top block it's in, lower case: "vehicle" or "vehicle_sounds"
 	  path    the block it's in, lower case, without the root: "engine", "engine/boost", "axle/wheel"
 	  label   the same for people: "axle 2 > wheel"
 	  key     the key as spelled in the file; lkey lower case
@@ -89,6 +90,7 @@ function KeyValues.Parse(text)
 				end
 				entries[#entries + 1] = {
 					index = #entries + 1,
+					root = stack[2] and stack[2].name or "",
 					path = table.concat(parts, "/"),
 					label = #labels > 0 and table.concat(labels, " > ") or (stack[2] and stack[2].name or ""),
 					key = pendingKey.text, lowerKey = lowerKey, occurrence = currentBlock.keys[lowerKey], axle = currentBlock.axle,
@@ -100,6 +102,23 @@ function KeyValues.Parse(text)
 		end
 	end
 	return entries
+end
+
+-- an entry's name that holds across cars' scripts (pins, history, copying between cars)
+function KeyValues.EntryId(entry)
+	return entry.root .. "/" .. entry.path .. "|" .. entry.lowerKey .. "|" .. entry.occurrence
+end
+
+--[[
+	Entries that only make sounds or effects and don't change how the car drives: the whole
+	vehicle_sounds block (crash sounds, skid sounds, the TDM gear / state sound blocks), and the
+	steering block's dust cloud. Not used by this addon (its engine is the Lua synth), so the
+	editor folds them away.
+]]
+KeyValues.NOT_HANDLING = { ["steering|dustcloud"] = true }
+function KeyValues.IsHandling(entry)
+	if entry.root ~= "vehicle" then return false end
+	return not KeyValues.NOT_HANDLING[entry.path .. "|" .. entry.lowerKey]
 end
 
 -- the text with new values put in: values[idx] = new value (unchanged entries left out)

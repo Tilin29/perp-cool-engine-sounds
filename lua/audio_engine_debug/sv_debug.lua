@@ -9,7 +9,7 @@ local KeyValues = AudioEngine.KV
 
 for _, networkName in ipairs({ "audio_dbg_state_req", "audio_dbg_state", "audio_dbg_cvar", "audio_dbg_tune",
 	"audio_dbg_script_req", "audio_dbg_script", "audio_dbg_script_apply", "audio_dbg_gear", "audio_dbg_rev",
-	"audio_dbg_result" }) do
+	"audio_dbg_result", "audio_dbg_copy_req", "audio_dbg_copy" }) do
 	util.AddNetworkString(networkName)
 end
 
@@ -213,6 +213,45 @@ net.Receive("audio_dbg_script_apply", function(_, requester)
 	end
 	sendResult(requester, true, message)
 	sendScript(requester, vehicle, baselineData)
+end)
+
+---------------------------------------------------------------------------
+-- copying handling from another car: its script's text, for the editor to take values from
+---------------------------------------------------------------------------
+-- a vehicle script another car may be on: under scripts/vehicles/, a .txt, no way out of it
+local function validScriptPath(path)
+	return isstring(path) and #path < 200 and path:sub(1, 17) == "scripts/vehicles/" and path:sub(-4) == ".txt"
+		and not path:find("..", 1, true) and not path:find("\\", 1, true)
+end
+
+-- the script's text: the file when mounted, else (off the PERP server) test_car.txt with its PERP physics
+local function sourceScriptText(path)
+	local text = file.Read(path, "GAME")
+	if text then return text, false end
+	if AudioEngine.PERP_PHYSICS and AudioEngine.PERP_PHYSICS[path] then return synthesize(path), true end
+	return nil
+end
+
+net.Receive("audio_dbg_copy_req", function(_, requester)
+	local vehicle = net.ReadEntity()
+	local sourcePath = net.ReadString()
+	local sourceVehicle = net.ReadEntity()
+	if not requestedCar(requester, vehicle) then return end
+	-- a car in the world: the script it's on (or stands in for)
+	if IsValid(sourceVehicle) and AudioEngine.TrackedVehicles and AudioEngine.TrackedVehicles[sourceVehicle] then
+		sourcePath = scriptOf(sourceVehicle)
+	end
+	if not validScriptPath(sourcePath) then sendResult(requester, false, "Not a vehicle script: " .. tostring(sourcePath)) return end
+	local text, fallback = sourceScriptText(sourcePath)
+	if not text then sendResult(requester, false, "Can't read " .. sourcePath .. " (not mounted here, and not one of PERP's scripts).") return end
+	local data = util.Compress(text) or ""
+	net.Start("audio_dbg_copy")
+	net.WriteEntity(vehicle)
+	net.WriteString(sourcePath)
+	net.WriteBool(fallback)
+	net.WriteUInt(#data, 16)
+	net.WriteData(data, #data)
+	net.Send(requester)
 end)
 
 ---------------------------------------------------------------------------

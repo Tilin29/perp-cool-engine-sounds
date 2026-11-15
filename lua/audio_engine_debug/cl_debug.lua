@@ -5,7 +5,11 @@
 	you sit in or look at. Superadmins, while audio_engine_debug is 1 (the default). Pages:
 
 	  Handling script  the car's vehicle script: edit its values, apply them to the car live, copy
-	                   the txt (or save it to data/audio_engine_debug/scripts/) for PERP's script pack
+	                   the txt (or save it to data/audio_engine_debug/scripts/) for PERP's script pack.
+	                   Blocks fold (Vehicle_Sounds and what doesn't change the handling start folded);
+	                   every Apply / Save adds a numbered version to the history on the right (hover:
+	                   what it changed, click: load it); handling can be copied from another car's
+	                   script; pinned values (the dot) show on the C overlay (cl_handling_overlay.lua)
 	  Gearing          how many gears and where each changes up / down, by speed and rpm; applied
 	                   live for everyone; copies an AudioEngine.CAR_GEARING entry for sh_carlist.lua
 	  Rev response     how fast the revs climb and drop back standing still (Space + W), this car or
@@ -33,8 +37,6 @@ local frame, status
 local targetCar          -- the car the menu works on
 local serverState = { cvars = {}, tunables = {} }
 local stateListeners = {}    -- pages that follow the server state
-local scriptData      -- the target's vehicle script (from the server)
-local scriptListener
 
 local function formatThousands(number)
 	local digits = tostring(floor(number + 0.5))
@@ -166,15 +168,59 @@ end
 
 local function requestState() net.Start("audio_dbg_state_req") net.SendToServer() end
 
-local function requestScript()
-	if not IsValid(targetCar) then return end
+---------------------------------------------------------------------------
+-- the cars' vehicle scripts (from the server), kept per car: the menu works on one car, the C
+-- overlay (cl_handling_overlay.lua) on the one you drive
+---------------------------------------------------------------------------
+local scriptDataByCar = setmetatable({}, { __mode = "k" })
+local scriptListeners = {}   -- name -> function(vehicle), told when a car's script arrives or changes
+local scriptRequestedAt = setmetatable({}, { __mode = "k" })
+
+function EngineDebug.ScriptData(vehicle) return IsValid(vehicle) and scriptDataByCar[vehicle] or nil end
+function EngineDebug.OnScript(name, listener) scriptListeners[name] = listener end
+
+local function notifyScript(vehicle)
+	for _, listener in pairs(scriptListeners) do listener(vehicle) end
+end
+
+local function requestScript(vehicle)
+	vehicle = vehicle or targetCar
+	if not IsValid(vehicle) then return end
+	scriptRequestedAt[vehicle] = RealTime()
 	net.Start("audio_dbg_script_req")
-	net.WriteEntity(targetCar)
+	net.WriteEntity(vehicle)
+	net.SendToServer()
+end
+EngineDebug.RequestScript = requestScript
+-- when the last request for this car went out (the overlay asks once on getting in)
+function EngineDebug.ScriptRequestedAt(vehicle) return scriptRequestedAt[vehicle] end
+
+local function scriptText(data)
+	return KeyValues.Rebuild(data.fileText, data.fileEntries, data.values)
+end
+EngineDebug.ScriptText = scriptText
+
+-- the edited values onto the car (quiet: no chat line for a plain success, for the overlay's steady edits)
+local quietResultsUntil = 0
+function EngineDebug.ApplyScript(vehicle, quiet)
+	local data = EngineDebug.ScriptData(vehicle)
+	if not data then return end
+	data.sentValues = table.Copy(data.values)
+	if quiet then quietResultsUntil = RealTime() + 3 end
+	local compressed = util.Compress(scriptText(data)) or ""
+	net.Start("audio_dbg_script_apply")
+	net.WriteEntity(vehicle)
+	net.WriteUInt(#compressed, 16)
+	net.WriteData(compressed, #compressed)
 	net.SendToServer()
 end
 
 net.Receive("audio_dbg_result", function()
 	local succeeded, message = net.ReadBool(), net.ReadString()
+	if succeeded and RealTime() < quietResultsUntil and not message:find("respawn", 1, true) then
+		if IsValid(status) then status:SetText(message) status:SetTextColor(COLORS.green) end
+		return
+	end
 	report(succeeded, message)
 end)
 
@@ -197,25 +243,465 @@ net.Receive("audio_dbg_script", function()
 	local current, fileText = raw:match("^(.-)%z(.*)$")
 	local live = {}
 	for _ = 1, net.ReadUInt(12) do live[net.ReadUInt(12)] = true end
-	if not current then return end
+	if not (current and IsValid(vehicle)) then return end
 	local entries = KeyValues.Parse(current)
-	local values = {}
-	for _, entry in ipairs(entries) do values[entry.index] = entry.value end
-	scriptData = {
+	local values, ids, indexById = {}, {}, {}
+	for _, entry in ipairs(entries) do
+		values[entry.index] = entry.value
+		ids[entry.index] = KeyValues.EntryId(entry)
+		indexById[ids[entry.index]] = entry.index
+	end
+	local data = {
 		vehicle = vehicle, path = path, fallback = fallback, fileText = fileText, fileEntries = KeyValues.Parse(fileText),
-		applied = values, values = table.Copy(values), entries = entries, live = live,
+		applied = values, values = table.Copy(values), entries = entries, live = live, ids = ids, indexById = indexById,
 	}
-	if scriptListener then scriptListener() end
+	-- the answer to an apply: edits made since it was sent are still waiting, keep them
+	local previous = scriptDataByCar[vehicle]
+	if previous and previous.sentValues and previous.path == path and #previous.entries == #entries then
+		for index, value in pairs(previous.values) do
+			if value ~= previous.sentValues[index] then data.values[index] = value end
+		end
+	end
+	scriptDataByCar[vehicle] = data
+	notifyScript(vehicle)
 end)
+
+-- the file's value of entry index
+local function fileValue(data, index)
+	local fileEntry = data.fileEntries[index]
+	return fileEntry and fileEntry.value
+end
+EngineDebug.FileValue = fileValue
+
+---------------------------------------------------------------------------
+-- settings kept in data/ on this client: pinned parameters (the C overlay) and save history
+---------------------------------------------------------------------------
+local DATA_FOLDER = "audio_engine_debug/"
+local OVERLAY_FILE = DATA_FOLDER .. "overlay.json"
+
+local function readJson(path)
+	local text = file.Read(path, "DATA")
+	return text and util.JSONToTable(text) or nil
+end
+local function writeJson(path, value)
+	file.CreateDir(string.GetPathFromFilename(path))
+	file.Write(path, util.TableToJSON(value, true))
+end
+
+--[[
+	The overlay's picks: pinned = { [entry id] = true } (any car whose script has it), dismissed =
+	{ [script path] = { [entry id] = value } }: a changed value taken off the overlay, until it
+	changes again
+]]
+local overlayPicks = readJson(OVERLAY_FILE) or {}
+overlayPicks.pinned = overlayPicks.pinned or {}
+overlayPicks.dismissed = overlayPicks.dismissed or {}
+local function saveOverlayPicks() writeJson(OVERLAY_FILE, overlayPicks) end
+
+function EngineDebug.IsPinned(id) return overlayPicks.pinned[id] == true end
+function EngineDebug.SetPinned(id, pinned)
+	overlayPicks.pinned[id] = pinned and true or nil
+	saveOverlayPicks()
+	for vehicle in pairs(scriptDataByCar) do if IsValid(vehicle) then notifyScript(vehicle) end end
+end
+
+-- changed from the file (what the car is on or what's waiting to go on)
+local function isChanged(data, index)
+	return data.values[index] ~= fileValue(data, index) or data.applied[index] ~= fileValue(data, index)
+end
+EngineDebug.IsChanged = isChanged
+
+-- the overlay's rows for a car: pinned, plus changed values not taken off it, in the script's order
+function EngineDebug.OverlayIndices(data)
+	local dismissed = overlayPicks.dismissed[data.path] or {}
+	local indices = {}
+	for _, entry in ipairs(data.entries) do
+		local id = data.ids[entry.index]
+		local shown = overlayPicks.pinned[id]
+		if not shown and isChanged(data, entry.index) then
+			shown = dismissed[id] == nil or dismissed[id] ~= data.values[entry.index]
+		end
+		if shown then indices[#indices + 1] = entry.index end
+	end
+	return indices
+end
+
+-- take a row off the overlay: unpin it, and a changed value stays off until it changes again
+function EngineDebug.RemoveFromOverlay(data, index)
+	local id = data.ids[index]
+	overlayPicks.pinned[id] = nil
+	if isChanged(data, index) then
+		overlayPicks.dismissed[data.path] = overlayPicks.dismissed[data.path] or {}
+		overlayPicks.dismissed[data.path][id] = data.values[index]
+	end
+	saveOverlayPicks()
+	notifyScript(data.vehicle)
+end
+
+--[[
+	Save history: every Apply live and Save to data/ (and the overlay's Save version) adds a
+	version per vehicle script, numbered in order, with the time and the values that differ from
+	the file: data/audio_engine_debug/history/<script>.json
+]]
+local function historyPath(scriptPath)
+	return DATA_FOLDER .. "history/" .. scriptPath:gsub("^scripts/vehicles/", ""):gsub("%.txt$", ""):gsub("[^%w_%-]", "_") .. ".json"
+end
+
+local historyCache = {}
+function EngineDebug.History(scriptPath)
+	if not historyCache[scriptPath] then
+		local stored = readJson(historyPath(scriptPath))
+		historyCache[scriptPath] = istable(stored) and istable(stored.versions) and stored or { versions = {} }
+	end
+	return historyCache[scriptPath]
+end
+
+-- the values of a version that differ from the file, by entry id
+local function changedValues(data)
+	local changed = {}
+	for _, entry in ipairs(data.entries) do
+		local value = data.values[entry.index]
+		if value ~= fileValue(data, entry.index) then changed[data.ids[entry.index]] = value end
+	end
+	return changed
+end
+
+local function sameValues(first, second)
+	for id, value in pairs(first) do if second[id] ~= value then return false end end
+	for id in pairs(second) do if first[id] == nil then return false end end
+	return true
+end
+
+-- add a version (kind: "applied", "saved", "overlay"); nothing new if it's the latest one again
+function EngineDebug.AddVersion(data, kind)
+	local history = EngineDebug.History(data.path)
+	local values = changedValues(data)
+	local latest = history.versions[#history.versions]
+	if latest and sameValues(latest.values or {}, values) then return latest, false end
+	local version = { number = (latest and latest.number or 0) + 1, time = os.time(), kind = kind, values = values }
+	history.versions[#history.versions + 1] = version
+	writeJson(historyPath(data.path), history)
+	return version, true
+end
+
+-- a readable name for an entry id ("engine.horsepower", "axle 2 > suspension.springconstant")
+local function entryName(data, id)
+	local index = data.indexById[id]
+	local entry = index and data.entries[index]
+	if not entry then return id end
+	return (entry.label ~= "" and entry.label .. "." or "") .. entry.key .. (entry.occurrence > 1 and (" #" .. entry.occurrence) or "")
+end
+
+-- what a version changed from the one before it (or from the file, for the first)
+function EngineDebug.VersionChanges(data, versionPosition)
+	local versions = EngineDebug.History(data.path).versions
+	local version, before = versions[versionPosition], versions[versionPosition - 1]
+	local beforeValues = before and before.values or {}
+	local lines, ids = {}, {}
+	for id in pairs(version.values or {}) do ids[id] = true end
+	for id in pairs(beforeValues) do ids[id] = true end
+	local ordered = {}
+	for id in pairs(ids) do
+		local oldValue = beforeValues[id]
+		local newValue = version.values[id]
+		local index = data.indexById[id]
+		local fileText = index and fileValue(data, index) or "?"
+		if (oldValue or fileText) ~= (newValue or fileText) then
+			ordered[#ordered + 1] = { index = index or math.huge, text = string.format("%s:  %s  ->  %s", entryName(data, id), oldValue or fileText, newValue or fileText) }
+		end
+	end
+	table.sort(ordered, function(first, second) return first.index < second.index end)
+	for _, line in ipairs(ordered) do lines[#lines + 1] = line.text end
+	return lines, before and before.number or nil
+end
+
+-- the editor's values set to a version's (not applied: the menu's Apply live does that)
+function EngineDebug.LoadVersion(data, version)
+	for _, entry in ipairs(data.entries) do
+		local value = version.values and version.values[data.ids[entry.index]]
+		data.values[entry.index] = value or fileValue(data, entry.index)
+	end
+	notifyScript(data.vehicle)
+end
+
+---------------------------------------------------------------------------
+-- copying handling from another car's script
+---------------------------------------------------------------------------
+-- which part of the handling an entry is ("body", "engine", "steering", "axles", "radius"), nil = never copied
+local function copyGroup(entry)
+	if not KeyValues.IsHandling(entry) or entry.path == "" then return nil end
+	local block = entry.path:match("^[^/]+")
+	if block == "axle" then return (entry.path == "axle/wheel" and entry.lowerKey == "radius") and "radius" or "axles" end
+	if block == "body" or block == "engine" or block == "steering" then return block end
+	return nil
+end
+
+local COPY_GROUPS = {
+	{ "body", "Body (mass, centre of mass, gravity)", true },
+	{ "engine", "Engine (power, top speed, gears, boost)", true },
+	{ "steering", "Steering", true },
+	{ "axles", "Axles (wheels, tyre materials, suspension, torque and brake split)", true },
+	{ "radius", "Wheel radius (belongs to the model: usually leave it)", false },
+}
+local copyChoice = {}
+for _, group in ipairs(COPY_GROUPS) do copyChoice[group[1]] = group[3] end
+local pendingCopy   -- { vehicle, name } of the request on its way
+
+net.Receive("audio_dbg_copy", function()
+	local vehicle = net.ReadEntity()
+	local sourcePath, fallback = net.ReadString(), net.ReadBool()
+	local dataLength = net.ReadUInt(16)
+	local sourceText = util.Decompress(net.ReadData(dataLength)) or ""
+	local data = EngineDebug.ScriptData(vehicle)
+	if not data then return end
+	local sourceValues = {}
+	for _, entry in ipairs(KeyValues.Parse(sourceText)) do sourceValues[KeyValues.EntryId(entry)] = entry.value end
+	local copied, changed, missing, notInSource = 0, 0, 0, {}
+	for _, entry in ipairs(data.entries) do
+		local group = copyGroup(entry)
+		if group and copyChoice[group] then
+			local value = sourceValues[data.ids[entry.index]]
+			if value and KeyValues.ValidValue(value) then
+				copied = copied + 1
+				if data.values[entry.index] ~= value then changed = changed + 1 end
+				data.values[entry.index] = value
+			else
+				missing = missing + 1
+				if #notInSource < 4 then notInSource[#notInSource + 1] = entryName(data, data.ids[entry.index]) end
+			end
+		end
+	end
+	-- keys the source has that this script doesn't (a 6th gear): can't be added
+	local extra = 0
+	for id in pairs(sourceValues) do
+		local root, path, key = id:match("^([^/]*)/([^|]*)|([^|]*)|")
+		local fakeEntry = { root = root, path = path, lowerKey = key }
+		local group = copyGroup(fakeEntry)
+		if group and copyChoice[group] and not data.indexById[id] then extra = extra + 1 end
+	end
+	local sourceName = pendingCopy and pendingCopy.name or sourcePath
+	pendingCopy = nil
+	local message = string.format("Copied %d value%s from %s (%d different): not applied yet, press Apply live.", copied, copied == 1 and "" or "s", sourceName, changed)
+	if fallback then message = message .. " (Its script isn't mounted here: PERP's physics values on the test script.)" end
+	if missing > 0 then message = message .. string.format(" %d not in its script, kept (%s%s).", missing, table.concat(notInSource, ", "), missing > #notInSource and ", ..." or "") end
+	if extra > 0 then message = message .. string.format(" It has %d key%s this script doesn't (e.g. more gears): not copied.", extra, extra == 1 and "" or "s") end
+	report(true, message)
+	notifyScript(vehicle)
+end)
+
+-- every car the copy dialog offers: cars in the world, then PERP's cars and job vehicles
+local function copySources()
+	local sources = {}
+	for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
+		local carConfig = AudioEngine.GetCarConfig(vehicle)
+		if carConfig and vehicle ~= targetCar then
+			local distance = math.floor(vehicle:GetPos():Distance(LocalPlayer():GetPos()) * 0.01905)
+			sources[#sources + 1] = { name = string.format("%s (in the world, %d m)", carConfig.name or "?", distance), vehicle = vehicle, script = "", world = true, sort = distance }
+		end
+	end
+	table.sort(sources, function(first, second) return first.sort < second.sort end)
+	local fromList = {}
+	for name, carModel in pairs(AudioEngine.CAR_MODELS or {}) do
+		if istable(carModel) and isstring(carModel[2]) then fromList[#fromList + 1] = { name = name, script = carModel[2] } end
+	end
+	for _, jobVehicle in ipairs(AudioEngine.JOB_VEHICLES or {}) do
+		if istable(jobVehicle) and isstring(jobVehicle[3]) then fromList[#fromList + 1] = { name = jobVehicle[1], script = jobVehicle[3] } end
+	end
+	table.sort(fromList, function(first, second) return first.name < second.name end)
+	for _, source in ipairs(fromList) do sources[#sources + 1] = source end
+	return sources
+end
+
+local COPY_TIERS = { { "", "base script" }, { "used/", "used" }, { "upgrade_1/", "upgrade 1" }, { "upgrade_2/", "upgrade 2" }, { "spiked/", "spiked" } }
+
+local function openCopyDialog()
+	local data = EngineDebug.ScriptData(targetCar)
+	if not data then report(false, "The car's script hasn't loaded yet.") return end
+	local dialog = vgui.Create("DFrame")
+	dialog:SetSize(620, 560)
+	dialog:Center()
+	dialog:SetTitle("")
+	dialog:MakePopup()
+	dialog:DockPadding(10, 30, 10, 10)
+	dialog.Paint = function(self, width, height)
+		draw.RoundedBox(8, 0, 0, width, height, COLORS.background)
+		draw.SimpleText("COPY HANDLING FROM ANOTHER CAR", "DermaDefaultBold", 12, 8, COLORS.amber)
+	end
+	paragraph(dialog, "The chosen parts of its script go into this car's editor as unapplied changes (orange): look them over, then Apply live. "
+		.. "Only keys both scripts have are copied; a gear the other car has and this one doesn't can't be added.", COLORS.muted)
+
+	local filterRow = vgui.Create("DPanel", dialog)
+	filterRow:Dock(TOP)
+	filterRow:SetTall(22)
+	filterRow.Paint = nil
+	local filterLabel = label(filterRow, "Find:", COLORS.muted)
+	filterLabel:Dock(LEFT)
+	filterLabel:DockMargin(0, 0, 6, 0)
+	local filter = vgui.Create("DTextEntry", filterRow)
+	filter:Dock(LEFT)
+	filter:SetWide(220)
+	local tierLabel = label(filterRow, "Script tier:", COLORS.muted)
+	tierLabel:Dock(LEFT)
+	tierLabel:DockMargin(16, 0, 6, 0)
+	local tierChoice = vgui.Create("DComboBox", filterRow)
+	tierChoice:Dock(LEFT)
+	tierChoice:SetWide(120)
+	for i, tier in ipairs(COPY_TIERS) do tierChoice:AddChoice(tier[2], tier[1], i == 1) end
+
+	local groupsPanel = vgui.Create("DPanel", dialog)
+	groupsPanel:Dock(BOTTOM)
+	groupsPanel:SetTall(#COPY_GROUPS * 22 + 40)
+	groupsPanel.Paint = nil
+	for _, group in ipairs(COPY_GROUPS) do
+		check(groupsPanel, group[2], copyChoice[group[1]], function(checked) copyChoice[group[1]] = checked end)
+	end
+	local buttons = buttonRow(groupsPanel)
+
+	local list = vgui.Create("DListView", dialog)
+	list:Dock(FILL)
+	list:DockMargin(0, 6, 0, 6)
+	list:SetMultiSelect(false)
+	list:AddColumn("Car")
+	list:AddColumn("Script"):SetWidth(260)
+	local sources = copySources()
+	local function fill()
+		list:Clear()
+		local filterText = filter:GetValue():lower()
+		for _, source in ipairs(sources) do
+			if filterText == "" or source.name:lower():find(filterText, 1, true) or source.script:lower():find(filterText, 1, true) then
+				local line = list:AddLine(source.name, source.world and "(the script it's on)" or source.script)
+				line.source = source
+			end
+		end
+	end
+	filter.OnChange = fill
+	fill()
+
+	local function copySelected()
+		local _, line = list:GetSelectedLine()
+		if not (line and line.source) then report(false, "Pick a car in the list first.") return end
+		if not IsValid(targetCar) then return end
+		local source = line.source
+		local _, tier = tierChoice:GetSelected()
+		tier = tier or ""
+		local sourcePath = source.script
+		if not source.world and tier and tier ~= "" then
+			sourcePath = sourcePath:gsub("^(scripts/vehicles/[^/]+/)", "%1" .. tier)
+		end
+		local tierName = tier:gsub("/$", "")
+		pendingCopy = { name = source.world and source.name or (source.name .. (tier ~= "" and (" (" .. tierName .. ")") or "")) }
+		net.Start("audio_dbg_copy_req")
+		net.WriteEntity(targetCar)
+		net.WriteString(sourcePath or "")
+		net.WriteEntity(source.world and source.vehicle or NULL)
+		net.SendToServer()
+		dialog:Close()
+	end
+	list.DoDoubleClick = copySelected
+	buttons:Add("Copy into the editor", copySelected, true)
+	buttons:Add("Cancel", function() dialog:Close() end)
+end
 
 ---------------------------------------------------------------------------
 -- page: handling script
 ---------------------------------------------------------------------------
-local function scriptText()
-	return KeyValues.Rebuild(scriptData.fileText, scriptData.fileEntries, scriptData.values)
+-- collapsible sections: { [section key] = expanded }, kept while the game runs
+local sectionExpanded = {}
+local SECTION_HEADER_HEIGHT, ROW_HEIGHT, SECTION_INDENT = 20, 22, 14
+
+local function triangle(x, y, size, open, color)
+	surface.SetDrawColor(color)
+	draw.NoTexture()
+	if open then
+		surface.DrawPoly({ { x = x, y = y }, { x = x + size, y = y }, { x = x + size / 2, y = y + size * 0.8 } })
+	else
+		surface.DrawPoly({ { x = x, y = y }, { x = x + size * 0.8, y = y + size / 2 }, { x = x, y = y + size } })
+	end
+end
+
+-- a section that folds: a header line and its items (rows or sections), laid out by hand
+local function createSection(parent, title, expanded, onToggle, dim)
+	local section = vgui.Create("DPanel", parent)
+	section.Paint = nil
+	section.items = {}
+	section.expanded = expanded
+	section.count = 0
+	local header = vgui.Create("DButton", section)
+	header:SetText("")
+	header.Paint = function(self, width, height)
+		if self:IsHovered() then draw.RoundedBox(3, 0, 0, width, height, COLORS.face) end
+		triangle(4, height / 2 - 4, 8, section.expanded, COLORS.muted)
+		draw.SimpleText(title, "DermaDefaultBold", 18, height / 2, dim and COLORS.muted or COLORS.amber, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+		if not section.expanded then
+			surface.SetFont("DermaDefaultBold")
+			local titleWidth = surface.GetTextSize(title)
+			draw.SimpleText(section.count .. " value" .. (section.count == 1 and "" or "s"), "DermaDefault", 30 + titleWidth, height / 2, COLORS.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+		end
+	end
+	header.DoClick = function()
+		section.expanded = not section.expanded
+		onToggle(section.expanded)
+	end
+	section.header = header
+	function section:AddItem(panel)
+		panel:SetParent(self)
+		self.items[#self.items + 1] = panel
+		return panel
+	end
+	function section:UpdateHeight()
+		local height = SECTION_HEADER_HEIGHT
+		for _, item in ipairs(self.items) do
+			if item.UpdateHeight then item:UpdateHeight() end
+			item:SetVisible(self.expanded)
+			if self.expanded then height = height + item:GetTall() + 1 end
+		end
+		if self.expanded and #self.items > 0 then height = height + 4 end
+		self:SetTall(height)
+		self:InvalidateLayout()
+	end
+	function section:PerformLayout(width)
+		self.header:SetPos(0, 0)
+		self.header:SetSize(width, SECTION_HEADER_HEIGHT)
+		local y = SECTION_HEADER_HEIGHT
+		for _, item in ipairs(self.items) do
+			if self.expanded then
+				item:SetPos(SECTION_INDENT, y)
+				item:SetWide(width - SECTION_INDENT)
+				y = y + item:GetTall() + 1
+			end
+		end
+	end
+	return section
+end
+
+-- the sections an entry sits in, outermost first: { key, title, starts open, dim }
+local function sectionChain(entry)
+	local rootTitle = entry.root == "" and "vehicle" or entry.root
+	rootTitle = rootTitle:sub(1, 1):upper() .. rootTitle:sub(2)
+	local isSound = entry.root ~= "vehicle"
+	local chain = { { key = entry.root, title = rootTitle, open = not isSound, dim = isSound } }
+	if entry.label ~= "" and entry.label ~= entry.root then
+		local key = entry.root
+		for part in (entry.label .. " > "):gmatch("(.-) > ") do
+			key = key .. ">" .. part
+			chain[#chain + 1] = { key = key, title = part:sub(1, 1):upper() .. part:sub(2), open = not isSound, dim = isSound }
+		end
+	end
+	-- in the vehicle block, what doesn't change the handling (the dust cloud) folds away on its own
+	if not isSound and not KeyValues.IsHandling(entry) then
+		local last = chain[#chain]
+		chain[#chain + 1] = { key = last.key .. ">effects", title = "Effects (no handling change)", open = false, dim = true }
+	end
+	return chain
+end
+
+local function formatVersionTime(time)
+	return os.date("%d %b %H:%M:%S", time)
 end
 
 local function buildScriptPage(pagePanel)
+	local function data() return EngineDebug.ScriptData(targetCar) end
+
 	local header = vgui.Create("DPanel", pagePanel)
 	header:Dock(TOP)
 	header:DockPadding(8, 6, 8, 0)
@@ -232,133 +718,257 @@ local function buildScriptPage(pagePanel)
 	filterLabel:DockMargin(0, 0, 6, 0)
 	local filter = vgui.Create("DTextEntry", filterRow)
 	filter:Dock(LEFT)
-	filter:SetWide(200)
-	local showSounds = vgui.Create("DCheckBoxLabel", filterRow)
-	showSounds:Dock(LEFT)
-	showSounds:DockMargin(12, 3, 0, 0)
-	showSounds:SetText("Show sound blocks")
-	showSounds:SetTextColor(COLORS.text)
-	showSounds:SetWide(140)
+	filter:SetWide(180)
+	local overlayCheck = vgui.Create("DCheckBoxLabel", filterRow)
+	overlayCheck:Dock(LEFT)
+	overlayCheck:DockMargin(12, 3, 0, 0)
+	overlayCheck:SetText("C overlay in the car")
+	overlayCheck:SetTextColor(COLORS.text)
+	overlayCheck:SetWide(140)
+	overlayCheck:SetConVar("audio_engine_debug_overlay")
+	overlayCheck:SetTooltip("The pinned (star) and changed values on screen while you drive; hold C to edit them live")
 	local countLabel = label(filterRow, "", COLORS.muted)
 	countLabel:Dock(FILL)
 	countLabel:DockMargin(12, 0, 0, 0)
 	header:SetTall(150)
 
+	-- the save history, on the right
+	local historyPanel = vgui.Create("DPanel", pagePanel)
+	historyPanel:Dock(RIGHT)
+	historyPanel:SetWide(230)
+	historyPanel:DockMargin(6, 4, 4, 8)
+	historyPanel.Paint = function(self, width, height) draw.RoundedBox(4, 0, 0, width, height, COLORS.background) end
+	historyPanel:DockPadding(6, 4, 6, 6)
+	local historyTitle = label(historyPanel, "SAVE HISTORY", COLORS.amber, "DermaDefaultBold")
+	historyTitle:Dock(TOP)
+	local historyHint = paragraph(historyPanel, "Each Apply live / Save adds a version. Hover: what it changed. Click: load it into the editor.", COLORS.muted)
+	historyHint:DockMargin(0, 2, 0, 4)
+	local historyList = vgui.Create("DScrollPanel", historyPanel)
+	historyList:Dock(FILL)
+
 	local scrollPanel = scroll(pagePanel)
-	local rows = {}
 
 	local function refreshCount()
-		if not scriptData then countLabel:SetText("") return end
+		local current = data()
+		if not current then countLabel:SetText("") return end
 		local fromFile, pending = 0, 0
-		for _, entry in ipairs(scriptData.fileEntries) do
-			if scriptData.values[entry.index] ~= entry.value then fromFile = fromFile + 1 end
-			if scriptData.values[entry.index] ~= scriptData.applied[entry.index] then pending = pending + 1 end
+		for _, entry in ipairs(current.fileEntries) do
+			if current.values[entry.index] ~= entry.value then fromFile = fromFile + 1 end
+			if current.values[entry.index] ~= current.applied[entry.index] then pending = pending + 1 end
 		end
 		countLabel:SetText(string.format("%d value%s changed from the file · %d not applied yet", fromFile, fromFile == 1 and "" or "s", pending))
 		countLabel:SetTextColor(pending > 0 and COLORS.amber or COLORS.muted)
 	end
 
-	local function rebuild()
-		scrollPanel:Clear()
-		rows = {}
-		if not scriptData then return end
-		local filterText = filter:GetValue():lower()
-		local lastLabel
-		for _, entry in ipairs(scriptData.entries) do
-			local isSound = entry.path:find("sound", 1, true) ~= nil
-			local matches = filterText == "" or entry.lowerKey:find(filterText, 1, true) or entry.label:lower():find(filterText, 1, true)
-			if matches and (showSounds:GetChecked() or not isSound) then
-				if entry.label ~= lastLabel then
-					lastLabel = entry.label
-					local groupLabel = label(scrollPanel, entry.label == "" and "vehicle" or entry.label, COLORS.amber, "DermaDefaultBold")
-					groupLabel:Dock(TOP)
-					groupLabel:DockMargin(0, 8, 0, 2)
-				end
-				local row = vgui.Create("DPanel", scrollPanel)
-				row:Dock(TOP)
-				row:SetTall(22)
-				row:DockMargin(0, 1, 0, 1)
-				row.Paint = nil
-				local keyLabel = label(row, entry.key .. (entry.occurrence > 1 and ("  #" .. entry.occurrence) or ""), COLORS.text)
-				keyLabel:Dock(LEFT)
-				keyLabel:SetWide(230)
-				local valueEntry = vgui.Create("DTextEntry", row)
-				valueEntry:Dock(LEFT)
-				valueEntry:SetWide(150)
-				valueEntry:SetValue(scriptData.values[entry.index])
-				local fileValue = scriptData.fileEntries[entry.index] and scriptData.fileEntries[entry.index].value
-				valueEntry.Paint = function(self, width, height)
-					local value = self:GetValue()
-					local background = not KeyValues.ValidValue(value) and Color(90, 30, 30) or value ~= fileValue and Color(70, 52, 25) or COLORS.face
-					draw.RoundedBox(3, 0, 0, width, height, background)
-					self:DrawTextEntryText(COLORS.text, COLORS.amber, COLORS.text)
-				end
-				valueEntry.OnChange = function(self)
-					local value = self:GetValue()
-					if KeyValues.ValidValue(value) then scriptData.values[entry.index] = value end
-					refreshCount()
-				end
-				local liveLabel = label(row, scriptData.live[entry.index] and "live" or "respawn", scriptData.live[entry.index] and COLORS.green or COLORS.muted)
-				liveLabel:Dock(LEFT)
-				liveLabel:SetWide(60)
-				liveLabel:DockMargin(8, 0, 0, 0)
-				if entry.comment then
-					local commentLabel = label(row, "// " .. entry.comment, COLORS.muted)
-					commentLabel:Dock(FILL)
-				end
-				rows[entry.index] = valueEntry
+	local function rebuildHistory()
+		historyList:Clear()
+		local current = data()
+		if not current then return end
+		local versions = EngineDebug.History(current.path).versions
+		if #versions == 0 then
+			local none = label(historyList, "No versions yet.", COLORS.muted)
+			none:Dock(TOP)
+			return
+		end
+		for position = #versions, 1, -1 do
+			local version = versions[position]
+			local versionButton = vgui.Create("DButton", historyList)
+			versionButton:Dock(TOP)
+			versionButton:DockMargin(0, 0, 0, 2)
+			versionButton:SetTall(32)
+			versionButton:SetText("")
+			local changeCount = table.Count(version.values or {})
+			versionButton.Paint = function(self, width, height)
+				draw.RoundedBox(3, 0, 0, width, height, self:IsHovered() and COLORS.line or COLORS.face)
+				draw.SimpleText("v" .. version.number, "DermaDefaultBold", 6, 3, COLORS.amber)
+				draw.SimpleText(formatVersionTime(version.time or 0), "DermaDefault", 40, 3, COLORS.text)
+				draw.SimpleText(string.format("%s · %d from the file", version.kind or "saved", changeCount), "DermaDefault", 6, 17, COLORS.muted)
+			end
+			local changes, beforeNumber = EngineDebug.VersionChanges(current, position)
+			local tooltipLines = { beforeNumber and ("Changes from v" .. beforeNumber .. ":") or "Changes from the file:" }
+			for i = 1, math.min(#changes, 30) do tooltipLines[#tooltipLines + 1] = changes[i] end
+			if #changes == 0 then tooltipLines[#tooltipLines + 1] = "(none)" end
+			if #changes > 30 then tooltipLines[#tooltipLines + 1] = string.format("... and %d more", #changes - 30) end
+			versionButton:SetTooltip(table.concat(tooltipLines, "\n"))
+			versionButton.DoClick = function()
+				local latest = data()
+				if not latest then return end
+				EngineDebug.LoadVersion(latest, version)
+				report(true, "Loaded v" .. version.number .. " into the editor: press Apply live to put it on the car.")
 			end
 		end
+	end
+
+	local sections = {}
+	local topSections = {}
+	local function relayout()
+		for _, section in ipairs(topSections) do section:UpdateHeight() end
+		scrollPanel:InvalidateLayout()
+		scrollPanel:GetCanvas():InvalidateLayout()
+	end
+
+	local function makeRow(parentSection, current, entry)
+		local row = parentSection:AddItem(vgui.Create("DPanel"))
+		row:SetTall(ROW_HEIGHT)
+		row.Paint = nil
+		local id = current.ids[entry.index]
+		local pinButton = vgui.Create("DButton", row)
+		pinButton:Dock(LEFT)
+		pinButton:SetWide(18)
+		pinButton:DockMargin(0, 2, 4, 2)
+		pinButton:SetText("")
+		pinButton:SetTooltip("Pin to the C overlay (the value on screen while driving, editable with C held)")
+		pinButton.Paint = function(self, width, height)
+			local pinned = EngineDebug.IsPinned(id)
+			local color = pinned and COLORS.amber or (self:IsHovered() and COLORS.muted or COLORS.line)
+			draw.RoundedBox(height / 2, 2, 1, width - 4, height - 2, color)
+			if not pinned then draw.RoundedBox(height / 2 - 2, 4, 3, width - 8, height - 6, COLORS.panel) end
+		end
+		pinButton.DoClick = function() EngineDebug.SetPinned(id, not EngineDebug.IsPinned(id)) end
+		local keyLabel = label(row, entry.key .. (entry.occurrence > 1 and ("  #" .. entry.occurrence) or ""), COLORS.text)
+		keyLabel:Dock(LEFT)
+		keyLabel:SetWide(210)
+		local valueEntry = vgui.Create("DTextEntry", row)
+		valueEntry:Dock(LEFT)
+		valueEntry:SetWide(150)
+		valueEntry:SetValue(current.values[entry.index])
+		local originalValue = fileValue(current, entry.index)
+		valueEntry:SetTooltip("File: " .. tostring(originalValue))
+		valueEntry.Paint = function(self, width, height)
+			local value = self:GetValue()
+			local background = not KeyValues.ValidValue(value) and Color(90, 30, 30) or value ~= originalValue and Color(70, 52, 25) or COLORS.face
+			draw.RoundedBox(3, 0, 0, width, height, background)
+			self:DrawTextEntryText(COLORS.text, COLORS.amber, COLORS.text)
+		end
+		valueEntry.OnChange = function(self)
+			local latest = data()
+			local value = self:GetValue()
+			if latest and KeyValues.ValidValue(value) then latest.values[entry.index] = value end
+			refreshCount()
+		end
+		local isLive = current.live[entry.index]
+		local liveLabel = label(row, isLive and "live" or (KeyValues.IsHandling(entry) and "respawn" or ""), isLive and COLORS.green or COLORS.muted)
+		liveLabel:Dock(LEFT)
+		liveLabel:SetWide(56)
+		liveLabel:DockMargin(8, 0, 0, 0)
+		if entry.comment then
+			local commentLabel = label(row, "// " .. entry.comment, COLORS.muted)
+			commentLabel:Dock(FILL)
+		end
+	end
+
+	local function rebuild()
+		scrollPanel:Clear()
+		sections, topSections = {}, {}
+		local current = data()
+		if not current then return end
+		local filterText = filter:GetValue():lower()
+		local filtering = filterText ~= ""
+		local sectionTotals = {}
+		for _, entry in ipairs(current.entries) do
+			local matches = not filtering or entry.lowerKey:find(filterText, 1, true) or entry.label:lower():find(filterText, 1, true)
+			if matches then
+				local parentSection
+				for depth, link in ipairs(sectionChain(entry)) do
+					local section = sections[link.key]
+					if not section then
+						if sectionExpanded[link.key] == nil then sectionExpanded[link.key] = link.open end
+						local key = link.key
+						section = createSection(nil, link.title, filtering or sectionExpanded[key], function(expanded)
+							if not filtering then sectionExpanded[key] = expanded end
+							relayout()
+						end, link.dim)
+						if depth == 1 then
+							scrollPanel:AddItem(section)
+							section:Dock(TOP)
+							section:DockMargin(0, 4, 0, 2)
+							topSections[#topSections + 1] = section
+						else
+							parentSection:AddItem(section)
+						end
+						sections[link.key] = section
+					end
+					section.count = section.count + 1
+					parentSection = section
+				end
+				makeRow(parentSection, current, entry)
+			end
+		end
+		relayout()
 		refreshCount()
 	end
 	filter.OnChange = function() rebuild() end
-	showSounds.OnChange = function() rebuild() end
 
-	scriptListener = function()
-		if not (scriptData and IsValid(infoLabel)) then return end
-		local carConfig = IsValid(scriptData.vehicle) and AudioEngine.GetCarConfig(scriptData.vehicle)
-		infoLabel:SetText(string.format("%s  ·  %s", carConfig and carConfig.name or "?", scriptData.path))
-		warningLabel:SetText(scriptData.fallback and ("PERP's vehicle scripts aren't mounted here: this is test_car.txt carrying PERP's physics values for "
-			.. scriptData.path .. " (what the car drives on). Its sounds, materials and other fields are test_car's, not PERP's file.") or "")
-		rebuild()
+	local function setAll(expanded)
+		for key in pairs(sections) do sectionExpanded[key] = expanded end
+		for _, section in pairs(sections) do section.expanded = expanded end
+		relayout()
 	end
 
+	EngineDebug.OnScript("menu", function(vehicle)
+		if vehicle ~= targetCar or not IsValid(infoLabel) then return end
+		local current = data()
+		if not current then return end
+		local carConfig = IsValid(current.vehicle) and AudioEngine.GetCarConfig(current.vehicle)
+		infoLabel:SetText(string.format("%s  ·  %s", carConfig and carConfig.name or "?", current.path))
+		warningLabel:SetText(current.fallback and ("PERP's vehicle scripts aren't mounted here: this is test_car.txt carrying PERP's physics values for "
+			.. current.path .. " (what the car drives on). Its sounds, materials and other fields are test_car's, not PERP's file.") or "")
+		rebuild()
+		rebuildHistory()
+	end)
+
 	buttons:Add("Apply live", function()
-		if not (scriptData and IsValid(scriptData.vehicle)) then return end
-		local data = util.Compress(scriptText()) or ""
-		net.Start("audio_dbg_script_apply")
-		net.WriteEntity(scriptData.vehicle)
-		net.WriteUInt(#data, 16)
-		net.WriteData(data, #data)
-		net.SendToServer()
+		local current = data()
+		if not (current and IsValid(current.vehicle)) then return end
+		local version, added = EngineDebug.AddVersion(current, "applied")
+		EngineDebug.ApplyScript(current.vehicle)
+		if not added then report(true, "Applying (same values as v" .. version.number .. ": no new version).") end
 	end, true)
 	buttons:Add("Copy txt", function()
-		if not scriptData then return end
-		SetClipboardText(scriptText())
-		report(true, "Copied " .. scriptData.path .. " to the clipboard.")
+		local current = data()
+		if not current then return end
+		SetClipboardText(scriptText(current))
+		report(true, "Copied " .. current.path .. " to the clipboard.")
 	end)
 	buttons:Add("Save to data/", function()
-		if not scriptData then return end
-		local relativePath = "audio_engine_debug/scripts/" .. scriptData.path:gsub("^scripts/vehicles/", "")
-		sourceFile.CreateDir(string.GetPathFromFilename(relativePath))
-		sourceFile.Write(relativePath, scriptText())
-		report(true, "Saved to garrysmod/data/" .. relativePath)
+		local current = data()
+		if not current then return end
+		local relativePath = "audio_engine_debug/scripts/" .. current.path:gsub("^scripts/vehicles/", "")
+		file.CreateDir(string.GetPathFromFilename(relativePath))
+		file.Write(relativePath, scriptText(current))
+		local version, added = EngineDebug.AddVersion(current, "saved")
+		rebuildHistory()
+		report(true, "Saved to garrysmod/data/" .. relativePath .. (added and (" as v" .. version.number) or (" (same values as v" .. version.number .. ")")))
 	end)
+	buttons:Add("Copy handling from...", openCopyDialog)
 	buttons:Add("Undo unapplied", function()
-		if not scriptData then return end
-		scriptData.values = table.Copy(scriptData.applied)
-		rebuild()
+		local current = data()
+		if not current then return end
+		current.values = table.Copy(current.applied)
+		notifyScript(current.vehicle)
 	end)
 	buttons:Add("Reset car to file", function()
-		if not (scriptData and IsValid(scriptData.vehicle)) then return end
+		local current = data()
+		if not (current and IsValid(current.vehicle)) then return end
+		current.sentValues = nil
 		net.Start("audio_dbg_script_apply")
-		net.WriteEntity(scriptData.vehicle)
+		net.WriteEntity(current.vehicle)
 		net.WriteUInt(0, 16)
 		net.SendToServer()
 	end)
-	buttons:Add("Reload", requestScript)
+	buttons:Add("Reload", function()
+		local current = data()
+		if current then current.sentValues = nil end
+		requestScript()
+	end)
+	for _, choice in ipairs({ { "Expand all", true }, { "Collapse all", false } }) do
+		local foldButton = button(filterRow, choice[1], function() setAll(choice[2]) end)
+		foldButton:Dock(LEFT)
+		foldButton:DockMargin(8, 0, 0, 0)
+	end
+	countLabel:MoveToFront()
 
-	if scriptData and scriptData.vehicle == targetCar then scriptListener() else requestScript() end
+	if data() then scriptListeners.menu(targetCar) else requestScript() end
 end
 
 ---------------------------------------------------------------------------
@@ -930,8 +1540,7 @@ function EngineDebug.OpenMenu(vehicle)
 		return
 	end
 	if IsValid(frame) then frame:Remove() end
-	stateListeners, scriptListener = {}, nil
-	if scriptData and scriptData.vehicle ~= targetCar then scriptData = nil end
+	stateListeners = {}
 
 	frame = vgui.Create("DFrame")
 	frame:SetSize(min(1000, ScrW() - 40), min(820, ScrH() - 40))
