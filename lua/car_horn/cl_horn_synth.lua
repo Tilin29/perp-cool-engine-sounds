@@ -6,8 +6,13 @@
 
 	A horn is one or more horn units (an ordinary car has a pair, a high and a low one; a truck's
 	air horn three trumpets), each a buzzing diaphragm: a wavetable of the horn's harmonics, plus
-	`rasp`, a burst of noise each cycle where the diaphragm strikes its stop. `air` is a steady
-	rush of air under the tone (an air horn), at full from the moment it's pressed.
+	`rasp`, a burst of noise each cycle where the diaphragm strikes its stop. `strike` lines the
+	harmonics up into a kick at that moment. `air` is a steady rush of air under the tone (an air
+	horn), at full from the moment it's pressed.
+	The kicks ring the horn's body (`resonances`: the tone disc, or a trumpet's air column), at fixed
+	pitches that don't follow the note, so every cycle is a knock and a short ring, a little
+	different each time with the rasp and the roughness: the sound of a real electric horn. Harmonics
+	alone, however they are shaped, give a steady, instrument-like note.
 	No real horn holds still, and a perfectly steady one sounds synthetic:
 	  * `jitter`: each unit's pitch wanders on its own, a smooth random drift
 	  * `shimmer`: each cycle of each unit comes out a little louder or softer than the last
@@ -16,8 +21,9 @@
 	  * `growl`: every other cycle stronger, a rumble an octave under the note
 	On pressing, the units scoop up to pitch over attack.time from attack.pitch while the level
 	rises, ragged at first: roughness, rasp and air stronger (the diaphragm catching), settling by
-	the attack's end. Then a speaker as the siren's:
-	highpass, drive (soft clipping), a resonant peak (the horn's trumpet) and a lowpass, and
+	the attack's end. Then a speaker as the siren's: highpass, the resonances, drive (soft
+	clipping; `asymmetry` clips one way sooner, mixing the units into the low snarl of a real pair),
+	a resonant peak and a lowpass, and
 	`grille`: the short reflections of the bumper and grille the horn sits behind.
 	Letting go is played, not rendered: a fade over release.time falling to release.pitch.
 	The loop lines up at its ends:
@@ -40,9 +46,10 @@ local RASP_DECAY = 12
 local ATTACK_RASP = 1.5
 local ATTACK_ROUGHNESS = 2
 local ATTACK_AIR = 2
+local DC_BLOCK_HZ = 20           -- what's left of an asymmetric drive's offset, taken out below this
 local AIR_NOISE_SHIFT = 104729   -- the air reads the noise table elsewhere than the units' rasp
 local PEAK = 0.95
-local YIELD_EVERY = 8192
+local YIELD_EVERY = 4096   -- (the resonances made each sample dearer: keep a step well under cl_horn.lua's 4 ms budget)
 local TWO_PI = math.pi * 2
 -- the bumper and grille: { delay (s), gain } of each reflection
 local GRILLE_TAPS = { { 0.0007, 0.45 }, { 0.0013, -0.3 }, { 0.0021, 0.25 }, { 0.0034, -0.15 }, { 0.0052, 0.1 } }
@@ -87,15 +94,18 @@ local function driftTable(count, points, seed)
 	return values
 end
 
--- a single cycle holding the harmonics that stay under the Nyquist limit at this top frequency
-local function wavetable(harmonics, topFreq, sampleRate)
+-- a single cycle holding the harmonics that stay under the Nyquist limit at this top frequency.
+-- `strike` 0..1 turns their phases from sines (a smooth wave) to cosines: all of them peaking
+-- together at the start of the cycle, a sharp kick where the diaphragm hits its stop
+local function wavetable(harmonics, topFreq, sampleRate, strike)
 	local waveTable, peak = {}, 0
 	local limit = sampleRate * NYQUIST_SHARE
+	local phaseShift = min(max(strike or 0, 0), 1) * math.pi / 2
 	for i = 0, TABLE_SIZE - 1 do
 		local sample, phase = 0, TWO_PI * i / TABLE_SIZE
 		for harmonic = 1, #harmonics do
 			local amplitude = harmonics[harmonic] or 0
-			if amplitude ~= 0 and harmonic * topFreq < limit then sample = sample + amplitude * sin(harmonic * phase) end
+			if amplitude ~= 0 and harmonic * topFreq < limit then sample = sample + amplitude * sin(harmonic * phase + phaseShift) end
 		end
 		waveTable[i] = sample
 		peak = max(peak, abs(sample))
@@ -108,7 +118,7 @@ local function wavetable(harmonics, topFreq, sampleRate)
 	return waveTable
 end
 
--- RBJ biquad coefficients: "hp", "lp" or "peak"
+-- RBJ biquad coefficients: "hp", "lp", "peak" or "bp" (a band pass, 1 at its centre)
 local function biquad(kind, frequency, q, gainDb, sampleRate)
 	frequency = min(max(frequency, 10), sampleRate * NYQUIST_SHARE)
 	q = max(q, 0.1)
@@ -120,6 +130,9 @@ local function biquad(kind, frequency, q, gainDb, sampleRate)
 		a0, a1, a2 = 1 + alpha, -2 * cw, 1 - alpha
 	elseif kind == "lp" then
 		b0, b1, b2 = (1 - cw) / 2, 1 - cw, (1 - cw) / 2
+		a0, a1, a2 = 1 + alpha, -2 * cw, 1 - alpha
+	elseif kind == "bp" then
+		b0, b1, b2 = alpha, 0, -alpha
 		a0, a1, a2 = 1 + alpha, -2 * cw, 1 - alpha
 	else
 		local gainFactor = 10 ^ (gainDb / 40)
@@ -197,6 +210,7 @@ function Synth.Render(horn, config, yield, inside)
 	local sampleCount = loopStart + loopCount
 
 	local harmonics = horn.harmonics or { 1 }
+	local strike = horn.strike or 0
 	local shimmer = max(horn.shimmer or 0, 0)
 	local growl = min(max(horn.growl or 0, 0), 1)
 	local voices = {}
@@ -209,7 +223,7 @@ function Synth.Render(horn, config, yield, inside)
 			voices[#voices + 1] = {
 				frequencies = frequencies, roughness = roughness, level = level, phase = 0, cycle = 0, cycles = cycles,
 				cycleGains = shimmer > 0 and randomTable(cycles, 5000 + unitIndex * 3331),
-				waveTable = wavetable(harmonics, top * max(attackPitch, 1), sampleRate),
+				waveTable = wavetable(harmonics, top * max(attackPitch, 1), sampleRate, strike),
 				noiseShift = unitIndex * 7919,
 			}
 		end
@@ -224,7 +238,27 @@ function Synth.Render(horn, config, yield, inside)
 	local lowpass = biquad("lp", speaker.lowpass or 20000, 0.707, 0, sampleRate)
 	local resonance = biquad("peak", speaker.resonance or 1000, speaker.resonanceQ or 1, speaker.resonanceGain or 0, sampleRate)
 	local drive = max(speaker.drive or 0, 0)
-	local driveNorm = drive > 0 and 1 / tanh(drive) or 1
+	-- asymmetry: the drive clips one way sooner than the other, which mixes the units (a pair's
+	-- difference tone, the low snarl under a real horn) and adds even harmonics. Its offset is
+	-- taken back out (dcBlock) so the clipping never leaves the wave off centre
+	local asymmetry = drive > 0 and min(max(speaker.asymmetry or 0, 0), 0.9) or 0
+	local driveOffset = tanh(asymmetry)
+	local driveNorm = drive > 0 and 1 / (tanh(drive + asymmetry) - driveOffset) or 1
+	local dcBlock = 1 - TWO_PI * DC_BLOCK_HZ / sampleRate
+	local dcInput, dcOutput = 0, 0
+
+	-- the body: the tone disc (or the trumpet's air) each strike sets ringing, at its own fixed
+	-- pitches whatever note the unit buzzes at: what makes a horn sound like a horn rather than a
+	-- note. `direct` of the diaphragm's own sound passes by them
+	local resonators = {}
+	for _, body in ipairs(horn.resonances or {}) do
+		if (body.f or 0) > 0 and (body.level or 0) ~= 0 then
+			local filter = biquad("bp", body.f, body.q or 4, 0, sampleRate)
+			filter.level = body.level
+			resonators[#resonators + 1] = filter
+		end
+	end
+	local direct = #resonators > 0 and (horn.direct or 0) or 1
 	local muffleHz = inside and config.cabin and config.cabin.muffle
 	local muffleLowpassA = muffleHz and biquad("lp", muffleHz, 0.707, 0, sampleRate)
 	local muffleLowpassB = muffleHz and biquad("lp", muffleHz, 0.707, 0, sampleRate)
@@ -276,7 +310,22 @@ function Synth.Render(horn, config, yield, inside)
 		sample = sample * envelope
 		if air > 0 then sample = sample + airFactor * noise[(loopIndex + AIR_NOISE_SHIFT) % loopCount] end
 		sample = runBiquad(highpass, sample)
-		if drive > 0 then sample = tanh(sample * drive) * driveNorm end
+		if #resonators > 0 then
+			local body = direct * sample
+			for r = 1, #resonators do
+				local resonator = resonators[r]
+				body = body + resonator.level * runBiquad(resonator, sample)
+			end
+			sample = body
+		end
+		if drive > 0 then
+			sample = (tanh(sample * drive + asymmetry) - driveOffset) * driveNorm
+			if asymmetry > 0 then
+				dcOutput = sample - dcInput + dcBlock * dcOutput
+				dcInput = sample
+				sample = dcOutput
+			end
+		end
 		sample = runBiquad(lowpass, runBiquad(resonance, sample))
 		if grille > 0 then
 			local slot = i % historySize

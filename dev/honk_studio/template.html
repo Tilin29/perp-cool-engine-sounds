@@ -172,7 +172,7 @@ const el = (tag, props, ...kids) => {
   return e
 }
 const clone = (x) => JSON.parse(JSON.stringify(x))
-const STORE = 'honk_studio_settings_v7'   // (v7: a gentler honk limit: older saves are left behind)
+const STORE = 'honk_studio_settings_v8'   // (v8: horns ring their body's resonances: older saves are left behind)
 
 let DEFAULTS = null, CFG = null, SEL = null
 
@@ -181,13 +181,17 @@ function status(t, cls) { $('status').textContent = t; $('status').className = c
 // ---------------------------------------------------------------------------------------------
 // settings: the shape the Lua file has, filled in where an old save or an import lacks a field
 // ---------------------------------------------------------------------------------------------
+const tilted = (count, power) => Array.from({ length: count }, (_, i) => +Math.pow(i + 1, -power).toFixed(2))
 const HORN_SHAPE = {
   name: 'Horn', level: 1, units: [{ f: 415, level: 1 }, { f: 520, level: 0.85 }],
-  harmonics: [0.5, 0.6, 0.75, 0.9, 1, 1, 0.85, 0.7, 0.55, 0.42, 0.32, 0.25, 0.19, 0.15, 0.11, 0.08],
-  rasp: 0.2, air: 0, jitter: { rate: 9, depth: 10 }, shimmer: 0.12, grille: 0.6, roughness: 0, growl: 0, flutter: { rate: 0, depth: 0 },
-  attack: { time: 0.025, pitch: 0.92, curve: 0.5 }, release: { time: 0.06, pitch: 0.94 },
-  speaker: { highpass: 250, lowpass: 6000, drive: 1.2, resonance: 2400, resonanceQ: 1.5, resonanceGain: 6 },
+  harmonics: tilted(24, 0.35), strike: 1,
+  rasp: 0.35, air: 0, jitter: { rate: 3, depth: 3 }, shimmer: 0.15, grille: 0.6, roughness: 6, growl: 0, flutter: { rate: 0, depth: 0 },
+  direct: 0.25, resonances: [{ f: 2350, q: 6, level: 1 }, { f: 3500, q: 8, level: 0.55 }, { f: 1100, q: 2, level: 0.35 }],
+  attack: { time: 0.012, pitch: 0.97, curve: 0.5 }, release: { time: 0.03, pitch: 1 },
+  speaker: { highpass: 300, lowpass: 7000, drive: 3.5, asymmetry: 0.2, resonance: 2500, resonanceQ: 1.2, resonanceGain: 0 },
 }
+// a horn saved before the body resonances: the new fields at the values that leave its sound as it was
+const OLD_MODEL = { strike: 0, direct: 1, resonances: [] }
 function fill(obj, shape) {
   for (const [k, v] of Object.entries(shape)) {
     if (obj[k] === undefined || obj[k] === null) obj[k] = clone(v)
@@ -214,6 +218,10 @@ function normalize(c) {
   if (!c.models || typeof c.models !== 'object' || Array.isArray(c.models)) c.models = {}
   for (const [m, id] of Object.entries(c.models)) if (!c.horns[id]) delete c.models[m]
   for (const h of Object.values(c.horns)) {
+    if (h.resonances === undefined || h.resonances === null) {
+      fill(h, OLD_MODEL)
+      if (h.speaker && h.speaker.asymmetry === undefined) h.speaker.asymmetry = 0
+    }
     fill(h, HORN_SHAPE)
     if (!h.units.length) h.units = clone(HORN_SHAPE.units)
     for (const u of h.units) { u.f = u.f || 400; if (u.level === undefined) u.level = 1 }
@@ -722,7 +730,7 @@ function buildEditor() {
     el('h2', null, 'Tone colour (harmonics)', el('span', { class: 'bar' },
       ...Object.entries(HARMONIC_PRESETS).map(([n, f]) => el('button', { class: 'small', textContent: n, onclick: () => { h.harmonics = f(); buildEditor(); onHorn() } })))),
     harm,
-    el('p', { class: 'hint' }, 'Level of each harmonic of the note (1 = the note itself). A diaphragm horn is rich: all of them, falling slowly. Fewer = a smoother, more expensive horn.'),
+    el('p', { class: 'hint' }, 'Level of each harmonic of the note (1 = the note itself): the diaphragm\'s bare buzz. A diaphragm horn is rich: all of them, falling slowly. With body resonances keep them nearly flat (Flat buzz) and let the resonances colour it. Fewer = a smoother, more expensive horn.'),
   )
   while (h.harmonics.length < 16) h.harmonics.push(0)
   h.harmonics.forEach((v, i) => {
@@ -730,10 +738,26 @@ function buildEditor() {
     harm.append(el('div', null, s, el('span', null, i + 1)))
   })
 
+  const bodySec = el('section', null,
+    el('h2', null, 'Body (resonances)', el('span', { class: 'bar' },
+      ...Object.entries(BODY_PRESETS).map(([n, f]) => el('button', { class: 'small', textContent: n, onclick: () => { Object.assign(h, f()); buildEditor(); onHorn() } })))),
+    el('div', { id: 'resonances' }),
+    el('div', { class: 'bar', style: 'margin-top:8px' },
+      el('button', { class: 'small', textContent: '+ Resonance', onclick: () => {
+        const last = h.resonances[h.resonances.length - 1]
+        h.resonances.push({ f: last ? Math.round(last.f * 1.5) : 2400, q: last ? last.q : 6, level: 0.5 })
+        buildResonances(); onHorn()
+      } })),
+    field('Direct', h, 'direct', { min: 0, max: 1, step: 0.01, change: onHorn }),
+    el('p', { class: 'hint' }, 'The tone disc (or a trumpet\'s air column) each strike sets ringing, at fixed pitches whatever the note: what makes it sound like a horn and not a note. Disc horns ring sharply around 2-3.5 kHz (Q 6-8), trumpets lower and broader. Direct = how much of the bare buzz passes by them (only with resonances). No resonances = the harmonics alone.'),
+  )
+
   const grit = el('section', null,
     el('h2', null, 'Grit, wobble, level'),
     el('div', { class: 'grid2' },
       el('div', null,
+        field('Strike', h, 'strike', { min: 0, max: 1, step: 0.01, change: onHorn }),
+        el('p', { class: 'hint' }, 'How sharply the diaphragm hits its stop each cycle: 1 = a kick that sets the body ringing (an electric horn), 0 = a smooth wave.'),
         field('Rasp', h, 'rasp', { min: 0, max: 1.5, step: 0.01, change: onHorn }),
         el('p', { class: 'hint' }, 'Noise each cycle where the diaphragm strikes its stop: 0 = clean, more = a cheap, raspy horn.'),
         field('Air', h, 'air', { min: 0, max: 0.5, step: 0.005, change: onHorn }),
@@ -775,12 +799,12 @@ function buildEditor() {
         field('Attack time', h.attack, 'time', { min: 0, max: 1, step: 0.005, unit: 's', change: onHorn }),
         field('Starts at pitch', h.attack, 'pitch', { min: 0.3, max: 1.5, step: 0.01, unit: '×', change: onHorn }),
         field('Attack curve', h.attack, 'curve', { min: 0.1, max: 4, step: 0.05, change: onHorn }),
-        el('p', { class: 'hint' }, 'On pressing: the horn rises to its level and scoops up to pitch. Curve 1 = even, below 1 = fast at first, above 1 = slow at first (a klaxon\'s "a-ooo").'),
+        el('p', { class: 'hint' }, 'On pressing: the horn rises to its level and scoops up to pitch. Curve 1 = even, below 1 = fast at first, above 1 = slow at first (a klaxon\'s "a-ooo"). A real electric horn is at full in 10-15 ms, starting at 0.97 or so: a long scoop is a cartoon "bwah".'),
       ),
       el('div', null,
         field('Release time', h.release, 'time', { min: 0.005, max: 1, step: 0.005, unit: 's', change: onHornPlayed }),
         field('Falls to pitch', h.release, 'pitch', { min: 0.3, max: 1, step: 0.01, unit: '×', change: onHornPlayed }),
-        el('p', { class: 'hint' }, 'On letting go: a fade while the pitch falls (the diaphragm winding down). Try "Beep beep" for taps.'),
+        el('p', { class: 'hint' }, 'On letting go: a fade while the pitch falls. An electric horn stops within a few cycles at its own pitch (1): a falling pitch is a cartoon "boop". An air horn sags a little as the air runs out. Try "Beep beep" for taps.'),
       ),
     ),
     el('canvas', { id: 'wave' }),
@@ -794,6 +818,7 @@ function buildEditor() {
         field('Low cut', sp, 'highpass', { min: 20, max: 3000, step: 1, log: true, unit: 'Hz', change: onHorn }),
         field('High cut', sp, 'lowpass', { min: 500, max: 20000, step: 1, log: true, unit: 'Hz', change: onHorn }),
         field('Drive', sp, 'drive', { min: 0, max: 10, step: 0.05, change: onHorn }),
+        field('Asymmetry', sp, 'asymmetry', { min: 0, max: 0.9, step: 0.01, change: onHorn }),
       ),
       el('div', null,
         field('Horn resonance', sp, 'resonance', { min: 100, max: 6000, step: 1, log: true, unit: 'Hz', change: onHorn }),
@@ -801,14 +826,23 @@ function buildEditor() {
         field('Resonance boost', sp, 'resonanceGain', { min: -12, max: 24, step: 0.5, unit: 'dB', change: onHorn }),
       ),
     ),
-    el('p', { class: 'hint' }, 'Drive = how hard the horn is pushed (0 = clean, more = harsher). The resonance is the horn trumpet\'s own peak: around 2-3 kHz a disc horn\'s bark, lower a snail horn\'s warmth.'),
+    el('p', { class: 'hint' }, 'Drive = how hard the horn is pushed (0 = clean, more = harsher). Asymmetry = it clips one way sooner: the two units mix into the low snarl under a real pair. The resonance is a broad tone control on top (the body\'s resonances do the horn\'s own colour).'),
   )
-  ed.append(unitsSec, harmSec, grit, pressSec, speakerSec)
+  ed.append(unitsSec, harmSec, bodySec, grit, pressSec, speakerSec)
   buildUnits()
+  buildResonances()
   drawWave()
 }
 
+// the body of each kind of horn (with the harmonics and strike that go with it)
+const BODY_PRESETS = {
+  Disc: () => ({ strike: 1, direct: 0.25, harmonics: tilted(24, 0.35), resonances: [{ f: 2350, q: 6, level: 1 }, { f: 3500, q: 8, level: 0.55 }, { f: 1100, q: 2, level: 0.35 }] }),
+  Trumpet: () => ({ strike: 0.8, direct: 0.5, harmonics: tilted(20, 0.5), resonances: [{ f: 1250, q: 2.5, level: 1 }, { f: 2500, q: 4, level: 0.5 }, { f: 620, q: 1.5, level: 0.3 }] }),
+  Seashell: () => ({ strike: 0.9, direct: 0.35, harmonics: tilted(24, 0.4), resonances: [{ f: 1700, q: 3.5, level: 1 }, { f: 2900, q: 5, level: 0.5 }, { f: 800, q: 2, level: 0.3 }] }),
+  None: () => ({ resonances: [] }),
+}
 const HARMONIC_PRESETS = {
+  'Flat buzz': () => tilted(24, 0.35),
   Disc: () => [0.5, 0.6, 0.75, 0.9, 1, 1, 0.85, 0.7, 0.55, 0.42, 0.32, 0.25, 0.19, 0.15, 0.11, 0.08],
   Trumpet: () => [0.85, 1, 0.9, 0.75, 0.6, 0.5, 0.4, 0.32, 0.25, 0.2, 0.15, 0.12],
   'Air horn': () => [0.8, 1, 0.95, 0.9, 0.82, 0.75, 0.68, 0.6, 0.53, 0.47, 0.42, 0.37, 0.33, 0.29, 0.26, 0.23, 0.2, 0.18, 0.16, 0.14, 0.12, 0.1, 0.09, 0.08],
@@ -844,6 +878,31 @@ function buildUnits() {
   box.replaceChildren(el('table', null,
     el('tr', null, ...['#', 'Pitch (Hz)', 'Note', 'Interval from previous (st)', 'Level', ''].map((x) => el('th', null, x))),
     ...rows))
+}
+
+function buildResonances() {
+  const h = CFG.horns[SEL]
+  const box = $('resonances')
+  if (!box) return
+  const rows = h.resonances.map((r, i) => {
+    const f = el('input', { type: 'number', step: 10, min: 50, value: r.f, onchange: () => {
+      const v = parseFloat(f.value)
+      if (!Number.isFinite(v)) return
+      r.f = Math.max(50, v); onHorn()
+    } })
+    const q = el('input', { type: 'number', step: 0.5, min: 0.3, max: 40, value: r.q, onchange: () => {
+      const v = parseFloat(q.value)
+      if (!Number.isFinite(v)) return
+      r.q = Math.min(Math.max(v, 0.3), 40); onHorn()
+    } })
+    const lv = el('input', { type: 'range', min: 0, max: 1.5, step: 0.01, value: r.level, style: 'width:120px', oninput: () => { r.level = +lv.value; onHorn() } })
+    return el('tr', null,
+      el('td', null, String(i + 1)), el('td', null, f), el('td', null, q), el('td', null, lv),
+      el('td', null, el('button', { class: 'small', textContent: '×', onclick: () => { h.resonances.splice(i, 1); buildResonances(); onHorn() } })))
+  })
+  box.replaceChildren(rows.length ? el('table', null,
+    el('tr', null, ...['#', 'Pitch (Hz)', 'Q (width)', 'Level', ''].map((x) => el('th', null, x))),
+    ...rows) : el('p', { class: 'hint' }, 'None: the harmonics alone.'))
 }
 
 // the rendered sound: its start (min/max per column) and a close-up of the loop's waveform
@@ -895,10 +954,10 @@ window.addEventListener('resize', () => drawWave())
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
 const GLOBAL_ORDER = ['volume', 'soundLevel', 'sampleRate', 'doppler', 'distance', 'limit', 'cabin', 'keys', 'default', 'models', 'horns']
-const HORN_ORDER = ['name', 'level', 'units', 'harmonics', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'attack', 'release', 'speaker']
+const HORN_ORDER = ['name', 'level', 'units', 'harmonics', 'strike', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'direct', 'resonances', 'attack', 'release', 'speaker']
 const SUB_ORDER = {
-  units: ['f', 'level'], flutter: ['rate', 'depth'], jitter: ['rate', 'depth'], attack: ['time', 'pitch', 'curve'], release: ['time', 'pitch'],
-  speaker: ['highpass', 'lowpass', 'drive', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['honk'], cabin: ['volume', 'muffle'], distance: ['full', 'at', 'volume', 'silent'],
+  units: ['f', 'level'], resonances: ['f', 'q', 'level'], flutter: ['rate', 'depth'], jitter: ['rate', 'depth'], attack: ['time', 'pitch', 'curve'], release: ['time', 'pitch'],
+  speaker: ['highpass', 'lowpass', 'drive', 'asymmetry', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['honk'], cabin: ['volume', 'muffle'], distance: ['full', 'at', 'volume', 'silent'],
   limit: ['charge', 'pressCost', 'refill', 'weakBelow', 'weakVolume', 'weakPitch', 'croak', 'resume', 'relaxAfter', 'relaxVolume', 'relaxTime'],
 }
 const luaKey = (k) => (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) ? k : '[' + JSON.stringify(k) + ']')
@@ -923,9 +982,10 @@ function exportLua() {
         out.push(tab(2) + luaKey(id) + ' = {')
         for (const hk of HORN_ORDER) {
           const hv = h[hk]
-          if (hk === 'units') {
-            out.push(tab(3) + 'units = {')
-            for (const u of hv) out.push(tab(4) + luaInline(u, SUB_ORDER.units) + ',')
+          if (hk === 'units' || hk === 'resonances') {
+            if (!hv.length) { out.push(tab(3) + hk + ' = {},'); continue }
+            out.push(tab(3) + hk + ' = {')
+            for (const u of hv) out.push(tab(4) + luaInline(u, SUB_ORDER[hk]) + ',')
             out.push(tab(3) + '},')
           } else if (hk === 'harmonics') {
             const list = hv.slice()

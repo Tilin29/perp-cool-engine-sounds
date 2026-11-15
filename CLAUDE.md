@@ -350,8 +350,9 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
   typing, in menus or unfocused (alt-tab lets go). Client: `car_horn_volume`, `car_horn_doppler`, `car_horn_maxcars`, `car_horn_key`.
   Offline check: a mock (mocked GMod + the real config/synth/cl_horn under the baker's wasmoon) is not in the repo.
 - `sh_horn_config.lua`: `CAR_HORN.CONFIG` (volume, soundLevel, sampleRate, cabin, keys, `default` horn, `models[model]` = horn id,
-  `horns[id]` { units { f, level }, harmonics, rasp, air, jitter { rate, depth }, shimmer, grille, roughness, growl, flutter,
-  attack { time, pitch, curve }, release { time, pitch }, speaker }), written by the studio's export. Must stay plain Lua.
+  `horns[id]` { units { f, level }, harmonics, strike, rasp, air, jitter { rate, depth }, shimmer, grille, roughness, growl, flutter,
+  direct, resonances { f, q, level }, attack { time, pitch, curve }, release { time, pitch }, speaker (+ asymmetry) }), written by
+  the studio's export. Must stay plain Lua.
   Horns (the user kept these; a meep and a klaxon were dropped): dual (disc pair 415/520), trumpet, sport, american, airhorn
   (semi truck: two trumpets, the user's 190/246.4, 24 brassy harmonics, roughness 35 cents + growl 0.2 + heavy rasp, no
   grille, a ragged 0.12 s start with only a 5% pitch rise).
@@ -363,11 +364,21 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
   The user found the first versions "way too artificial" (the trumpet "out of GTA:SA"): they were dead steady with the note
   loudest. Now every horn has jitter (each unit's own random pitch drift), shimmer (per-cycle level) and, on cars, a grille
   (bumper reflections), and the disc horns' harmonics are weak at the note and loudest around 2-3 kHz, like a real disc horn.
+  The user then still found them "very cartoonish", not fitting the game. Now (the 4 car horns; the air horn stays as the user
+  tuned it, its new fields neutral: strike 0, direct 1, no resonances, asymmetry 0, rendering bit-identical to before):
+  no pitch gestures (attack 10-15 ms from 0.97-0.98, was 20-35 ms from 0.92: a "bwah"; release 25-35 ms at pitch 1, was a fall
+  to 0.94-0.95: a "boop"; jitter 3 Hz / 3 cents, was 8-10 Hz / 8-10 cents, a vibrato), and a source-filter horn: `strike` 0.8-1
+  (harmonics in cosine phase: a kick each cycle), nearly flat harmonics (n^-0.35..0.5), the kicks ringing fixed `resonances`
+  (disc: 2350/3500/1100 Hz Q 6/8/2, direct 0.25; sport 3000/4400/1400; trumpet 1250/2500/620 broad, direct 0.5; american
+  "seashell" 1700/2900/800, direct 0.35) so each cycle is a knock + short ring that varies with rasp/roughness (4-6 cents),
+  `asymmetry` 0.2 for the pair's difference tone; drive 3.2-3.5 on the disc/seashell horns keeps the loudness within ~1 dB
+  of before (asymmetry costs peak headroom: 0.4 was 2.5 dB quieter). Not yet heard by the user in game.
 - `cl_horn_synth.lua`: plain Lua, game and studio. One sound per horn: the attack (pitch scoop + level rise), `SETTLE_SECONDS`
   0.05 steady, then a `LOOP_SECONDS` 2 s seamless loop (every wobble and noise read by the position in the loop, units tuned to
   whole cycles; the settle is fed exactly what the loop's end is, so filters and grille wrap in the same state; `--test` checks
   that the two match); returns `loopStart` for `sound.Generate`'s loopStart. Rasp = noise burst each cycle where the diaphragm hits
-  its stop. The release isn't rendered: played as a volume fade + pitch fall (in game ChangeVolume/ChangePitch over release.time).
+  its stop. Chain: units (+ air) -> highpass -> `resonances` (band passes, peak 1, + `direct`) -> drive (tanh, `asymmetry` offset,
+  then a 20 Hz DC block) -> peak -> lowpass -> grille -> cabin muffle. Without resonances the bare harmonics pass (direct 1). The release isn't rendered: played as a volume fade + pitch fall (in game ChangeVolume/ChangePitch over release.time).
 - `dev/honk_studio/build.js [--test]` builds `dev/honk_studio.html` (as the siren studio; `--test` checks every horn, outside and
   inside, for length, peak and the loop seam). Hold the honk key or the Honk button; "Beep beep" = two taps. Saves edits in
   localStorage (`honk_studio_settings_v1`).
