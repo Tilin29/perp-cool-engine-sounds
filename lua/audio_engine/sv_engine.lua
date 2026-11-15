@@ -27,11 +27,78 @@ end
 ---------------------------------------------------------------------------
 local HU_PER_MPH = AudioEngine.HU_PER_MPH   -- GetVehicleParams speeds are inches/s (sv_handling.lua: AudioEngine.SetParams)
 
+--[[
+	The top speed the fitted gearing is made for (sh_presets.lua AudioEngine.FitGearEnds / FitFinal). PERP
+	spawns a car on one of its tier scripts: base, upgrade_1/, upgrade_2/ (each its own top speed, so its
+	own gearing), used/ (worn) or spiked/ (tyres shot). A used or spiked car keeps the gearing of the tier
+	it came from, so it revs as that car would, only slower: used = the base script's top speed; spiked =
+	the tier of the car it replaced (the same model removed where it spawned, just before: PERP respawning
+	it on the spiked script), else the base script's.
+]]
+local GEARING_TIERS = { used = true, spiked = true }
+local REPLACED_WITHIN, REPLACED_DISTANCE = 2, 200   -- s, inches
+
+-- "upgrade_1", "used", ... (nil for a base script) and the base script next to it
+function AudioEngine.ScriptTier(script)
+	local directory, tier, fileName = string.match(script or "", "^(.+)/([^/]+)/([^/]+)$")
+	if directory and (GEARING_TIERS[tier] or tier == "upgrade_1" or tier == "upgrade_2") then return tier, directory .. "/" .. fileName end
+	return nil, script
+end
+
+-- a vehicle script's MaxSpeed in km/h: read from the file (mounted on the PERP server), else the
+-- generated PERP physics (sv_perp_physics.lua, base scripts only)
+local scriptTopSpeeds = {}
+function AudioEngine.ScriptTopSpeed(script)
+	if scriptTopSpeeds[script] ~= nil then return scriptTopSpeeds[script] or nil end
+	local mph
+	local scriptText = file.Read(script, "GAME")
+	if scriptText then
+		scriptText = string.lower(scriptText):gsub("//[^\n]*", "")
+		mph = tonumber(string.match(scriptText, "[%s\"{]maxspeed[\"%s]+\"?([%d%.]+)"))
+	end
+	local perpPhysics = AudioEngine.PERP_PHYSICS and AudioEngine.PERP_PHYSICS[script]
+	if not mph and perpPhysics and perpPhysics.engine then mph = tonumber(perpPhysics.engine.maxspeed) end
+	local topSpeed = mph and mph > 0 and mph * 1.609344 or nil
+	scriptTopSpeeds[script] = topSpeed or false
+	return topSpeed
+end
+
+function AudioEngine.GearingTopSpeed(vehicle, ownTopSpeed)
+	local tier, baseScript = AudioEngine.ScriptTier(vehicle.audioScript or (AudioEngine.VehicleScriptOf and AudioEngine.VehicleScriptOf(vehicle)))
+	if not GEARING_TIERS[tier] then return ownTopSpeed end
+	if tier == "spiked" and vehicle.audioReplacedGearing then return vehicle.audioReplacedGearing end
+	return AudioEngine.ScriptTopSpeed(baseScript) or ownTopSpeed
+end
+
+-- cars just removed (model, where, their gearing's top speed), for a spiked car spawned in their place
+local removedCars = {}
+hook.Add("EntityRemoved", "audio_engine_gearing", function(entity)
+	if not trackedVehicles[entity] or entity.audioSpiked then return end
+	local gearTopSpeed = entity:GetNW2Float("audio_gear_vmax", 0)
+	if gearTopSpeed <= 0 then return end
+	local now = CurTime()
+	for i = #removedCars, 1, -1 do if now - removedCars[i].time > REPLACED_WITHIN then table.remove(removedCars, i) end end
+	removedCars[#removedCars + 1] = { model = string.lower(entity:GetModel() or ""), position = entity:GetPos(), gearTopSpeed = gearTopSpeed, time = now }
+end)
+
+local function findReplacedCar(vehicle)
+	local model, position, now = string.lower(vehicle:GetModel() or ""), vehicle:GetPos(), CurTime()
+	for i = #removedCars, 1, -1 do
+		local removed = removedCars[i]
+		if now - removed.time <= REPLACED_WITHIN and removed.model == model and removed.position:Distance(position) <= REPLACED_DISTANCE then
+			table.remove(removedCars, i)
+			return removed.gearTopSpeed
+		end
+	end
+end
+
 -- what the clients need of the car's physics (params as GetVehicleParams gives them)
 function AudioEngine.RefreshCarStats(vehicle, params)
-	-- the car's own top speed, for "fit gearing" and the menu
+	-- the car's own top speed, for "fit gearing" and the menu; the gearing's (its tier's)
 	if (params.engine.maxSpeed or 0) > 0 then
-		vehicle:SetNW2Float("audio_vmax", params.engine.maxSpeed / HU_PER_MPH * 1.609344)
+		local topSpeed = params.engine.maxSpeed / HU_PER_MPH * 1.609344
+		vehicle:SetNW2Float("audio_vmax", topSpeed)
+		vehicle:SetNW2Float("audio_gear_vmax", AudioEngine.GearingTopSpeed(vehicle, topSpeed))
 	end
 	-- its power to weight (W/kg), for audio_engine_accel_log's model (sh_presets.lua AudioEngine.GearAccel)
 	local physics = vehicle:GetPhysicsObject()
@@ -72,6 +139,8 @@ local function track(entity)
 	-- PERP physics on the test script and the anti-spin setup (sv_handling.lua), before the
 	-- car's physics are captured as the base the tuning menu works from
 	AudioEngine.PrepareHandling(entity)
+	-- a spiked car PERP spawned in place of one it removed keeps that one's gearing
+	if entity.audioReplacedGearing == nil then entity.audioReplacedGearing = entity.audioSpiked and findReplacedCar(entity) or false end
 	captureBase(entity)
 	-- after a lua refresh, a car that is already running stays drivable
 	if entity.audioDrivable == nil then entity.audioDrivable = entity:GetNW2Bool("audio_on", false) end

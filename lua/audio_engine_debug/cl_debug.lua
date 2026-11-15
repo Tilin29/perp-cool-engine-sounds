@@ -1036,7 +1036,7 @@ local function buildGearPage(pagePanel)
 		local redline = baseConfig.redline
 		local spacing = { topRpm = floor(redline * AudioEngine.TopGearShare(redline) + 0.5) }
 		if gearCount >= 2 then
-			local gearEnds = AudioEngine.FitGearEnds(baseConfig.topSpeed, gearCount, redline, baseConfig.powerKg, gearCount)
+			local gearEnds = AudioEngine.FitGearEnds(baseConfig.gearTopSpeed or baseConfig.topSpeed, gearCount, redline, baseConfig.powerKg, gearCount)
 			for i = 1, gearCount - 1 do
 				spacing[i] = { rpm = floor(redline * AudioEngine.GEAR_FIT.upShare / 50 + 0.5) * 50, mph = floor(gearEnds[i] * AudioEngine.GEAR_FIT.upShare / 1.609344 * 10 + 0.5) / 10 }
 			end
