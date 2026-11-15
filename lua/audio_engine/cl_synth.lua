@@ -1637,34 +1637,48 @@ function Synth.RenderEVHumLoop(sampleRate, yieldFn)
 end
 
 --[[
-	Electric car's dash chime as it powers up: "ding ding ding", three soft electronic bell tones
-	(880 Hz with a faint octave and twelfth that die away faster, so each ding rounds off) 0.32 s
-	apart, each fading out over ~0.4 s. cl_engine plays it only for the player sitting in the car
-	(2D, at the player): no one outside hears it. Env bank `evchime`.
+	Electric car's power-up chime: a soft "welcome" phrase, notes rising and ringing into one
+	another (Synth.EV_CHIME_NOTES { hz, at seconds, level }). It was three equal 880 Hz dings 0.32 s
+	apart, which the user heard as an error warning: equal repeats of one pitch are what alerts
+	sound like, a rising major phrase ringing on reads as "ready". Each note is a mellow bell
+	(electric-piano like): a soft 12 ms attack, the fundamental doubled ~2 cents apart (a slow
+	shimmer instead of a dead sine), a faint octave and twelfth that die away first, and a long
+	decay; every note fades to silence by the end. cl_engine plays it only for the player sitting
+	in the car (2D, at the player): no one outside hears it. Env bank `evchime`.
 ]]
-Synth.EV_CHIME_HZ = 880
-Synth.EV_CHIME_COUNT = 3
-Synth.EV_CHIME_SPACING = 0.32
-function Synth.RenderEVChime(sampleRate, yieldFn)
-	local duration = Synth.EV_CHIME_SPACING * (Synth.EV_CHIME_COUNT - 1) + 0.6
+Synth.EV_CHIME_NOTES = {
+	{ 659.26, 0.00, 0.80 },    -- E5
+	{ 880.00, 0.14, 0.85 },    -- A5
+	{ 1108.73, 0.28, 1.00 },   -- C#6: A major, rising, ending on its third
+}
+Synth.EV_CHIME_DECAY = 0.42       -- seconds (fundamental's time constant)
+Synth.EV_CHIME_RING = 1.3         -- seconds each note rings for before it is silent
+function Synth.RenderEVChime(sampleRate, yieldFn, notes)
+	notes = notes or Synth.EV_CHIME_NOTES
+	local lastAt = 0
+	for _, note in ipairs(notes) do lastAt = max(lastAt, note[2]) end
+	local ring, decay = Synth.EV_CHIME_RING, Synth.EV_CHIME_DECAY
+	local duration = lastAt + ring
 	local sampleCount = floor(sampleRate * duration)
 	local buffer = {}
-	local frequency = Synth.EV_CHIME_HZ
+	local detune = 2 ^ (1 / 1200)   -- one cent each way
 	for i = 1, sampleCount do
 		local time = (i - 1) / sampleRate
 		local sample = 0
-		for ding = 0, Synth.EV_CHIME_COUNT - 1 do
-			local dingTime = time - ding * Synth.EV_CHIME_SPACING
-			if dingTime >= 0 then
-				local attack = min(1, dingTime / 0.004)
-				local tail = max(0, 1 - dingTime / 0.6)     -- reaches silence before the sound ends
-				local phase = TAU * frequency * dingTime
-				sample = sample + attack * tail * (exp(-dingTime / 0.13) * sin(phase)
-					+ 0.15 * exp(-dingTime / 0.06) * sin(2 * phase)
-					+ 0.05 * exp(-dingTime / 0.04) * sin(3 * phase))
+		for _, note in ipairs(notes) do
+			local noteTime = time - note[2]
+			if noteTime >= 0 and noteTime < ring then
+				local attack = min(1, noteTime / 0.012)
+				attack = attack * attack * (3 - 2 * attack)
+				local fade = 1 - noteTime / ring
+				local phase = TAU * note[1] * noteTime
+				local body = 0.5 * (sin(phase * detune) + sin(phase / detune))
+				sample = sample + note[3] * attack * fade * fade * (exp(-noteTime / decay) * body
+					+ 0.10 * exp(-noteTime / 0.15) * sin(2 * phase)
+					+ 0.03 * exp(-noteTime / 0.07) * sin(3 * phase))
 			end
 		end
-		buffer[i] = sample * 0.5
+		buffer[i] = sample * 0.4
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
 	return buffer, duration

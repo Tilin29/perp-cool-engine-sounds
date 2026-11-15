@@ -125,8 +125,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and a faint 800 Hz in a little air (two third-octave
   bands, as UN R138 / FMVSS 141 ask; 1.25 kHz and more air was a loud "idle fan" to the user); cl_engine plays it at EV_HUM_VOLUME x 0.35 x (0.35
   standing .. `EV_HUM_MOVING_GAIN` 2 moving: the user wanted it louder driving slow, was 1), heard only near the car (the user: ~5 m; `EV_HUM_FULL_DISTANCE` 3 to `EV_HUM_SILENT_DISTANCE` 5 m from
-  the body, `NearestPoint`, smoothstep; not for whoever sits in it), full to `EV_HUM_FULL_MPH` 30 mph, gone by `EV_HUM_GONE_MPH` 35 (the user's; was 20 -> 30 km/h), pitch +0.8% per km/h (the UN rule). `RenderEVChime`: "ding ding ding" as an
-  EV powers up (the user's idea), three 880 Hz bell tones 0.32 s apart (env bank `evchime`); cl_engine `playIgnitionChime` plays it
+  the body, `NearestPoint`, smoothstep; not for whoever sits in it), full to `EV_HUM_FULL_MPH` 30 mph, gone by `EV_HUM_GONE_MPH` 35 (the user's; was 20 -> 30 km/h), pitch +0.8% per km/h (the UN rule). `RenderEVChime`: a chime as an
+  EV powers up (the user's idea): `Synth.EV_CHIME_NOTES` { hz, at, level }, soft rising notes ringing into each other (E5 A5 C#6, 0.14 s
+  apart, mellow detuned bells, ~1.6 s; was three equal 880 Hz dings 0.32 s apart, which the user heard as an error warning) (env bank `evchime`); cl_engine `playIgnitionChime` plays it
   only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
   real start (not one skipped on joining).
   dev/drive_demo applies EV_VOLUME and the warning sound like cl_engine. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
