@@ -248,6 +248,7 @@ function AudioEngine.OpenMenu(vehicle)
 	local effectiveCar = {}
 	for key, value in pairs(carConfig) do effectiveCar[key] = value end
 	effectiveCar.topSpeed = AudioEngine.CarTopSpeed(vehicle, carConfig)
+	effectiveCar.gearTopSpeed = AudioEngine.CarGearingTopSpeed(vehicle, carConfig)
 	effectiveCar.powerKg = AudioEngine.CarPower(vehicle, carConfig)
 
 	local function refreshStats()

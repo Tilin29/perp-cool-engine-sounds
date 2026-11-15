@@ -57,7 +57,7 @@ const LUA = path.join(ADDON, 'lua')
     function GetGlobal2String(k, d) return GLOBAL2[k] or d end
     AUDIO_ENGINE = {}`)
   for (const f of ['audio_engine/sh_config.lua', 'audio_engine/sh_presets.lua', 'audio_engine/sh_drivetrain.lua', 'audio_engine/sh_carlist.lua',
-    'audio_engine_debug/sh_kv.lua', 'audio_engine_debug/sh_debug.lua'])
+    'audio_engine_debug/sh_kv.lua', 'audio_engine_debug/sh_debug.lua', 'audio_engine/sv_perp_physics.lua'])
     await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
 
   await run('tests', `
@@ -185,6 +185,44 @@ const LUA = path.join(ADDON, 'lua')
     local prof = E.CarStockProfile(carG)
     prof.fit = 0
     check(E.ResolveProfile(carG, prof).shiftPlan == nil, "fit 0 keeps the profile's own ratios")
+
+    ---------------------------------------------------------------- fitted gearing from each tier's top speed
+    -- every car with a PERP script, at its base top speed and at faster (upgrade) and slower ones: the top
+    -- gear turns at least TOP_GEAR_MIN 70% of redline at the top speed, and never reaches redline
+    local lowest, lowestName, tested = 1, "", 0
+    for _, c in pairs(E.Cars) do
+      local physics = c.script and E.PERP_PHYSICS[c.script]
+      if physics and physics.engine.maxspeed and not c.gearing then
+        local ce = {}
+        for k, v2 in pairs(c) do ce[k] = v2 end
+        for _, scale in ipairs({ 0.8, 1, 1.15, 1.3 }) do
+          local kmh = math.min(400, math.max(40, math.floor(physics.engine.maxspeed * 1.609344 * scale / 5 + 0.5) * 5))
+          ce.topSpeed, ce.gearTopSpeed = kmh, nil
+          local cf = E.ResolveProfile(ce)
+          local K2 = 60 / (2 * math.pi * cf.wheelRadius)
+          local share = kmh / 3.6 * K2 * cf.gears[#cf.gears] * cf.final / cf.redline
+          tested = tested + 1
+          if share < lowest then lowest, lowestName = share, string.format("%s at %d km/h", c.name, kmh) end
+          check(share >= E.TOP_GEAR_MIN - 1e-6 and share < 0.99, string.format("%s at %d km/h: top gear at %.0f%% of redline", c.name, kmh, share * 100))
+          -- spiked / used: its own (lower) top speed, the tier's gearing
+          if scale == 1.15 then
+            ce.topSpeed, ce.gearTopSpeed = math.floor(kmh * 0.5), kmh
+            local spiked = E.ResolveProfile(ce)
+            local same = #spiked.gears == #cf.gears and math.abs(spiked.final / cf.final - 1) < 1e-9
+            for i = 1, #cf.gears do same = same and spiked.gears[i] == cf.gears[i] end
+            check(same and spiked.topSpeed == math.floor(kmh * 0.5), c.name .. ": a spiked car keeps its tier's gearing")
+          end
+        end
+      end
+    end
+    check(tested > 400, "fitted gearing checked on " .. tested .. " car / top speed pairs")
+    __log(string.format("fitted gearing: %d car / top speed pairs, top gear at least %.0f%% of redline at the top speed (%s)", tested, lowest * 100, lowestName))
+    -- NW2 audio_gear_vmax reaches the config apart from audio_vmax
+    local nwFloats = { audio_vmax = 60, audio_gear_vmax = 140 }
+    local tierCar = { GetModel = function() return car.model end, GetNW2String = function(_, k, d) return d end,
+      GetNW2Float = function(_, k, d) return nwFloats[k] or d end }
+    local tierConfig = E.GetEngineConfig(tierCar)
+    check(tierConfig.topSpeed == 60 and tierConfig.gearTopSpeed == 140, "audio_vmax / audio_gear_vmax: top speed 60, gearing for 140")
 
     ---------------------------------------------------------------- the debug overrides
     local nw = {}

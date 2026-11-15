@@ -93,12 +93,16 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Fitted gearing comes from the top speed only, deliberately not realistic (the user's choice; a time-based, realistic spacing
   with up to 7 gears was tried and reverted) (`AudioEngine.FitGearEnds`, `AudioEngine.GEAR_FIT`): 1 gear per `kmhPerGear` 40 km/h, steps at most
   `stepMax` 2.3x, 1st ends at `firstShare` 0.28 of top speed (at least `firstMin` 25 km/h), gear ends evenly spaced in speed^`spread` 2.2;
-  2 to `maxCount` 5 gears (or the box's count if lower). `CAR_GEARS[name]` overrides the count, 2..8: Furai 6 (the only 6-speed), both Mini Coopers 3.
+  2 to `maxCount` 5 gears (or the box's count if lower). The top speed is the tier script's MaxSpeed (PERP spawns base / upgrade_1 / upgrade_2,
+  each with its own, so each tier has its own gearing; NW2 `audio_vmax`); used/ and spiked/ cars keep the gearing of the tier they came from
+  (`config.gearTopSpeed`, NW2 `audio_gear_vmax`, sv_engine `AudioEngine.GearingTopSpeed`): used = the base script's MaxSpeed (read from the file,
+  else `PERP_PHYSICS`), spiked = the car of the same model removed within 2 s / 200 units of where it spawned (PERP respawning it), else the base's.
+  `config.topSpeed` stays the car's own (supercharger fade, debug chart). `CAR_GEARS[name]` overrides the count, 2..8: Furai 6 (the only 6-speed), both Mini Coopers 3.
   Manual gearing (`AudioEngine.CAR_GEARING`, debug gearing editor) still replaces the fitted gears.
   `AudioEngine.GearAccel`/`AudioEngine.GEAR_ACCEL` (pull `perWkg` 0.035 x power to weight, W/kg from NW2 `audio_pwr`) is now only the model that
   `audio_engine_accel_log` and dev/drive_demo compare against, not used for the gear spacing. HUD speed defaults to mph (`audio_engine_units`).
   The top gear never reaches redline: at top speed it turns `AudioEngine.TOP_GEAR_DROP` 1000 rpm under redline (`AudioEngine.TopGearShare`, at least
-  `AudioEngine.TOP_GEAR_MIN` 0.6 of it; FitFinal), the gears are spaced up to
+  `AudioEngine.TOP_GEAR_MIN` 0.7 of it, the user's rule; FitFinal; test_debug.js checks every car at 0.8-1.3x its base top speed), the gears are spaced up to
   that gear's redline speed, and there's no lazy upshift into it: the car changes up near top speed and settles lower.
   Cruise (`inp.cruise`): highest gear above `cruiseLand` 0.45, down only below `sagRpm`, no kickdown, steady `cruiseThr` 0.8 (pedal 80% down).
   Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.

@@ -53,7 +53,7 @@ local function gearPreset(id)
 end
 AudioEngine.GearPreset = gearPreset
 
---[[ Engine presets. topSpeed: the gearing is fitted so top gear reaches redline there. ]]
+--[[ Engine presets. The fitted gearing comes from the car's top speed (AudioEngine.FitGearEnds / FitFinal). ]]
 -- One preset per engine type in the game (see sh_carlist.lua for which car uses which),
 -- plus the SL65's own engine and the original Rev Bench sound.
 AudioEngine.ENGINE_PRESETS = {
@@ -252,10 +252,12 @@ end
 
 --[[
 	The top gear never reaches redline: at the top speed it turns TOP_GEAR_DROP rpm under redline
-	(AudioEngine.FitFinal; at least TOP_GEAR_MIN of it, for the low-revving diesels), so the gears are spaced
-	up to the speed the top gear would reach at redline.
+	(AudioEngine.FitFinal), but never under TOP_GEAR_MIN of it (the low-revving engines), so the gears are spaced
+	up to the speed the top gear would reach at redline. The top speed is the one of the car's tier script
+	(base, upgrade_1, upgrade_2: sv_engine.lua AudioEngine.GearingTopSpeed, NW2 audio_gear_vmax); used and
+	spiked cars keep the gearing of the tier they came from.
 ]]
-AudioEngine.TOP_GEAR_DROP, AudioEngine.TOP_GEAR_MIN = 1000, 0.6
+AudioEngine.TOP_GEAR_DROP, AudioEngine.TOP_GEAR_MIN = 1000, 0.7
 function AudioEngine.TopGearShare(redline)
 	return max(AudioEngine.TOP_GEAR_MIN, (redline - AudioEngine.TOP_GEAR_DROP) / redline)
 end
@@ -345,7 +347,7 @@ end
 	                                       gentler pulling changes up a little earlier)
 	  { mph = 42, rpm = 5600, down = 15 }  ... and changes down under 15 mph coasting or braking
 	                                       (no `down`: the default shift points)
-	  { down = 60 }                        the top gear: it turns topRpm at the car's top speed
+	  { down = 60 }                        the top gear: it turns topRpm at the car's top speed (its tier's)
 	  topRpm = 5200                        (default: AudioEngine.TOP_GEAR_DROP under redline)
 	Each gear is at least GEAR_MIN_STEP taller than the one before, so every upshift drops the
 	revs far enough to hear it. Runtime only: no re-bake.
@@ -367,7 +369,7 @@ function AudioEngine.ApplyGearing(config, spec)
 			ratio = upshiftRpms[i] / (max(1, tonumber(gearSpec.mph) or 10) * MS_PER_MPH * rpmPerSpeed)
 		else
 			local topRpm = math.Clamp(tonumber(spec.topRpm) or redline * AudioEngine.TopGearShare(redline), idle * 1.5, redline * 0.985)
-			ratio = topRpm / (config.topSpeed / 3.6 * rpmPerSpeed)
+			ratio = topRpm / ((config.gearTopSpeed or config.topSpeed) / 3.6 * rpmPerSpeed)
 		end
 		if i > 1 then ratio = min(ratio, ratios[i - 1] / AudioEngine.GEAR_MIN_STEP) end
 		ratios[i] = ratio
@@ -428,10 +430,13 @@ function AudioEngine.ResolveProfile(carConfig, profile)
 	config.popTone = profile.popTone
 	-- the speed the car will actually reach: the profile's top speed, else the car's own
 	config.topSpeed = profile.vmax > 0 and profile.vmax or (tonumber(carConfig.topSpeed) or 250)
+	-- the speed the gearing is fitted to: the same, except on a used or spiked script, which keeps the
+	-- gearing of the car's tier (AudioEngine.CarGearingTopSpeed)
+	config.gearTopSpeed = profile.vmax > 0 and profile.vmax or (tonumber(carConfig.gearTopSpeed) or config.topSpeed)
 	-- power to weight (W/kg): the car's own (server, NW2 audio_pwr), scaled by the tuned acceleration
 	config.powerKg = (tonumber(carConfig.powerKg) or AudioEngine.GEAR_ACCEL.defaultWkg) * (profile.accel or 1)
-	config.gears = profile.fit > 0 and AudioEngine.FitGearCount(profile.gears, config.topSpeed, carConfig.gearCount, profile.redline, config.powerKg) or profile.gears
-	config.final = profile.fit > 0 and AudioEngine.FitFinal(config.gears, profile.redline, carConfig.wheelRadius, config.topSpeed, true) or profile.final
+	config.gears = profile.fit > 0 and AudioEngine.FitGearCount(profile.gears, config.gearTopSpeed, carConfig.gearCount, profile.redline, config.powerKg) or profile.gears
+	config.final = profile.fit > 0 and AudioEngine.FitFinal(config.gears, profile.redline, carConfig.wheelRadius, config.gearTopSpeed, true) or profile.final
 	config.reverse = profile.gears[1] * 0.9
 	-- torque converter stall speed (an electric motor is direct drive)
 	config.stallRpm = config.electric and profile.idle or (profile.idle + 0.27 * profile.redline)
@@ -469,13 +474,23 @@ function AudioEngine.ResolveProfile(carConfig, profile)
 end
 
 -- the car's top speed in km/h: "auto" uses the vehicle script's MaxSpeed (sent by the server)
+local function scriptSpeed(entity, networkName)
+	local scriptTopSpeed = IsValid(entity) and entity:GetNW2Float(networkName, 0) or 0
+	return scriptTopSpeed > 0 and min(400, max(40, floor(scriptTopSpeed / 5 + 0.5) * 5)) or nil
+end
 function AudioEngine.CarTopSpeed(entity, carConfig)
 	carConfig = carConfig or AudioEngine.GetCarConfig(entity)
 	local topSpeed = carConfig and carConfig.topSpeed
-	if topSpeed == "auto" or topSpeed == nil then
-		local scriptTopSpeed = IsValid(entity) and entity:GetNW2Float("audio_vmax", 0) or 0
-		return scriptTopSpeed > 0 and min(400, max(40, floor(scriptTopSpeed / 5 + 0.5) * 5)) or 250
-	end
+	if topSpeed == "auto" or topSpeed == nil then return scriptSpeed(entity, "audio_vmax") or 250 end
+	return topSpeed
+end
+
+-- the top speed (km/h) the fitted gearing is made for: the car's own, but a used or spiked car's is the one
+-- of the tier it came from (sv_engine.lua AudioEngine.GearingTopSpeed, NW2 audio_gear_vmax)
+function AudioEngine.CarGearingTopSpeed(entity, carConfig)
+	carConfig = carConfig or AudioEngine.GetCarConfig(entity)
+	local topSpeed = carConfig and carConfig.topSpeed
+	if topSpeed == "auto" or topSpeed == nil then return scriptSpeed(entity, "audio_gear_vmax") or AudioEngine.CarTopSpeed(entity, carConfig) end
 	return topSpeed
 end
 
@@ -492,12 +507,14 @@ function AudioEngine.GetEngineConfig(entity)
 	if not carConfig then return nil end
 	local profileString = entity:GetNW2String("audio_prof", "")
 	local topSpeed, powerToWeight = AudioEngine.CarTopSpeed(entity, carConfig), AudioEngine.CarPower(entity, carConfig)
+	local gearTopSpeed = AudioEngine.CarGearingTopSpeed(entity, carConfig)
 	local cached = resolveCache[entity]
-	if cached and cached.profileString == profileString and cached.carConfig == carConfig and cached.topSpeed == topSpeed and cached.powerToWeight == powerToWeight then return cached.config end
+	if cached and cached.profileString == profileString and cached.carConfig == carConfig and cached.topSpeed == topSpeed
+		and cached.gearTopSpeed == gearTopSpeed and cached.powerToWeight == powerToWeight then return cached.config end
 	local effectiveCar = {}
 	for key, value in pairs(carConfig) do effectiveCar[key] = value end
-	effectiveCar.topSpeed, effectiveCar.powerKg = topSpeed, powerToWeight
+	effectiveCar.topSpeed, effectiveCar.gearTopSpeed, effectiveCar.powerKg = topSpeed, gearTopSpeed, powerToWeight
 	local config = AudioEngine.ResolveProfile(effectiveCar, AudioEngine.DecodeProfile(profileString))
-	resolveCache[entity] = { profileString = profileString, carConfig = carConfig, topSpeed = topSpeed, powerToWeight = powerToWeight, config = config }
+	resolveCache[entity] = { profileString = profileString, carConfig = carConfig, topSpeed = topSpeed, gearTopSpeed = gearTopSpeed, powerToWeight = powerToWeight, config = config }
 	return config
 end

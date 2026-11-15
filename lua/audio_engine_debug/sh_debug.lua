@@ -148,7 +148,7 @@ function EngineDebug.GearingFromConfig(config)
 		if shiftPlan and shiftPlan.down[i] then gearSpec.down = math.floor(shiftPlan.down[i] / 0.44704 * 10 + 0.5) / 10 end
 		spec[i] = gearSpec
 	end
-	spec.topRpm = math.floor(config.topSpeed / 3.6 * rpmPerSpeed * config.gears[gearCount] * config.final + 0.5)
+	spec.topRpm = math.floor((config.gearTopSpeed or config.topSpeed) / 3.6 * rpmPerSpeed * config.gears[gearCount] * config.final + 0.5)
 	return spec
 end
 
