@@ -17,6 +17,9 @@ const SR = 44100, FPS = 60
 const CL_ENGINE = fs.readFileSync(path.join(LUA, 'cl_engine.lua'), 'utf8')
 const EV_VOLUME = +(CL_ENGINE.match(/AudioEngine\.EV_VOLUME = ([\d.]+)/) || [0, 1])[1]
 const EV_HUM_VOLUME = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_VOLUME = ([\d.]+)/) || [0, 1])[1]
+const EV_HUM_MOVING_GAIN = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_MOVING_GAIN = ([\d.]+)/) || [0, 1])[1]
+const EV_HUM_FULL_MPH = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_FULL_MPH = ([\d.]+)/) || [0, 30])[1]
+const EV_HUM_GONE_MPH = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_GONE_MPH = ([\d.]+)/) || [0, 35])[1]
 
 function readWav(f) {
   const b = fs.readFileSync(f); let o = 12, sr = 44100, ch = 1, bits = 16, data
@@ -147,10 +150,11 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       const lv = voice('lim', lim, true); lv.target = limW * g; lv.pitch = red / +limRpm
       const kmh = v * 3.6, rrd = Math.min(1, Math.max(0, (kmh - 3) / 120))
       const rv = voice('road', road, true); rv.target = 0.5 * rrd ** 1.2 * 0.7 * (1 - 0.45 * Math.min(1, Math.max(0, (kmh - 60) / 100))) * loopGain; rv.pitch = 0.8 + 0.3 * rrd
-      if (+electric) {   // the pedestrian warning sound (cl_engine): full to 20 km/h, gone by 30, +0.8% pitch per km/h
-        const hv = voice('evhum', W(path.join(env, 'evhum.wav')), true)
-        hv.target = g / EV_VOLUME * EV_HUM_VOLUME * 0.35 * (1 - Math.min(1, Math.max(0, (kmh - 20) / 10))) * (0.35 + 0.65 * Math.min(1, v / 2)) * (+run ? 1 : 0)
-        hv.pitch = 1 + 0.008 * Math.min(kmh, 30)
+      if (+electric) {   // the pedestrian warning sound (cl_engine): full to EV_HUM_FULL_MPH, gone by EV_HUM_GONE_MPH, +0.8% pitch per km/h
+        const hv = voice('evhum', W(path.join(env, 'evhum.wav')), true), mph = kmh / 1.609344
+        hv.target = g / EV_VOLUME * EV_HUM_VOLUME * 0.35 * (1 - Math.min(1, Math.max(0, (mph - EV_HUM_FULL_MPH) / (EV_HUM_GONE_MPH - EV_HUM_FULL_MPH))))
+          * (0.35 + (EV_HUM_MOVING_GAIN - 0.35) * Math.min(1, v / 2)) * (+run ? 1 : 0)
+        hv.pitch = 1 + 0.008 * Math.min(kmh, EV_HUM_GONE_MPH * 1.609344)
       }
       const wv = voice('wind', wind, true); wv.target = 0.5 * Math.min(1, Math.max(0, (kmh - 80) / 240)) ** 2 * 0.015; wv.pitch = 1
       if (+turbo) { const tv = voice('turbo', turboW, true); tv.target = g * boost ** 1.5 * 0.5; tv.pitch = (0.45 + 0.55 * boost) * (0.9 + 0.2 * rpm / red)

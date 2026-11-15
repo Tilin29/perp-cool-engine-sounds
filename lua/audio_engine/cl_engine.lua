@@ -192,6 +192,12 @@ AudioEngine.EV_HUM_VOLUME = 0.2
 -- EV_HUM_SILENT_DISTANCE (about three player heights). Sitting in the car it plays as it is
 AudioEngine.EV_HUM_FULL_DISTANCE = 3
 AudioEngine.EV_HUM_SILENT_DISTANCE = 5
+-- moving, the warning sound plays this much louder than standing (the user: louder driving slow;
+-- standing it stays as it was, idling it had been too loud)
+AudioEngine.EV_HUM_MOVING_GAIN = 2
+-- full up to EV_HUM_FULL_MPH, gone by EV_HUM_GONE_MPH (the user: up to 30 mph; was 20 -> 30 km/h)
+AudioEngine.EV_HUM_FULL_MPH = 30
+AudioEngine.EV_HUM_GONE_MPH = 35
 local function glide(current, target, deltaTime)
 	local nextValue = current + (target - current) * min(1, deltaTime * 18)
 	local maxStep = VOLUME_SLEW * deltaTime
@@ -582,16 +588,18 @@ local function updateSound(car, deltaTime)
 	local turboPlaying = config.turbo and sharedBank and sharedBank.ready and sharedBank.turbo and not idleOnly
 	local boost = turboPlaying and (engineState.boost or 0) or 0
 	-- electric: the pedestrian warning sound at walking pace (UN R138 / FMVSS 141), its pitch
-	-- rising ~0.8% per km/h as the UN rule asks; full up to 20 km/h, gone by 30, while the motor
-	-- whine, rising with speed, takes over
+	-- rising ~0.8% per km/h as the UN rule asks; full up to EV_HUM_FULL_MPH, gone by EV_HUM_GONE_MPH,
+	-- while the motor whine, rising with speed, takes over
 	local evSpeedKmh = abs(car.speedAlongNose) * 3.6
 	local humVolume = 0
 	if config.electric and sharedBank and sharedBank.ready and sharedBank.evhum and engineState.on and engineState.phase == "run" then
-		local humFade = 1 - math.Clamp((evSpeedKmh - 20) / 10, 0, 1)
+		local evSpeedMph = evSpeedKmh / 1.609344
+		local humFade = 1 - math.Clamp((evSpeedMph - AudioEngine.EV_HUM_FULL_MPH) / (AudioEngine.EV_HUM_GONE_MPH - AudioEngine.EV_HUM_FULL_MPH), 0, 1)
 		-- quiet standing still (everyone around a parked EV hears it), up once it moves
-		-- (was 0.6 x (0.6 .. 1): too loud idling)
+		-- (was 0.6 x (0.6 .. 1): too loud idling; moving was x1, the user wanted it louder)
 		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)
-		humVolume = loopVolume / AudioEngine.EV_VOLUME * AudioEngine.EV_HUM_VOLUME * 0.35 * humFade * (0.35 + 0.65 * movingShare)
+		humVolume = loopVolume / AudioEngine.EV_VOLUME * AudioEngine.EV_HUM_VOLUME * 0.35 * humFade
+			* (0.35 + (AudioEngine.EV_HUM_MOVING_GAIN - 0.35) * movingShare)
 		if not car.listenerInside and listener.valid then
 			local bodyDistance = entity:NearestPoint(listener.position):Distance(listener.position) * 0.0254   -- meters
 			local nearShare = math.Clamp((AudioEngine.EV_HUM_SILENT_DISTANCE - bodyDistance)
@@ -732,7 +740,7 @@ local function updateSound(car, deltaTime)
 		end
 	end
 	if humVolume > 0 or car.activeGroups.evhum then
-		local pitch = math.Clamp(100 * (car.dopplerRatio or 1) * (1 + 0.008 * math.min(evSpeedKmh, 30)), 20, 220)
+		local pitch = math.Clamp(100 * (car.dopplerRatio or 1) * (1 + 0.008 * math.min(evSpeedKmh, AudioEngine.EV_HUM_GONE_MPH * 1.609344)), 20, 220)
 		setGroup(car, "evhum", singleNameList(sharedBank.evhum), volumeList(car, "evhum", humVolume), pitch, deltaTime)
 	end
 
