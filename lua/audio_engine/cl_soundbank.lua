@@ -153,11 +153,11 @@ end
 Bank.LimitPeaks = limitPeaks
 
 -- every engine is matched to the same loudness (rms above 250 Hz of its on-throttle loops),
--- so a V8 isn't quieter than an inline-4. Electric motors sit well below the engines: their
--- top-speed on-throttle loop is set to TARGET_EV_DB rms over the whole band (most of their
--- whine is below 250 Hz for much of the speed range, so the engines' measure would miss it).
--- In game they're turned down further (cl_engine AudioEngine.EV_VOLUME).
-local TARGET_DB, TARGET_EV_DB = -21, -32
+-- so a V8 isn't quieter than an inline-4. Electric motors keep their own levels from band to
+-- band (the whine grows with speed): their top-speed on-throttle loop is set to TARGET_EV_DB
+-- rms over the whole band, and in game they play at cl_engine's AudioEngine.EV_VOLUME. (At -32 dB
+-- and 0.1 they were ~30 dB under the engines with the whine below 450 Hz: no one heard them.)
+local TARGET_DB, TARGET_EV_DB = -21, -22
 
 local function build(bank)
 	local config, sampleRate = bank.config, bank.sampleRate
@@ -388,7 +388,7 @@ local function buildSharedBank(bank)
 		{ "road", Synth.RenderRoadLoop(sampleRate, yield), 0.07, true },
 		{ "wind", Synth.RenderWindLoop(sampleRate, yield), 0.06, true },
 		{ "turbo", Synth.RenderTurboLoop(sampleRate, yield), 0.027, true },
-		{ "evhum", Synth.RenderEVHumLoop(sampleRate, yield), 0.06, true },
+		{ "evhum", Synth.RenderEVHumLoop(sampleRate, yield), 0.12, true },
 		{ "bov1", Synth.RenderBlowoff(sampleRate, 0xB10F + 4099, yield), 0.093, false, 0.15 },
 		{ "bov2", Synth.RenderBlowoff(sampleRate, 0xB10F + 2 * 4099, yield), 0.093, false, 0.15 },
 	}

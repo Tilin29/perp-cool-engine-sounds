@@ -13,6 +13,8 @@ const { LuaFactory } = require(path.resolve(__dirname, '../baker/node_modules/wa
 const ADDON = path.resolve(__dirname, '../..'), LUA = path.join(ADDON, 'lua/audio_engine')
 const OUT = path.join(__dirname, 'out'); fs.mkdirSync(OUT, { recursive: true })
 const SR = 44100, FPS = 60
+// electric motors play at this share of their banks in game (cl_engine.lua)
+const EV_VOLUME = +(fs.readFileSync(path.join(LUA, 'cl_engine.lua'), 'utf8').match(/AudioEngine\.EV_VOLUME = ([\d.]+)/) || [0, 1])[1]
 
 function readWav(f) {
   const b = fs.readFileSync(f); let o = 12, sr = 44100, ch = 1, bits = 16, data
@@ -77,7 +79,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
 	bk.start.fadeAt, bk.start.dur, bk.startEmo and bk.startEmo.fadeAt or 0, bk.startEmo and bk.startEmo.dur or 0, table.concat(se, " "),
 	cfg.emotionStart and 1 or 0, string.format("%.0f", DT.EmotionFlare(cfg)), cfg.turbo and 1 or 0, cfg.profile.bov and 1 or 0,
 	cfg.supercharger or "", cfg.scPitch or 1, cfg.profile.pops or 0, bk.pops or 0, cfg.volume or 1, cfg.topSpeed, table.concat(ends, "/"),
-	cfg.engineName, table.concat(out, ";") }, "|"))
+	cfg.engineName, cfg.electric and 1 or 0, table.concat(out, ";") }, "|"))
 `
 
 ;(async () => {
@@ -97,7 +99,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     await L.doString(LUA_DRIVE)
     if (res.startsWith('ERR')) { console.log(name, res); continue }
     const f = res.split('|')
-    const [dir, layersS, trimsS, limRpm, redline, sFade, sDur, eFade, eDur, emoS, emo, flare, turbo, bov, sc, scPitch, pops, nPops, volume, top, ends, engine, framesS] = f
+    const [dir, layersS, trimsS, limRpm, redline, sFade, sDur, eFade, eDur, emoS, emo, flare, turbo, bov, sc, scPitch, pops, nPops, volume, top, ends, engine, electric, framesS] = f
     const layers = layersS.split(' ').map(Number), trims = trimsS ? trimsS.split(' ').map(Number) : layers.map(() => 1)
     const frames = framesS.split(';').map(r => r.split(',').map(Number))
     const D = path.join(ADDON, 'sound/audio_engine', dir), red = +redline
@@ -133,7 +135,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       const w = new Array(layers.length).fill(0), n = layers.length
       if (Math.exp(xr) <= layers[0]) w[0] = 1; else if (Math.exp(xr) >= layers[n - 1]) w[n - 1] = 1
       else for (let i = 0; i < n - 1; i++) if (Math.exp(xr) < layers[i + 1]) { const x = (xr - Math.log(layers[i])) / (Math.log(layers[i + 1]) - Math.log(layers[i])); w[i] = Math.cos(x * Math.PI / 2); w[i + 1] = Math.sin(x * Math.PI / 2); break }
-      const g = 0.62 * loopGain * +volume
+      const g = 0.62 * loopGain * +volume * (+electric ? EV_VOLUME : 1)
       for (let i = 0; i < n; i++) {
         const wi = w[i] * (1 - limW) * g * trims[i], pitch = Math.min(2.5, rpm / layers[i])
         const a = voice('on' + i, on[i], true), b = voice('off' + i, off[i], true)
@@ -142,6 +144,11 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       const lv = voice('lim', lim, true); lv.target = limW * g; lv.pitch = red / +limRpm
       const kmh = v * 3.6, rrd = Math.min(1, Math.max(0, (kmh - 3) / 120))
       const rv = voice('road', road, true); rv.target = 0.5 * rrd ** 1.2 * 0.7 * (1 - 0.45 * Math.min(1, Math.max(0, (kmh - 60) / 100))) * loopGain; rv.pitch = 0.8 + 0.3 * rrd
+      if (+electric) {   // the pedestrian warning sound (cl_engine): full to 20 km/h, gone by 30, +0.8% pitch per km/h
+        const hv = voice('evhum', W(path.join(env, 'evhum.wav')), true)
+        hv.target = g * 0.6 * (1 - Math.min(1, Math.max(0, (kmh - 20) / 10))) * (0.6 + 0.4 * Math.min(1, v / 2)) * (+run ? 1 : 0)
+        hv.pitch = 1 + 0.008 * Math.min(kmh, 30)
+      }
       const wv = voice('wind', wind, true); wv.target = 0.5 * Math.min(1, Math.max(0, (kmh - 80) / 240)) ** 2 * 0.015; wv.pitch = 1
       if (+turbo) { const tv = voice('turbo', turboW, true); tv.target = g * boost ** 1.5 * 0.5; tv.pitch = (0.45 + 0.55 * boost) * (0.9 + 0.2 * rpm / red)
         if (bovE > 0 && +bov) shots.push({ w: W(path.join(env, rr() < 0.5 ? 'bov1.wav' : 'bov2.wav')), pos: 0, vol: g * Math.min(1, bovE * 1.2) * 0.5, pitch: 0.95 + 0.1 * rr(), at: fi }) }

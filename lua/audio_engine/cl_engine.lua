@@ -183,9 +183,9 @@ local function superchargerBandNames(env, variant)
 	end
 	return names or nil
 end
--- electric motors (and their low-speed hum) play at this fraction: their banks are rendered at a
--- workable level for 16-bit files, a real EV is far quieter than any engine
-AudioEngine.EV_VOLUME = 0.1
+-- electric motors (and their low-speed warning sound) play at this fraction of their banks: a
+-- real EV is quieter than an engine, though its whine sits where the ear is keenest (1-8 kHz)
+AudioEngine.EV_VOLUME = 0.5
 local function glide(current, target, deltaTime)
 	local nextValue = current + (target - current) * min(1, deltaTime * 18)
 	local maxStep = VOLUME_SLEW * deltaTime
@@ -561,15 +561,15 @@ local function updateSound(car, deltaTime)
 	-- turbo sounds live in the shared bank (Bank.env): any engine can have them
 	local turboPlaying = config.turbo and sharedBank and sharedBank.ready and sharedBank.turbo and not idleOnly
 	local boost = turboPlaying and (engineState.boost or 0) or 0
-	-- electric: a steady low hum at walking pace (like an EV's pedestrian warning sound), at an
-	-- almost fixed pitch; it fades out between ~8% and 20% of top speed (about 15-35 km/h)
-	-- while the motor whine, rising with speed, takes over
-	local motorSpeedShare = rpm / config.redline
+	-- electric: the pedestrian warning sound at walking pace (UN R138 / FMVSS 141), its pitch
+	-- rising ~0.8% per km/h as the UN rule asks; full up to 20 km/h, gone by 30, while the motor
+	-- whine, rising with speed, takes over
+	local evSpeedKmh = abs(car.speedAlongNose) * 3.6
 	local humVolume = 0
 	if config.electric and sharedBank and sharedBank.ready and sharedBank.evhum and engineState.on and engineState.phase == "run" then
-		local humFade = 1 - math.Clamp((motorSpeedShare - 0.08) / 0.12, 0, 1)
-		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)   -- a little softer standing still
-		humVolume = loopVolume * 0.3 * humFade * (0.7 + 0.3 * movingShare)
+		local humFade = 1 - math.Clamp((evSpeedKmh - 20) / 10, 0, 1)
+		local movingShare = math.Clamp(abs(car.speedAlongNose) / 2, 0, 1)   -- softer standing still
+		humVolume = loopVolume * 0.6 * humFade * (0.6 + 0.4 * movingShare)
 	end
 	--[[
 		Supercharger (sh_carlist CAR_SUPERCHARGER): belt-driven, so its whine follows the revs, not
@@ -704,7 +704,7 @@ local function updateSound(car, deltaTime)
 		end
 	end
 	if humVolume > 0 or car.activeGroups.evhum then
-		local pitch = math.Clamp(100 * (car.dopplerRatio or 1) * (1 + 0.12 * math.Clamp(motorSpeedShare / 0.2, 0, 1)), 20, 220)
+		local pitch = math.Clamp(100 * (car.dopplerRatio or 1) * (1 + 0.008 * math.min(evSpeedKmh, 30)), 20, 220)
 		setGroup(car, "evhum", singleNameList(sharedBank.evhum), volumeList(car, "evhum", humVolume), pitch, deltaTime)
 	end
 

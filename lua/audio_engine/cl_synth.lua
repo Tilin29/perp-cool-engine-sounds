@@ -240,31 +240,41 @@ local function resonator(frequency, decaySeconds, sampleRate)
 end
 
 --[[
-	Electric motor: no firing pulses, one faint whine. It is a single tone locked to the motor
-	speed with weak harmonics (so you hear one pitch, not several), under a hiss of bearings and
-	cooling air. The motor's speed ripples a little (a fraction of a percent, ~25 Hz), so the tone
-	is a narrow band rather than a perfect sine, the one thing that makes a synth whine sound
-	like a machine; all harmonics share the ripple, so it stays one pitch. The tone's order (tones per motor
-	turn) is picked so it reaches EV_TOP_HZ at redline whatever the redline, rounded to a multiple
-	of 0.5 so the loops close seamlessly over a 720 degree cycle. Its level drifts a little, the
-	housing and body colour it gently (little below 150 Hz, rolled off above ~4 kHz), and the
-	harmonics grow with load and tone. Off throttle the motor regenerates, so it still
-	whines, softer. Practically silent at low speed: there you hear the low-speed hum
-	(Synth.RenderEVHumLoop).
+	Electric motor: no firing pulses. What a real EV drive unit sounds like (e-NVH studies, see
+	CLAUDE.md): several thin tones locked to the motor speed at orders (tones per motor turn) that
+	aren't a musical chord, so it reads as a turbine-like whine, not a note:
+	  * the reduction gear's meshing teeth, the classic EV whine: the 2nd stage mesh (~9.5 per
+	    motor turn, ~1 kHz at 60 mph, ~2.5 kHz flat out) with its harmonic, and the motor pinion's
+	    1st stage mesh (31: ~3-8 kHz). The meshes rattle at the shaft rate: side tones at +-1 order
+	  * the motor's electromagnetic orders (24 and 48, set by its slot and pole counts: ~2.5 and
+	    ~5 kHz at 60 mph)
+	all under a hiss of bearings and cooling air. Everything is in the 1-8 kHz band where the ear
+	is most sensitive and the road noise thinnest. The whine follows the torque: strongest on the
+	pedal, softer regenerating off it, never silent; even pulling away it's there (faintly).
+	The motor's speed ripples a little (a fraction of a percent, ~25 Hz), so the tones are narrow
+	bands rather than perfect sines, the one thing that makes a synth whine sound like a machine;
+	all orders share the ripple. Orders are whole or half, so the loops close on a 720 degree cycle.
+	At walking pace the pedestrian warning sound takes over (Synth.RenderEVHumLoop).
 ]]
-local EV_TOP_HZ = 450
 local EV_PARTIALS = {
-	-- { harmonic, level }
-	{ 1, 1.00 }, { 2, 0.18 }, { 3, 0.05 },
+	-- { order per motor turn, level, share of it that follows the torque, gear mesh (side tones) }
+	{ 9.5, 1.00, 0.6, true },     -- reduction gear, 2nd stage mesh
+	{ 19,  0.22, 0.7, true },     -- its harmonic
+	{ 24,  0.50, 0.9, false },    -- motor electromagnetic order
+	{ 31,  0.30, 0.6, true },     -- 1st stage mesh (the motor's pinion)
+	{ 48,  0.24, 0.9, false },    -- motor electromagnetic order, 2nd
 }
+local EV_MESH_RATTLE = 0.3   -- shaft-rate level ripple on the gear meshes (side tones at +-1 order)
 
--- how the motor housing and the body pass a tone of fz Hz on
+-- how the drive unit's housing and the body pass a tone on: little below ~300 Hz, housing
+-- resonances around 1.2 and 3 kHz, rolled off above ~7 kHz; nothing near the file's top
+-- (the band loops are pitched up to ~1.2x in game)
 local function evBodyResponse(partialHz, sampleRate)
-	if partialHz > 0.45 * sampleRate then return 0 end
-	local offset1, offset2 = (partialHz - 700) / 300, (partialHz - 1800) / 600
-	local resonance = 0.9 + 0.25 / (1 + offset1 * offset1) + 0.15 / (1 + offset2 * offset2)
-	local highRolloff = partialHz / 4000
-	return resonance * partialHz * partialHz / (partialHz * partialHz + 22500) / (1 + highRolloff * highRolloff * highRolloff * highRolloff)
+	if partialHz > 0.4 * sampleRate then return 0 end
+	local offset1, offset2 = (partialHz - 1200) / 500, (partialHz - 3000) / 1000
+	local resonance = 0.8 + 0.35 / (1 + offset1 * offset1) + 0.25 / (1 + offset2 * offset2)
+	local highRolloff = partialHz / 7000
+	return resonance * partialHz * partialHz / (partialHz * partialHz + 90000) / (1 + highRolloff * highRolloff * highRolloff * highRolloff)
 end
 
 function Synth.EVRender(generator, out, offset, count)
@@ -272,31 +282,28 @@ function Synth.EVRender(generator, out, offset, count)
 	local smoothedRpm, smoothedThrottle, gain = generator.rpm, generator.throttle, generator.gain
 	local targetRpm, targetThrottle, ignitionTarget = generator.targetRpm, generator.targetThrottle, generator.ignitionOn and 1 or 0
 	local redline, pitch, tone = generator.redline, generator.pitch, generator.tone
-	local toneOrder = generator.evToneOrder
-	if not toneOrder then
-		toneOrder = max(1, floor(EV_TOP_HZ * 60 / redline * 2 + 0.5) / 2)
-		generator.evToneOrder = toneOrder
-	end
 	local phases = generator.evPhases
 	if not phases then
 		phases = {}
 		for partialIndex = 1, #EV_PARTIALS do phases[partialIndex] = (partialIndex * 2.39996) % TAU end   -- spread starting phases
 		generator.evPhases = phases
 	end
+	local shaftPhase = generator.evShaftPhase or 0
 	local levelDrift1 = generator.evLevelDrift1 or 0
 	local levelDrift2 = generator.evLevelDrift2 or 0
-	local harmonic1 = generator.evHissState1 or 0
-	local harmonic2 = generator.evHissState2 or 0
+	local hiss1 = generator.evHissState1 or 0
+	local hiss2 = generator.evHissState2 or 0
 	local seed = generator.seed
-	local ripple1, harmonic2Wobble = generator.evRipple1 or 0, generator.evRipple2 or 0
+	local ripple1, ripple2 = generator.evRipple1 or 0, generator.evRipple2 or 0
 	local rpmSmoothing, throttleSmoothing, gainSmoothing = smoothing.rpm, smoothing.throttle, smoothing.gain
 	local driftCoefficient = 1 - exp(-TAU * 3 / sampleRate)            -- level drift, ~3 Hz
 	local driftNorm = 1 / (0.28 * sqrt(driftCoefficient))              -- makes the twice-smoothed noise ~1 rms
 	local rippleCoefficient = 1 - exp(-TAU * 25 / sampleRate)            -- speed ripple, ~25 Hz
 	local rippleNorm = 1 / (0.28 * sqrt(rippleCoefficient))
-	local hissCoefficient1, hissCoefficient2 = 1 - exp(-TAU * 1800 / sampleRate), 1 - exp(-TAU * 5000 / sampleRate)
+	local hissCoefficient1, hissCoefficient2 = 1 - exp(-TAU * 1800 / sampleRate), 1 - exp(-TAU * 6000 / sampleRate)
 	local radiansPerSample = TAU / sampleRate
 	local partialCount = #EV_PARTIALS
+	local brightness = 0.5 + tone   -- the higher orders follow the profile's tone
 	for i = 0, count - 1 do
 		smoothedRpm = smoothedRpm + (targetRpm - smoothedRpm) * rpmSmoothing
 		smoothedThrottle = smoothedThrottle + (targetThrottle - smoothedThrottle) * throttleSmoothing
@@ -304,41 +311,46 @@ function Synth.EVRender(generator, out, offset, count)
 		local baseHz = max(0, smoothedRpm) / 60 * pitch
 		local speedShare = min(1, max(0, smoothedRpm) / redline)
 		-- motor torque: full on the pedal, regeneration off it
-		local load = 0.4 + 0.6 * smoothedThrottle
+		local load = 0.45 + 0.55 * smoothedThrottle
 		seed = bxor(seed, lshift(seed, 13)); seed = bxor(seed, rshift(seed, 17)); seed = bxor(seed, lshift(seed, 5))
 		local random = seed / 2147483648
 		levelDrift1 = levelDrift1 + (random - levelDrift1) * driftCoefficient
 		levelDrift2 = levelDrift2 + (levelDrift1 - levelDrift2) * driftCoefficient
 		seed = bxor(seed, lshift(seed, 13)); seed = bxor(seed, rshift(seed, 17)); seed = bxor(seed, lshift(seed, 5))
 		ripple1 = ripple1 + (seed / 2147483648 - ripple1) * rippleCoefficient
-		harmonic2Wobble = harmonic2Wobble + (ripple1 - harmonic2Wobble) * rippleCoefficient
-		local rippledRadians = radiansPerSample * (1 + 0.004 * rippleNorm * harmonic2Wobble)
-		local level = 0.18 * speedShare ^ 0.8 * (0.35 + 0.65 * load) * (1 + 0.05 * driftNorm * levelDrift2)
-		local brightness = (0.5 + 0.5 * load) * (0.5 + tone)
+		ripple2 = ripple2 + (ripple1 - ripple2) * rippleCoefficient
+		local rippledRadians = radiansPerSample * (1 + 0.004 * rippleNorm * ripple2)
+		shaftPhase = shaftPhase + rippledRadians * baseHz
+		if shaftPhase > TAU then shaftPhase = shaftPhase - TAU end
+		local meshRattle = 1 + EV_MESH_RATTLE * sin(shaftPhase)
+		-- louder with speed, but there from pulling away (a faint whine at walking pace)
+		local level = 0.18 * (0.35 + 0.65 * speedShare ^ 0.5) * (1 + 0.05 * driftNorm * levelDrift2)
 		local sample = 0
 		for partialIndex = 1, partialCount do
 			local partial = EV_PARTIALS[partialIndex]
-			local partialHz = baseHz * toneOrder * partial[1]
-			local peakFilter = phases[partialIndex] + rippledRadians * partialHz
-			if peakFilter > TAU then peakFilter = peakFilter - TAU end
-			phases[partialIndex] = peakFilter
-			local partialLevel = partial[1] > 1 and partial[2] * brightness or partial[2]
-			sample = sample + partialLevel * evBodyResponse(partialHz, sampleRate) * sin(peakFilter)
+			local partialHz = baseHz * partial[1]
+			local phase = phases[partialIndex] + rippledRadians * partialHz
+			if phase > TAU then phase = phase - TAU end
+			phases[partialIndex] = phase
+			local partialLevel = partial[2] * (1 - partial[3] + partial[3] * load) * (partial[1] >= 24 and brightness or 1)
+			if partial[4] then partialLevel = partialLevel * meshRattle end
+			sample = sample + partialLevel * evBodyResponse(partialHz, sampleRate) * sin(phase)
 		end
 		sample = sample * level
-		-- bearings and cooling air: a band of noise around 2-5 kHz
-		harmonic1 = harmonic1 + (random - harmonic1) * hissCoefficient1
-		harmonic2 = harmonic2 + ((random - harmonic1) - harmonic2) * hissCoefficient2
-		sample = sample + harmonic2 * 0.08 * speedShare ^ 1.2 * (0.6 + 0.4 * load)
+		-- bearings and cooling air: a band of noise around 2-6 kHz
+		hiss1 = hiss1 + (random - hiss1) * hissCoefficient1
+		hiss2 = hiss2 + ((random - hiss1) - hiss2) * hissCoefficient2
+		sample = sample + hiss2 * 0.1 * speedShare ^ 1.2 * (0.6 + 0.4 * load)
 		out[offset + i] = sample * gain * 0.6
 	end
 	generator.rpm, generator.throttle, generator.gain = smoothedRpm, smoothedThrottle, gain
+	generator.evShaftPhase = shaftPhase
 	generator.evLevelDrift1 = levelDrift1
 	generator.evLevelDrift2 = levelDrift2
-	generator.evHissState1 = harmonic1
-	generator.evHissState2 = harmonic2
+	generator.evHissState1 = hiss1
+	generator.evHissState2 = hiss2
 	generator.seed = seed
-	generator.evRipple1, generator.evRipple2 = ripple1, harmonic2Wobble
+	generator.evRipple1, generator.evRipple2 = ripple1, ripple2
 end
 
 -- render n samples of raw generator output into out[o] .. out[o+n-1]
@@ -1593,10 +1605,12 @@ function Synth.RenderSuperchargerLoop(sampleRate, variant, yieldFn, bypassOpen, 
 end
 
 --[[
-	Electric low-speed hum, like the pedestrian warning sound EVs play at walking pace: a soft,
-	low tone (220 Hz and a little of its octave) in a breath of air, with a slow shimmer, no motor in it.
-	cl_engine plays it at an almost fixed pitch and fades it out by ~30 km/h. Shared by every
-	electric car (env bank).
+	Electric low-speed sound, the pedestrian warning sound (AVAS) EVs must play at walking pace
+	(UN R138 up to 20 km/h, FMVSS 141 up to 30): tones in two separate third-octave bands of the
+	315 Hz-5 kHz range the rules ask for, a soft 330 Hz hum (and its octave) and a thin 1.25 kHz
+	tone, in a breath of air, with a slow shimmer. cl_engine raises its pitch with speed (the UN
+	rule: ~0.8% per km/h) and fades it out by 30 km/h, as the motor whine takes over. Every tone and
+	the shimmer run whole cycles over the 2 s loop. Shared by every electric car (env bank).
 ]]
 function Synth.RenderEVHumLoop(sampleRate, yieldFn)
 	local random = noiseGen(0xE7A5)
@@ -1604,16 +1618,18 @@ function Synth.RenderEVHumLoop(sampleRate, yieldFn)
 	local crossfadeLength = floor(sampleRate * 0.2)
 	local totalSamples = loopLength + crossfadeLength
 	local buffer = {}
-	local baseHz = 220
-	local airFilter = biquad("bandpass", 900, sampleRate, 0.8)
-	local lowpass = biquad("lowpass", 1600, sampleRate, 0)
+	local lowHz, highHz = 330, 1250
+	local airFilter = biquad("bandpass", 1100, sampleRate, 0.9)
+	local lowpass = biquad("lowpass", 3000, sampleRate, 0)
 	for i = 1, totalSamples do
 		local time = i / sampleRate
 		-- two slightly detuned voices beat slowly (0.5 Hz): a living hum, not a test tone
 		local shimmer = 1 + 0.15 * sin(TAU * 0.5 * time)
-		local tone = 0.50 * sin(TAU * baseHz * time)
-			+ 0.10 * sin(TAU * (baseHz * 2 + 0.5) * time) * shimmer
-		buffer[i] = runBiquad(lowpass, tone * 0.5 + runBiquad(airFilter, random()) * 0.25)
+		local tone = 0.42 * sin(TAU * lowHz * time)
+			+ 0.12 * sin(TAU * (lowHz * 2 + 0.5) * time) * shimmer
+			+ 0.16 * sin(TAU * highHz * time) * (2 - shimmer)
+			+ 0.06 * sin(TAU * (highHz + 0.5) * time)
+		buffer[i] = runBiquad(lowpass, tone * 0.6 + runBiquad(airFilter, random()) * 0.2)
 		if yieldFn and i % 8192 == 0 then yieldFn() end
 	end
 	return makeLoop(buffer, loopLength, crossfadeLength), loopLength

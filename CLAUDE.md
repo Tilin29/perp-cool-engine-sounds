@@ -108,11 +108,18 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   a full blip hard braking ran a sawtooth near redline that sounded cartoonish. cl_engine feeds the model the car's full speed
   signed by the nose (`car.driveSpeed`), not the speed along the nose, which collapsed in a slide (revs plunged, then shot back up).
 - `cl_synth.lua`: generator. Firing pulses on a 720° cycle, two exhaust banks, per-layout CHARACTER (f1/f2/f3, w, o1, o05),
-  gurgle, flow grit, bark. `Synth.EVRender` for the electric motor (one faint whine: a tone of order chosen to reach
-  `EV_TOP_HZ` 450 Hz at redline, weak harmonics, a slight speed ripple so it isn't a pure sine, under a bearing/air hiss; regen whines softer off throttle; near silent at
-  low speed; bands 1.35x apart; electric bands keep natural levels, no per-band loudness matching, the top band's on loop is set
-  to `TARGET_EV_DB` -32 dB rms full band; cl_engine plays EVs and their hum at `AudioEngine.EV_VOLUME` 0.1). `RenderEVHumLoop`: the steady low-speed EV hum (env bank `evhum`), played by
-  cl_engine at a near-fixed pitch, fading out between 8% and 20% of redline. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
+  gurgle, flow grit, bark. `Synth.EVRender` for the electric motor, after the e-NVH literature (the user asked for real EV
+  sound): orders per motor turn `EV_PARTIALS` 9.5 (reduction gear 2nd stage mesh, the classic whine: ~1 kHz at 60 mph), 19, 24 (motor
+  electromagnetic), 31 (1st stage mesh), 48, gear meshes rattling at the shaft rate (`EV_MESH_RATTLE`, side tones +-1 order), a slight
+  speed ripple, a bearing/air hiss; housing response passes 0.3-7 kHz (`evBodyResponse`); level follows torque (regen softer) and
+  speed (0.35 + 0.65 x share^0.5, so there's a whine from pulling away); orders whole/half for the 720 deg loop. Bands 1.35x apart;
+  electric bands keep natural levels, no per-band loudness matching, the top band's on loop is set to `TARGET_EV_DB` -22 dB rms full band;
+  cl_engine plays EVs and their warning sound at `AudioEngine.EV_VOLUME` 0.5. (Before: one tone capped at 450 Hz, -32 dB and 0.1:
+  ~30 dB under the engines, "no sound" in the Tesla.) Measured A-weighted in dev/drive_demo, the Tesla runs ~3-5 dB under a BMW 1M.
+  No inverter (PWM carrier) tone: it doesn't follow the revs, so it can't live in the pitched band loops. `RenderEVHumLoop`: the
+  pedestrian warning sound (AVAS, env bank `evhum`, rms 0.12): 330 Hz + octave and 1.25 kHz in a breath of air (two third-octave
+  bands, as UN R138 / FMVSS 141 ask); cl_engine plays it full to 20 km/h, gone by 30, pitch +0.8% per km/h (the UN rule).
+  dev/drive_demo applies EV_VOLUME and the warning sound like cl_engine. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
   a ~1 ms thump + 35-100 ms muffler scatter, body peak 140-190 Hz, low-passed (a 0.4 ms click with light saturation sounded like
   firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over;
   played at 0.7 x (cl_engine `popVolume`, ~3 dB up on the 0.5 they used to play at).
@@ -456,5 +463,5 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
 - Generation cost: ~2 s CPU per engine at 44.1 kHz in game (~16 s in the browser page); ~4 MB each, `audio_engine_maxsounds` cap.
 
 ## Open ideas (not requested yet)
-- Electric whine layer for hybrids; real diesel character (diesels currently use softened petrol presets).
+- Electric whine layer for hybrids; an inverter carrier tone for EVs (its own fixed-pitch loop); per-car EV voices (Leaf PMSM vs Model S induction); real diesel character (diesels currently use softened petrol presets).
 - Confirm the uncertain car mappings (INTEGRATION.md section 8) against PERP's dealer table.
