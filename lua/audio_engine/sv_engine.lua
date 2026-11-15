@@ -2,6 +2,9 @@
 	Audio Engine - server side
 	Switches the engine on/off as drivers get in and out, and networks the driver's
 	throttle/brake/handbrake keys so every client can run the rpm model and sound.
+	It never changes how a car drives (beyond holding it while the engine is off or starting):
+	handling, the profile's acceleration / top speed and the speed limiter are the optional
+	handling module (lua/audio_engine_handling/), which hooks in through the audio_engine/* hooks below.
 ]]
 
 local AudioEngine = AUDIO_ENGINE
@@ -22,12 +25,47 @@ local function isOurs(entity)
 end
 
 ---------------------------------------------------------------------------
--- real performance: the profile's acceleration and top speed are applied to the car's
--- physics (Source vehicle params), starting from what its own vehicle script set up
+-- vehicle helpers, also used by the optional modules (handling, police lights, seats, debug)
 ---------------------------------------------------------------------------
-local HU_PER_MPH = AudioEngine.HU_PER_MPH   -- GetVehicleParams speeds are inches/s (sv_handling.lua: AudioEngine.SetParams)
+-- GetVehicleParams speeds are inches/s; SetVehicleParams takes mph
+local HU_PER_MPH = 17.6
+AudioEngine.HU_PER_MPH = HU_PER_MPH
 
--- what the clients need of the car's physics (params as GetVehicleParams gives them)
+-- the vehicle script the car spawned with (lower case, forward slashes), or nil
+function AudioEngine.VehicleScriptOf(vehicle)
+	local keyValues = vehicle:GetKeyValues() or {}
+	local script = keyValues.vehiclescript or keyValues.VehicleScript or keyValues.vehicleScript
+	if (not script or script == "") and istable(vehicle.VehicleTable) and istable(vehicle.VehicleTable.KeyValues) then
+		script = vehicle.VehicleTable.KeyValues.vehiclescript
+	end
+	if not isstring(script) or script == "" then return nil end
+	return (string.lower(script):gsub("\\", "/"))
+end
+
+-- nose direction and wheelbase, from the wheel attachments (cached per model)
+local geometryCache = {}
+function AudioEngine.CarGeometry(vehicle)
+	local model = vehicle:GetModel()
+	if geometryCache[model] then return geometryCache[model] end
+	local wheelPositions = {}
+	for _, attachmentName in ipairs({ "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr" }) do
+		local attachmentId = vehicle:LookupAttachment(attachmentName)
+		local attachment = attachmentId and attachmentId > 0 and vehicle:GetAttachment(attachmentId)
+		if not attachment then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
+		wheelPositions[attachmentName] = vehicle:WorldToLocal(attachment.Pos)
+	end
+	local forward = ((wheelPositions.wheel_fl + wheelPositions.wheel_fr) - (wheelPositions.wheel_rl + wheelPositions.wheel_rr)) * 0.5
+	forward.z = 0
+	local length = forward:Length()
+	if length < 1 then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
+	local wheelbase = math.Clamp(length * 0.0254, 1.8, 4.5)
+	forward:Normalize()
+	geometryCache[model] = { forward = forward, wheelbase = wheelbase }
+	return geometryCache[model]
+end
+
+-- what the clients need of the car's physics (params as GetVehicleParams gives them).
+-- The handling module calls it again after it changes a car's physics
 function AudioEngine.RefreshCarStats(vehicle, params)
 	-- the car's own top speed, for "fit gearing" and the menu
 	if (params.engine.maxSpeed or 0) > 0 then
@@ -41,42 +79,22 @@ function AudioEngine.RefreshCarStats(vehicle, params)
 	end
 end
 
-local function captureBase(vehicle)
-	if vehicle.audioBase then return vehicle.audioBase end
-	local succeeded, params = pcall(vehicle.GetVehicleParams, vehicle)
-	if not succeeded or not istable(params) or not istable(params.engine) then return nil end
-	vehicle.audioBase = table.Copy(params)
-	AudioEngine.RefreshCarStats(vehicle, params)
-	return vehicle.audioBase
-end
-
-function AudioEngine.ApplyPerformance(vehicle, profile)
-	local base = captureBase(vehicle)
-	if not base then return end
-	local accelerationScale = profile and profile.accel or 1
-	local topSpeedOverride = profile and profile.vmax or 0
-	local adjusted = table.Copy(base)
-	-- audioLimiterPower: cruise control's power trim (sv_cruise.lua, sv_handling.lua)
-	-- audioTractionPower: launch traction control's power trim; audioSteerLockScale: the lock at speed (sv_handling.lua)
-	adjusted.engine.horsepower = base.engine.horsepower * accelerationScale * (vehicle.audioTractionPower or 1) * (vehicle.audioLimiterPower or 1)
-	if adjusted.steering and adjusted.steering.degreesFast and vehicle.audioSteerLockScale then
-		adjusted.steering.degreesFast = base.steering.degreesFast * vehicle.audioSteerLockScale
-	end
-	if topSpeedOverride > 0 then adjusted.engine.maxSpeed = topSpeedOverride / 1.609344 * HU_PER_MPH end
-	AudioEngine.SetParams(vehicle, adjusted)
-end
-
+--[[
+	Hooks for the optional modules (the engine never names them):
+	  audio_engine/car-tracked (vehicle)               a car with the procedural engine is tracked
+	                                                   (spawned, or found by a lua refresh)
+	  audio_engine/profile-changed (vehicle, profile)  its tuning profile changed (nil = back to stock);
+	                                                   the handling module applies its acceleration / top speed
+]]
 local function track(entity)
 	if not isOurs(entity) then return end
 	trackedVehicles[entity] = true
-	-- PERP physics on the test script and the anti-spin setup (sv_handling.lua), before the
-	-- car's physics are captured as the base the tuning menu works from
-	AudioEngine.PrepareHandling(entity)
-	captureBase(entity)
+	-- the physics as it spawned; a module that changes them (handling) sends them again
+	local succeeded, params = pcall(entity.GetVehicleParams, entity)
+	if succeeded and istable(params) and istable(params.engine) then AudioEngine.RefreshCarStats(entity, params) end
 	-- after a lua refresh, a car that is already running stays drivable
 	if entity.audioDrivable == nil then entity.audioDrivable = entity:GetNW2Bool("audio_on", false) end
-	local profile = AudioEngine.DecodeProfile(entity:GetNW2String("audio_prof", ""))
-	if profile then AudioEngine.ApplyPerformance(entity, profile) end
+	hook.Run("audio_engine/car-tracked", entity)
 end
 
 hook.Add("OnEntityCreated", "audio_engine", function(entity)
@@ -250,13 +268,13 @@ net.Receive("audio_engine_set", function(_, player)
 
 	if profileString == "" then
 		vehicle:SetNW2String("audio_prof", "")      -- back to stock
-		AudioEngine.ApplyPerformance(vehicle, nil)
+		hook.Run("audio_engine/profile-changed", vehicle, nil)
 		return
 	end
 	local profile = AudioEngine.DecodeProfile(profileString)
 	if not profile then return end
 	vehicle:SetNW2String("audio_prof", AudioEngine.EncodeProfile(profile))
-	AudioEngine.ApplyPerformance(vehicle, profile)
+	hook.Run("audio_engine/profile-changed", vehicle, profile)
 end)
 
 hook.Add("PlayerSay", "audio_engine", function(player, text)

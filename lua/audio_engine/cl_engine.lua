@@ -332,7 +332,7 @@ local function readInputs(car)
 			forwardHeld, backwardHeld, handbrakeHeld, steeringHeld = forwardKey, backwardKey, handbrakeKey, player:KeyDown(IN_MOVELEFT) ~= player:KeyDown(IN_MOVERIGHT)
 		end
 	end
-	-- speed limiter (sv_cruise.lua): holding at the limit sounds like steady part throttle;
+	-- speed limiter (the handling module's sv_cruise.lua, NW2 audio_limst; 0 without it): holding at the limit sounds like steady part throttle;
 	-- over it the throttle is shut even with W held
 	local limiterState = entity:GetNW2Int("audio_limst", 0)
 	if limiterState == 2 then forwardHeld = false end
@@ -1215,7 +1215,11 @@ hook.Add("EntityRemoved", "audio_engine_cars", function(entity)
 	end
 end)
 
--- for the HUD
+--[[
+	Read-only view of a car's engine for other modules (the HUD, lua/audio_engine_hud/), or nil:
+	{ config (the engine config: redline, idle...), engineState (Drivetrain state: rpm, gear,
+	throttle, on, phase, limiterHoldTimer...), speedAlongNose (m/s, + forward) }
+]]
 function AudioEngine.GetClientCar(entity)
 	return cars[entity]
 end

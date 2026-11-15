@@ -81,28 +81,8 @@ local deg, rad, atan2, abs, min, max, sqrt, tan = math.deg, math.rad, math.atan2
 local function clamp(value, low, high) if value < low then return low elseif value > high then return high end return value end
 local function sign(value) return value >= 0 and 1 or -1 end
 
--- nose direction and wheelbase, from the wheel attachments (cached per model)
-local geometryCache = {}
-local function geometry(vehicle)
-	local model = vehicle:GetModel()
-	if geometryCache[model] then return geometryCache[model] end
-	local wheelPositions = {}
-	for _, attachmentName in ipairs({ "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr" }) do
-		local attachmentId = vehicle:LookupAttachment(attachmentName)
-		local attachment = attachmentId and attachmentId > 0 and vehicle:GetAttachment(attachmentId)
-		if not attachment then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
-		wheelPositions[attachmentName] = vehicle:WorldToLocal(attachment.Pos)
-	end
-	local forward = ((wheelPositions.wheel_fl + wheelPositions.wheel_fr) - (wheelPositions.wheel_rl + wheelPositions.wheel_rr)) * 0.5
-	forward.z = 0
-	local length = forward:Length()
-	if length < 1 then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
-	local wheelbase = clamp(length * 0.0254, 1.8, 4.5)
-	forward:Normalize()
-	geometryCache[model] = { forward = forward, wheelbase = wheelbase }
-	return geometryCache[model]
-end
-AudioEngine.CarGeometry = geometry
+-- nose direction and wheelbase, from the wheel attachments (sv_engine.lua, cached per model)
+local geometry = AudioEngine.CarGeometry
 
 -- is the car on the ground? (a short trace down from its floor)
 local function onGround(vehicle)

@@ -1,7 +1,7 @@
 local A = "/home/claude/addon/sl65amg_rtu/lua/audio_engine/"
 local now = 0
 local hooks, cvs, cmds, timers = {}, {}, {}, {}
-hook = { Add = function(ev, id, fn) hooks[ev] = hooks[ev] or {} hooks[ev][id] = fn end }
+hook = { Add = function(ev, id, fn) hooks[ev] = hooks[ev] or {} hooks[ev][id] = fn end, Run = function(ev, ...) for _, fn in pairs(hooks[ev] or {}) do fn(...) end end }
 local function run(ev, ...) for _, fn in pairs(hooks[ev] or {}) do fn(...) end end
 function CreateConVar(n, d) local c = { v = d } function c:GetBool() return tonumber(self.v) ~= 0 end function c:GetFloat() return tonumber(self.v) end function c:GetInt() return tonumber(self.v) end cvs[n] = c return c end
 FCVAR_ARCHIVE, FCVAR_REPLICATED = 1, 2
@@ -26,6 +26,7 @@ veh.GetNW2Float, veh.GetNW2String, veh.GetNW2Int = veh.GetNW2Bool, veh.GetNW2Boo
 function veh:SetNW2Bool(k, v) self.nw[k] = v end
 veh.SetNW2Float, veh.SetNW2String, veh.SetNW2Int = veh.SetNW2Bool, veh.SetNW2Bool, veh.SetNW2Bool
 function veh:GetVehicleParams() return { engine = { maxSpeed = 155 * 17.6, horsepower = 480 } } end
+function veh:GetPhysicsObject() return nil end
 function veh:SetVehicleParams() end
 function veh:EnableEngine(b) self.enabled = b end
 function veh:StartEngine(b) self.started = b end

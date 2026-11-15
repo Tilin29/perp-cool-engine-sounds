@@ -7,8 +7,17 @@ is rendered offline by that same synth (`dev/baker`) and shipped as WAVs; only e
 Keep the synth the single source of every sound (no recordings). Porting the sounds into PERP: `PORTING.md`.
 
 ## Layout
-- `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu, cl_police. Server: sv_engine, sv_stability, sv_cruise, sv_police, sv_seats.
-  Then the debug module (`lua/audio_engine_debug/`, see "Debug module" below), if that folder exists: deleting it is all it takes to ship without it.
+- Modules (the engine, siren and horn go into PERPHeads' own code in the end, so they stay apart): the engine sound core is
+  `lua/audio_engine/` and works on its own. Handling (`lua/audio_engine_handling/`: sv_handling, sv_perp_physics, sv_stability, sv_cruise)
+  and the speed/rpm HUD (`lua/audio_engine_hud/cl_hud.lua`) are optional modules: the core never calls them, they use the core's
+  functions and hooks. Delete a folder to drop it. Hooks the core runs (server): `audio_engine/car-tracked` (vehicle; spawn or lua refresh)
+  and `audio_engine/profile-changed` (vehicle, profile or nil = stock; the handling module applies accel/vmax: `ApplyPerformance` lives there).
+  Read-only client API: `AudioEngine.GetClientCar(vehicle)` -> { config, engineState, speedAlongNose } (the HUD's only way in).
+  Shared server helpers in the core's sv_engine: `AudioEngine.HU_PER_MPH`, `VehicleScriptOf`, `CarGeometry`, `RefreshCarStats` (audio_vmax/audio_pwr;
+  the core sends them as the car spawned, handling again after changing its physics). The core only reads the handling's NW2 `audio_limst`
+  (0 without it). Keep it that way: no core file may call into a module (check: load with the folders hidden).
+- `lua/autorun/audio_engine_init.lua`: loader. Core shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_menu, cl_police. Server: sv_engine, sv_police, sv_seats.
+  Then each optional module whose folder exists (`hasModule`): handling, HUD, then the debug module (`lua/audio_engine_debug/`, see "Debug module" below; its handling pages need the handling module).
 - `sh_config.lua`: `RegisterCar(model, cfg)`, `GetCarConfig` (keeps each model path's lower case: called per car per tick/frame). `audio_engine_editor`
   (shared, default 0, `AudioEngine.EditorEnabled()`): the Rev Bench menu (cl_menu: command, `!engine`, context menu; sv_engine rejects `audio_engine_set`) only when 1.
   cl_menu has no gear card any more (its ratio editor never reached the car; it forces `fit = 1`).
@@ -175,13 +184,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     with the sandbox bone editor) and rises by the spoiler speed rules (`AudioEngine.WingSpeedUp`) or while the flap is up.
     `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
     shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
-- `sv_engine.lua`: ignition, run by the server.
+- `sv_engine.lua` (core): ignition, run by the server. Never changes how a car drives beyond holding it while off/starting.
   - Engine off on entry; start key `audio_engine_startkey` (default R; polled by cl_engine, which sends `audio_engine_toggle`: the server's
     PlayerButtonDown rides on usercmds and missed presses). A press within 1.5 s of starting can't switch it off (`START_LOCK`: at 150 ms ping a second press did). Getting out leaves it
     idling (`audio_engine_keeprunning` 1, default, not archived: a saved 0 from the old default overrode it); getting back in drives off.
   - The server runs `Drivetrain.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
-  - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
-- `sv_cruise.lua`: speed limiter (was cruise control). Middle mouse on at exactly the current speed / off; mouse wheel moves the
+  - Also: `audio_engine_autostart`, input bits NW2, the tuning net message (sets `audio_prof`, runs `audio_engine/profile-changed`), wings.
+- `sv_cruise.lua` (handling module): speed limiter (was cruise control). Middle mouse on at exactly the current speed / off; mouse wheel moves the
   limit to the next 5 mph step (`StartCommand`: `cmd:GetMouseWheel()`). The driver's own W drives: from `band` 6 mph under the limit
   the horsepower is trimmed (`vehicle.audioLimiterPower`, sv_handling's tick, applied in `ApplyPerformance`) by tracking a wanted acceleration
   `k` x (mph to go), which finds the holding power for any car (a PI on the speed error overshot 1-2 mph). Over the limit (lowered,
@@ -192,7 +201,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `audio_engine_handling`, `audio_engine_stability` and `audio_engine_traction` default 0, all archived (a server keeps what it saved).
   The cars then drive on PERP's vehicle scripts only (`addons/perp_vehicle_scripts_local` locally; on the test-script fallback
   `applyPerpPhysics` puts PERP's values on). The assists below are kept, switched off; the speed limiter only acts when switched on.
-- `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `vehicle.audioSpiked`.
+- `sv_stability.lua` (handling module): steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `vehicle.audioSpiked`.
   Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
   and reports any rotation as `vehicle.audioSlideAmount`, so traction control cuts the power. Taken over from a turn (still rotating), it only damps
   the rotation and follows the car's heading until under `holdSettled` 3 deg/s (at most `holdGrace` 1 s), then holds that line: holding
@@ -206,7 +215,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Braking (S, locked fronts plough on) still up to `brakeTurn` 0.6 at `brakeHelp` 6/s.
   Never turns a sliding car's velocity (that launched cars toward the nose). A drift starts with the handbrake and lasts while
   the slide angle > `driftHold`; while drifting counter-steer isn't damped. Grip 1.5 g; `vehicle.audioFastSteerScale` widens the lock at speed.
-- `sv_handling.lua`: on spawn (`AudioEngine.PrepareHandling`, before `captureBase`): PERP base physics from generated `sv_perp_physics.lua` onto cars
+- `sv_handling.lua` (handling module): on `audio_engine/car-tracked` (`AudioEngine.PrepareHandling`, before `captureBase`; `ApplyPerformance` = the profile's accel/vmax on the car): PERP base physics from generated `sv_perp_physics.lua` onto cars
   on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), anti-spin `AudioEngine.ANTI_SPIN`
   (`audio_engine_handling`; also steering at speed x1.5, handbrake slide left as scripted),
   launch traction control `AudioEngine.TRACTION` (`audio_engine_traction`): driven-wheel slip from `GetWheel` angular speed trims
@@ -255,7 +264,7 @@ charge that honk against the spam limit); cl_siren reads the key from the horn's
 keeps playing. startTone cuts a fading patch of the same name on the car first (same entity + name = one sound to the game).
 The siren studio plays it too (hold Alt with the lights on) and exports `honkTone` (scheme lines too).
 In a siren car the spawn menu (Q) is blocked (`SpawnMenuOpen`), and the tone shows after the light mode on the engine's HUD through
-the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still never names the siren).
+the engine's generic `audio_engine/lights-label` hook (the HUD module's cl_hud; the engine still never names the siren).
 - `sh_siren_config.lua`: `PoliceSiren.CONFIG`, written by the studio's export (the user pastes it back): volume, soundLevel (85, the engines' own: it was 88 = 85 + 3, the user lowered it, sirens carried too far) and
   `soundLevels[model]` (the user's: Cayenne 89, SL65 92; the 340i, M5 E60 and Charger SRT-8 were 94, then the base (88, now 85)
   (the user found the sirens carried a bit far); 95 was a touch far, 94 for all carried too far on the others, 86 lost to the SL65's engine), `distance` { full 20 m, at 150 m, volume 0.4 }: the siren's own fade on top of the game's (the user: "you can't really tell the
@@ -398,7 +407,7 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   `sound/audio_engine/` + `lua/audio_engine/cl_baked.lua`. Re-bake after changing cl_synth, cl_soundbank, sh_presets or the car list.
   `node bake.js --electric` re-bakes only the electric motors + env bank (~15 s) and keeps every other entry and folder:
   only for changes that can't touch other engines (it fails if any other engine's sound key is missing from the manifest).
-  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle. `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
+  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle (core sv_engine + handling module, through the core's hooks). `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - Offline harnesses run under LuaJIT (`luajit file.lua` from `dev/`). Fix the hard-coded paths at the top first: they point at /home/claude/....
   - `gmod_sim5.lua`: drive mix
