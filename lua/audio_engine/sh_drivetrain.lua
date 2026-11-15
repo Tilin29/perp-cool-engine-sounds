@@ -108,16 +108,22 @@ function Drivetrain.Stop(engineState)
 	engineState.phase = "off"
 end
 
+-- seconds from the key until an electric car can drive (Drivetrain.Start sets phaseTimer 0.3)
+Drivetrain.EV_START_SECONDS = 3
+
 -- Rev Bench start-up: catch -> rev flare -> eased settle to idle
 function Drivetrain.StartSequence(engineState, config, deltaTime)
 	engineState.fuelCut = false
 	engineState.crankMode = 0
 	if config.electric then
-		-- an electric car just powers up: a short hum, then it's ready
+		-- an electric car powers up (contactors, inverter; the sound is the env bank's evpowerup),
+		-- then it's ready: Drivetrain.EV_START_SECONDS from the key, about as long as an engine's
+		-- start (2.2 s, 3.6 s with a rev flare). It was 0.6 s, the Tesla drove off before anything
+		-- else had caught
 		engineState.rpm = engineState.rpm + (config.idle - engineState.rpm) * min(1, deltaTime * 8)
 		engineState.soundThrottle = 0.15
 		engineState.phaseTimer = engineState.phaseTimer - deltaTime
-		if engineState.phaseTimer <= -0.3 then engineState.phase = "run" end
+		if engineState.phaseTimer <= 0.3 - Drivetrain.EV_START_SECONDS then engineState.phase = "run" end
 		return
 	end
 	if engineState.phase == "catch" then

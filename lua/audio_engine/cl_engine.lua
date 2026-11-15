@@ -276,9 +276,25 @@ local function playOneShot(car, kind, name, volume, pitch, fadeAt, duration)
 	car.oneShot = { kind = kind, patch = patch, startTime = RealTime(), fadeAt = fadeAt or 0, duration = duration }
 end
 
--- an electric car's dash chime as it powers up ("ding ding ding"), for whoever sits in it only:
+-- an electric car's dash chime once it is ready to drive (Drivetrain.EV_START_SECONDS after the
+-- key; it played at the key while the car was ready at once), for whoever sits in it only:
 -- a client-side sound on the local player, 2D (sound level 0), so nobody outside hears it
 AudioEngine.EV_CHIME_VOLUME = 0.3
+-- and its power-up (contactors clunking, the motor energising into the warning hum: env bank
+-- evpowerup), at the car, for anyone near: a quiet sound level, so it carries only a few meters
+-- (its swell ends ~4 dB over the standing warning hum it turns into: at 0.1 it was 15 dB over)
+AudioEngine.EV_POWERUP_VOLUME = 0.03
+AudioEngine.EV_POWERUP_SOUNDLEVEL = 65
+local function playPowerUp(car, volume)
+	local sharedBank = Bank.env
+	if not (sharedBank and sharedBank.ready and sharedBank.evpowerup) then return end
+	if car.powerUpPatch then car.powerUpPatch:Stop() end
+	local patch = CreateSound(car.entity, sharedBank.evpowerup)
+	patch:SetSoundLevel(AudioEngine.EV_POWERUP_SOUNDLEVEL)
+	patch:SetDSP(car.dspPreset)
+	patch:PlayEx(min(1, volume * AudioEngine.EV_POWERUP_VOLUME), 100)
+	car.powerUpPatch = patch
+end
 local function playIgnitionChime(car)
 	local sharedBank = Bank.env
 	local player = LocalPlayer()
@@ -1050,7 +1066,10 @@ local function updateCar(car, deltaTime)
 			else
 				Drivetrain.Start(engineState, entity:GetNW2Bool("audio_emo", false))
 				car.loopGain = 0
-				if config.electric and isOwnCar then playIgnitionChime(car) end
+				if config.electric then
+					car.chimeAtReady = true
+					if not car.outOfRange then playPowerUp(car, oneShotVolume) end
+				end
 				if car.bank and car.bank.ready and not car.outOfRange then
 					local startSound = engineState.emotion and car.bank.startEmo or car.bank.start
 					playOneShot(car, "start", startSound.name, oneShotVolume, 100, startSound.fadeAt, startSound.dur)
@@ -1062,6 +1081,8 @@ local function updateCar(car, deltaTime)
 				playOneShot(car, "stop", car.bank.stop.name, oneShotVolume, pitch, 0, car.bank.stop.dur)
 			end
 			Drivetrain.Stop(engineState)
+			car.chimeAtReady = nil
+			if car.powerUpPatch then car.powerUpPatch:FadeOut(0.1); car.powerUpPatch = nil end
 			if car.firstUpdate then engineState.rpm = 0 end
 		end
 		car.lastEngineOn = engineOn
@@ -1113,6 +1134,11 @@ local function updateCar(car, deltaTime)
 			limiterEvent, blowOffEvent = limiterEvent or engineState.limiterEvent, blowOffEvent or engineState.blowOffEvent
 		end
 		engineState.limiterEvent, engineState.blowOffEvent = limiterEvent, blowOffEvent
+	end
+	-- an electric car just became ready to drive: the chime, if you sit in it
+	if car.chimeAtReady and engineState.phase == "run" then
+		car.chimeAtReady = nil
+		if engineState.on and isOwnCar then playIgnitionChime(car) end
 	end
 
 	updateRoom(car, deltaTime)

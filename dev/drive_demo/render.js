@@ -127,11 +127,13 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     const spf = SR / FPS; let thrS = 0, limW = 0, xr = null, loopGain = 0, scThr = 0, lastThr = 0, popUntil = -1, nextPop = 0, rr = Math.random
     let seed = 7; rr = () => (seed = (seed * 16807) % 2147483647) / 2147483647
     shots.push({ w: start, pos: 0, vol: 0.9, pitch: 1 })
-    if (+electric) shots.push({ w: W(path.join(env, 'evchime.wav')), pos: 0, vol: 0.3, pitch: 1 })   // cl_engine EV_CHIME_VOLUME
+    if (+electric) shots.push({ w: W(path.join(env, 'evpowerup.wav')), pos: 0, vol: 0.03, pitch: 1 })   // cl_engine EV_POWERUP_VOLUME
+    let chimed = !+electric   // the chime plays once the car is ready (cl_engine EV_CHIME_VOLUME)
     let tPhase = null
     for (let fi = 0; fi < frames.length; fi++) {
       const [rpm0, sThr, gear, v, limT, boost, bovE, run, cut] = frames[fi]; const dt = 1 / FPS, t = fi * dt
       const rpm = Math.max(rpm0, 50)
+      if (!chimed && +run) { chimed = true; shots.push({ w: W(path.join(env, 'evchime.wav')), pos: 0, vol: 0.3, pitch: 1, at: fi }) }
       // loops muted until the start one-shot reaches its fade point
       const target = t < fadeAt ? 0 : 1; const rate = t < fadeAt ? 8 : 1 / Math.max(0.05, sdur - fadeAt)
       loopGain += Math.max(-rate * dt, Math.min(rate * dt, target - loopGain))

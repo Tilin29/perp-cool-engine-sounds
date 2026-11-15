@@ -390,6 +390,7 @@ local function buildSharedBank(bank)
 		{ "turbo", Synth.RenderTurboLoop(sampleRate, yield), 0.027, true },
 		{ "evhum", Synth.RenderEVHumLoop(sampleRate, yield), 0.12, true },
 		{ "evchime", Synth.RenderEVChime(sampleRate, yield), 0.1, false, 0.25 },   -- (level over the first ding)
+		{ "evpowerup", Synth.RenderEVPowerUp(sampleRate, yield), 0.1, false },
 		{ "bov1", Synth.RenderBlowoff(sampleRate, 0xB10F + 4099, yield), 0.093, false, 0.15 },
 		{ "bov2", Synth.RenderBlowoff(sampleRate, 0xB10F + 2 * 4099, yield), 0.093, false, 0.15 },
 	}

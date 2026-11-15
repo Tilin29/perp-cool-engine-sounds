@@ -5,18 +5,19 @@
 	several redlines is baked once, at the highest, and E.BAKED_FAMILY points the others at it.
 	The WAVs live in sound/audio_engine/<dir>/. cl_soundbank.lua loads these instead of
 	generating, so stock cars cost no CPU; tuned engines are still generated in game.
-	Synth version: 0764521966
+	Synth version: 5a92533013
 ]]
 
 local E = AUDIO_ENGINE
-E.BAKED_VERSION = "0764521966"
+E.BAKED_VERSION = "5a92533013"
 E.BAKED_ENV = {
-	dir = "env_757004be",
+	dir = "env_51a7d922",
 	peak = {
 		bov1 = 0.35331,
 		bov2 = 0.363128,
 		evchime = 0.298066,
 		evhum = 0.256841,
+		evpowerup = 0.911955,
 		road = 0.298855,
 		sc_heavy_1 = 0.140719,
 		sc_heavy_1_off = 0.0666027,
@@ -276,7 +277,7 @@ E.BAKED = {
 		bangs = 0,
 		cars = { "Nissan Leaf" },
 		cyl = 1,
-		dir = "ev_10400_f8d5d5",
+		dir = "ev_10400_58630f",
 		engine = "Electric motor",
 		layers = { 540, 720, 970, 1300, 1750, 2360, 3170, 4270, 5750, 7730, 10400 },
 		limitedDb = 0,
@@ -305,19 +306,19 @@ E.BAKED = {
 			b9off = 0.113428,
 			b9on = 0.178038,
 			lim = 0.275136,
-			start = 0.00998803,
-			starte = 0.00998803,
+			start = 0.0108545,
+			starte = 0.0108545,
 			stop = 0.00718424,
 		},
 		pops = 0,
 		sr = 44100,
 		start = {
-			dur = 1.06667,
-			fadeAt = 0.616667,
+			dur = 3.46667,
+			fadeAt = 3.01667,
 		},
 		startEmo = {
-			dur = 1.06667,
-			fadeAt = 0.616667,
+			dur = 3.46667,
+			fadeAt = 3.01667,
 		},
 		stop = {
 			dur = 1.6,
@@ -328,7 +329,7 @@ E.BAKED = {
 		bangs = 0,
 		cars = { "Tesla Model S" },
 		cyl = 1,
-		dir = "ev_16000_108e6f",
+		dir = "ev_16000_38782f",
 		engine = "Electric motor",
 		layers = { 540, 710, 940, 1250, 1660, 2200, 2930, 3880, 5150, 6840, 9080, 12050, 16000 },
 		limitedDb = 0,
@@ -361,19 +362,19 @@ E.BAKED = {
 			b9off = 0.110056,
 			b9on = 0.173979,
 			lim = 0.250979,
-			start = 0.0109177,
-			starte = 0.0109177,
+			start = 0.0118703,
+			starte = 0.0118703,
 			stop = 0.00788337,
 		},
 		pops = 0,
 		sr = 44100,
 		start = {
-			dur = 1.06667,
-			fadeAt = 0.616667,
+			dur = 3.46667,
+			fadeAt = 3.01667,
 		},
 		startEmo = {
-			dur = 1.06667,
-			fadeAt = 0.616667,
+			dur = 3.46667,
+			fadeAt = 3.01667,
 		},
 		stop = {
 			dur = 1.6,

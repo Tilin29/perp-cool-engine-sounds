@@ -79,7 +79,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `AudioEngine.BAKED_FAMILY[familyKey]` points lower redlines at it (unused top bands stay silent, cl_engine pitches the limiter loop by
   `config.redline / bank.limiter.rpm`). The emotion start flares to 0.55 x redline, so families also ship `starte_<flare>.wav`
   variants (`startEmoAt`); a tuned engine whose flare has no variant gets the closest one.
-- `sh_drivetrain.lua`: rpm/gear model shared by client and server. Start-up sequence (catch, flare, settle; electric = short power-up),
+- `sh_drivetrain.lua`: rpm/gear model shared by client and server. Start-up sequence (catch, flare, settle: drivable after 2.2 s, 3.6 s with the emotion flare; electric = `Drivetrain.EV_START_SECONDS` 3 s power-up, the user's: it was 0.6 s),
   arcade automatic driven by RPM thresholds (W/S/Space are on/off keys), torque converter, turbo boost and BOV event.
   Upshift point follows the car's acceleration (`upRpm` pulling hard .. `lazyUpRpm` creeping), so power-limited cars reach top gear.
   Past `upRpm` it changes up even inside the post-shift hold (close-geared hard pullers like the M5 E60 hit the in-gear limiter).
@@ -128,8 +128,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   the body, `NearestPoint`, smoothstep; not for whoever sits in it), full to `EV_HUM_FULL_MPH` 30 mph, gone by `EV_HUM_GONE_MPH` 35 (the user's; was 20 -> 30 km/h), pitch +0.8% per km/h (the UN rule). `RenderEVChime`: a chime as an
   EV powers up (the user's idea): `Synth.EV_CHIME_NOTES` { hz, at, level }, soft rising notes ringing into each other (E5 A5 C#6, 0.14 s
   apart, mellow detuned bells, ~1.6 s; was three equal 880 Hz dings 0.32 s apart, which the user heard as an error warning) (env bank `evchime`); cl_engine `playIgnitionChime` plays it
-  only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
-  real start (not one skipped on joining).
+  once the car is ready (phase run, `car.chimeAtReady`; it was at the key) only for whoever sits in the car (CreateSound on LocalPlayer, sound level 0 = 2D) at `AudioEngine.EV_CHIME_VOLUME` 0.3, on a
+  real start (not one skipped on joining). `RenderEVPowerUp` (env bank `evpowerup`, 3.4 s, played at the key at the car,
+  `AudioEngine.EV_POWERUP_VOLUME` 0.03, sound level `EV_POWERUP_SOUNDLEVEL` 65): pre-charge relay tick + capacitor whine (1.4-2.2 kHz),
+  main contactor clunk at 0.5 s, then the motor energising 165 -> 330 Hz into the warning hum's notes, fading as the hum comes in at ready
+  (its end ~4 dB over the standing hum; at 0.1 it was 15 dB over).
   dev/drive_demo applies EV_VOLUME and the warning sound like cl_engine. Exhaust chain (WebAudio biquads). Pops via `RenderBackfire`:
   a ~1 ms thump + 35-100 ms muffler scatter, body peak 140-190 Hz, low-passed (a 0.4 ms click with light saturation sounded like
   firecrackers); crackles are ragged 4-8 pulse "b-r-rap" runs. Levels (cl_soundbank): pops 4 dB under the loudest band, bangs 3 dB over;

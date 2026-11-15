@@ -1637,6 +1637,70 @@ function Synth.RenderEVHumLoop(sampleRate, yieldFn)
 end
 
 --[[
+	Electric car powering up, Drivetrain.EV_START_SECONDS (3 s) from the key to ready, played at
+	the car (cl_engine, near only). What a real EV does, made audible:
+	  0.06 s  the pre-charge relay ticks and the inverter's capacitors charge: a faint whine
+	          rising 1.4 -> 2.2 kHz
+	  0.50 s  the main contactor closes: a low clunk with a click on top, the whine stops
+	  0.6-2.6 s  the inverter energises the motor: a soft tone rising an octave, 165 -> 330 Hz,
+	          and swelling, with its octave above
+	  2.6-3 s  it holds on 330 Hz + 660 Hz, the warning sound's own notes (RenderEVHumLoop), and
+	          fades as the warning sound comes in at ready: the power-up turns into the hum
+]]
+Synth.EV_POWERUP_HZ = 330
+function Synth.RenderEVPowerUp(sampleRate, yieldFn)
+	local random = noiseGen(0xE7B0)
+	local duration = 3.4
+	local sampleCount = floor(sampleRate * duration)
+	local buffer = {}
+	local relayClick = biquad("bandpass", 3500, sampleRate, 2)
+	local contactorClick = biquad("bandpass", 2200, sampleRate, 1.2)
+	local lowpass = biquad("lowpass", 2500, sampleRate, 0)
+	local relayAt, contactorAt = 0.06, 0.5
+	local swellFrom, swellTo, fadeFrom = 0.6, 2.6, 2.9
+	local topHz = Synth.EV_POWERUP_HZ
+	local phase, whinePhase = 0, 0
+	for i = 1, sampleCount do
+		local time = (i - 1) / sampleRate
+		local sample = 0
+		-- pre-charge relay: a tick
+		local sinceRelay = time - relayAt
+		local relayNoise = runBiquad(relayClick, random())
+		if sinceRelay >= 0 and sinceRelay < 0.03 then
+			sample = sample + 0.8 * exp(-sinceRelay / 0.003) * relayNoise
+				+ 0.2 * exp(-sinceRelay / 0.012) * sin(TAU * 1800 * sinceRelay)
+		end
+		-- capacitors charging: a faint whine, rising, cut by the main contactor
+		if sinceRelay >= 0 and time < contactorAt then
+			local share = sinceRelay / (contactorAt - relayAt)
+			whinePhase = whinePhase + TAU * (1400 + 800 * share) / sampleRate
+			sample = sample + 0.04 * min(1, sinceRelay / 0.05) * min(1, (contactorAt - time) / 0.01) * sin(whinePhase)
+		end
+		-- main contactor: clunk + click
+		local sinceContactor = time - contactorAt
+		local contactorNoise = runBiquad(contactorClick, random())
+		if sinceContactor >= 0 and sinceContactor < 0.12 then
+			sample = sample + 1.8 * min(1, sinceContactor / 0.002) * exp(-sinceContactor / 0.025) * sin(TAU * 140 * sinceContactor)
+				+ 1.2 * exp(-sinceContactor / 0.004) * contactorNoise
+		end
+		-- the motor energising: rising an octave and swelling, then holding on the hum's notes
+		if time >= swellFrom then
+			local share = min(1, (time - swellFrom) / (swellTo - swellFrom))
+			local ease = share * share * (3 - 2 * share)
+			local frequency = topHz * 0.5 * 2 ^ ease
+			phase = phase + TAU * frequency / sampleRate
+			local level = 0.08 + 0.92 * ease
+			if time > fadeFrom then level = level * 0.5 * (1 + cos(pi * min(1, (time - fadeFrom) / (duration - fadeFrom)))) end
+			local attack = min(1, (time - swellFrom) / 0.15)
+			sample = sample + attack * level * (0.42 * sin(phase) + 0.14 * ease * sin(2 * phase + 0.3))
+		end
+		buffer[i] = runBiquad(lowpass, sample)
+		if yieldFn and i % 8192 == 0 then yieldFn() end
+	end
+	return buffer, duration
+end
+
+--[[
 	Electric car's power-up chime: a soft "welcome" phrase, notes rising and ringing into one
 	another (Synth.EV_CHIME_NOTES { hz, at seconds, level }). It was three equal 880 Hz dings 0.32 s
 	apart, which the user heard as an error warning: equal repeats of one pitch are what alerts
