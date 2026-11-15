@@ -67,7 +67,8 @@ Don't copy these files. They hold the extras:
 | `sv_cruise.lua` | speed limiter (middle mouse) |
 | `cl_menu.lua` | tuning menu |
 | `cl_hud.lua` | rpm/speed HUD |
-| `lua/autorun/sl65amg_rtu_vehicle.lua`, `models/`, `materials/`, `scripts/` | this addon's test police car |
+| `scripts/` | the test script cars fall back on off the PERP server |
+| `addons/sl65amg_rtu/` | the example police car: a separate addon, not part of the port |
 
 Loader (`lua/autorun/audio_engine_init.lua`):
 
@@ -96,8 +97,7 @@ end
 To put the files inside PERP's gamemode instead, keep the same load order and change `base` to
 the folder you put them in.
 
-`sh_config.lua` also registers this addon's SL65 test car (`models/plpd/sl65amg_rtu.mdl`).
-Without that model on the server it never matches anything, so it is safe to leave in.
+The example SL65 RTU police car is a separate addon (`addons/sl65amg_rtu/`): nothing in the files above refers to it.
 
 ## 3. Server file
 

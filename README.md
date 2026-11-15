@@ -1,11 +1,11 @@
 # Audio Engine
 
-Procedurally generated engine sound, rpm/gear model and speed / rpm HUD for Garry's Mod cars: all 165 PERPHeads cars, plus an example police car (Mercedes SL65 AMG, RTU liveries) with its own model.
+Procedurally generated engine sound, rpm/gear model and speed / rpm HUD for Garry's Mod cars: all 165 PERPHeads cars, plus an example police car (Mercedes SL65 AMG, RTU liveries) with its own model, in a separate addon (`addons/sl65amg_rtu/`, temporary: not part of the final addon).
 
 **Requires** the TDM Cars content (shared materials and wheels), same as the model.
 
 ## Install
-Drop the `sl65amg_rtu` folder into `garrysmod/addons/`. Spawn the example car from **Vehicles → Police**:
+Drop this folder into `garrysmod/addons/`. For the example car, also copy `addons/sl65amg_rtu/` into `garrysmod/addons/` (it is its own addon: GMod doesn't load addons inside an addon). Spawn it from **Vehicles → Police**:
 - SL65 AMG (Police): skin 0
 - SL65 AMG (RTU Blue): skin 1
 - SL65 AMG (RTU Yellow): skin 2
@@ -104,7 +104,7 @@ The HUD tachometer and the model's own dashboard tach needle both follow the rev
 
 Also remove the engine `Gear`/`State` sounds from that script, or they play on top of the generated engine.
 
-`scripts/vehicles/plpd/sl65amg_rtu.txt` is tuned to be calm on its own:
+`addons/sl65amg_rtu/scripts/vehicles/plpd/sl65amg_rtu.txt` is tuned to be calm on its own:
 - lower centre of mass and a cap on body rotation speed
 - near-neutral anti-roll balance, so it turns in properly
 - less rear brake bias and slight front drive
@@ -170,6 +170,6 @@ Commands:
   - `shift`: the gearbox shift points
   - `wheelRadius`, `soundLevel` and `volume`
   - `stability`: the assist (`false` turns it off)
-- `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling (power, grip, suspension, top speed).
+- `addons/sl65amg_rtu/scripts/vehicles/plpd/sl65amg_rtu.txt`: the example car's handling (power, grip, suspension, top speed); its engine settings are in `addons/sl65amg_rtu/lua/sl65amg_rtu/sh_car.lua`.
 
 To give another jeep-rigged car this engine, call `AUDIO_ENGINE.RegisterCar("models/....mdl", { ... })` in `sh_config.lua`.

@@ -1,6 +1,6 @@
 AUDIO_ENGINE = {}
 local A = "/home/claude/addon/sl65amg_rtu/lua/audio_engine/"
-dofile(A.."sh_config.lua"); dofile(A.."sh_presets.lua")
+dofile(A.."sh_config.lua"); dofile(A.."../../addons/sl65amg_rtu/lua/sl65amg_rtu/sh_car.lua"); dofile(A.."sh_presets.lua")
 local E = AUDIO_ENGINE
 local car = E.Cars["models/plpd/sl65amg_rtu.mdl"]
 for _, p in ipairs(E.ENGINE_PRESETS) do

@@ -55,7 +55,6 @@ CAR_HORN.CONFIG = {
 	models = {
 		["models/forest/f450_ambo.mdl"] = "american",
 		["models/perp2.5/swat_van.mdl"] = "airhorn",
-		["models/plpd/sl65amg_rtu.mdl"] = "trumpet",
 		["models/sickness/meatwagon.mdl"] = "american",
 		["models/sickness/stretchdr_tdmcars.mdl"] = "american",
 		["models/sickness/truckfire.mdl"] = "airhorn",

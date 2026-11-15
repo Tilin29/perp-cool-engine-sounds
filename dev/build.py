@@ -11,6 +11,8 @@ host = open("host.js").read()
 files = [("gmod_shim.lua", open("gmod_shim.lua").read())]
 for n in ["sh_config", "sh_presets", "sh_drivetrain", "cl_synth", "cl_soundbank", "cl_engine"]:
     files.append((n + ".lua", open(A + n + ".lua").read()))
+# the example car (a separate addon now): its settings right after sh_config
+files.insert(2, ("sh_car.lua", open(A + "../../addons/sl65amg_rtu/lua/sl65amg_rtu/sh_car.lua").read()))
 files.append(("bridge.lua", open("bridge.lua").read()))
 blocks = []
 for name, src in files:

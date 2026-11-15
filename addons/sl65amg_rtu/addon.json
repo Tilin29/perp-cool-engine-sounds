@@ -1,0 +1,6 @@
+{
+	"title": "SL65 AMG RTU (Audio Engine test car)",
+	"type": "vehicle",
+	"tags": [ "roleplay", "realism" ],
+	"ignore": [ "*.md" ]
+}

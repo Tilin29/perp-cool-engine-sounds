@@ -32,7 +32,7 @@ function GetConVar() return { GetInt = function() return 1 end } end
 function IsValid(x) return x ~= nil end
 function math.Clamp(x,a,b) return math.min(b, math.max(a, x)) end
 AUDIO_ENGINE = {}
-dofile(A.."sh_config.lua"); dofile(A.."sh_presets.lua")
+dofile(A.."sh_config.lua"); dofile(A.."../../addons/sl65amg_rtu/lua/sl65amg_rtu/sh_car.lua"); dofile(A.."sh_presets.lua")
 local veh = { nw = {} }
 function veh:GetModel() return "models/plpd/sl65amg_rtu.mdl" end
 function veh:GetNW2String(k, d) return self.nw[k] or d end

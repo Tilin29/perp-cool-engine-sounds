@@ -9,7 +9,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu, cl_police. Server: sv_engine, sv_stability, sv_cruise, sv_police, sv_seats.
   Then the debug module (`lua/audio_engine_debug/`, see "Debug module" below), if that folder exists: deleting it is all it takes to ship without it.
-- `sh_config.lua`: `RegisterCar(model, cfg)`, `GetCarConfig` (keeps each model path's lower case: called per car per tick/frame); the SL65 entry (shift points, stability, wheel radius). `audio_engine_editor`
+- `sh_config.lua`: `RegisterCar(model, cfg)`, `GetCarConfig` (keeps each model path's lower case: called per car per tick/frame). `audio_engine_editor`
   (shared, default 0, `AudioEngine.EditorEnabled()`): the Rev Bench menu (cl_menu: command, `!engine`, context menu; sv_engine rejects `audio_engine_set`) only when 1.
   cl_menu has no gear card any more (its ratio editor never reached the car; it forces `fit = 1`).
 - `sh_presets.lua`: layouts, gearbox presets, 38 engine presets, profile Sanitize/Encode/Decode
@@ -223,7 +223,16 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `vehicle.audioScriptParams` = params after PERP physics, before the anti-spin setup; `AudioEngine.RebaseHandling(veh[, params])` rebuilds `vehicle.audioBase`
   from it (anti-spin only while `audio_engine_handling` is on; off clears the lock-at-speed state), refreshes NW2 `audio_vmax`/`audio_pwr`
   (`AudioEngine.RefreshCarStats`, sv_engine) and re-applies performance. The `audio_engine_handling` change callback runs it on every car: it applies at once.
-- `scripts/vehicles/plpd/sl65amg_rtu.txt`: handling. The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
+- The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
+
+## SL65 AMG RTU (separate addon, temporary)
+`addons/sl65amg_rtu/`: the original example police car, its own GMod addon (copied into garrysmod/addons/ next to this one; GMod doesn't load
+addons nested in an addon), not part of the final addon: delete the folder to drop it. Holds the model/materials (`models/plpd`, `materials/plpd`),
+its handling `scripts/vehicles/plpd/sl65amg_rtu.txt`, the spawn entries (Vehicles > Police, skins 0-2) and `lua/sl65amg_rtu/sh_car.lua`: its
+`AudioEngine.RegisterCar("models/plpd/sl65amg_rtu.mdl", ...)` (shift points, stability, wheel radius; plain Lua), included by its autorun file
+once `AUDIO_ENGINE.RegisterCar` exists (autorun goes in name order, else at Initialize), which also gives it the trumpet horn in `CAR_HORN.CONFIG.models`.
+The core never names it. The dev harnesses still use it as their test car: they dofile sh_car.lua after sh_config (dev/build.py inlines it too).
+`dev/baker/check_syntax.js` also compiles `addons/*/lua`.
 
 ## Police siren (separate module, may not stay)
 Own loader `lua/autorun/police_siren_init.lua`, files in `lua/police_siren/`, studio in `dev/siren_studio/`: delete those three

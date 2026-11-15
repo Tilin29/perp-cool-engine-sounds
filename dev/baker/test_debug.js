@@ -67,7 +67,7 @@ const LUA = path.join(ADDON, 'lua')
     local function near(a, b, tol) return math.abs(a - b) <= tol end
 
     ---------------------------------------------------------------- KeyValues
-    for _, p in ipairs({ "scripts/vehicles/audio_engine/test_car.txt", "scripts/vehicles/plpd/sl65amg_rtu.txt" }) do
+    for _, p in ipairs({ "scripts/vehicles/audio_engine/test_car.txt", "addons/sl65amg_rtu/scripts/vehicles/plpd/sl65amg_rtu.txt" }) do
       local txt = __read(p)
       local es = KV.Parse(txt)
       check(#es > 40, p .. ": parsed " .. #es .. " entries")

@@ -95,7 +95,7 @@ function ply:KeyDown(k) return self.keys[k] or false end
 bit = require("bit")
 
 AUDIO_ENGINE = {}
-dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "audio_engine/sh_presets.lua"); dofile(A .. "audio_engine/sh_drivetrain.lua")
+dofile(A .. "audio_engine/sh_config.lua"); dofile(A .. "../addons/sl65amg_rtu/lua/sl65amg_rtu/sh_car.lua"); dofile(A .. "audio_engine/sh_presets.lua"); dofile(A .. "audio_engine/sh_drivetrain.lua")
 dofile(A .. "audio_engine/cl_synth.lua"); dofile(A .. "audio_engine/cl_soundbank.lua")
 util = util or {}; util.TraceLine = function() return { Hit = false, Fraction = 1 } end
 input = { IsKeyDown = function() return false end }

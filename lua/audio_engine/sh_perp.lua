@@ -111,7 +111,7 @@ local function collectSoundNames()
 			end
 		end
 	end
-	-- registered cars whose script lives somewhere else (e.g. the example police car in scripts/vehicles/plpd/)
+	-- registered cars whose script lives somewhere else (a carConfig.script outside the PERP packs)
 	for _, carConfig in pairs(AudioEngine.Cars) do
 		if carConfig.script then collectStateSounds(carConfig.script, ourSounds, skidSounds) end
 	end
