@@ -445,6 +445,9 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   Engine ideas panel: `dev/tone_studio/candidates.json` lists sounds to audition before they reach sh_carlist (each is an ordinary edit of its
   example car; `[]` hides the panel). Nothing in it reaches the game.
 
+## Git
+- Branches are named `cc/<feature>` (the user's rule), e.g. `cc/tier-gearing`: never the session's generated name.
+
 ## Naming (the code is reviewed by people: keep names spelled out)
 - Module aliases: `local AudioEngine = AUDIO_ENGINE`, `Drivetrain`, `EngineDebug` (AUDIO_ENGINE.Debug), `KeyValues` (AUDIO_ENGINE.KV),
   `PoliceSiren` (POLICE_SIREN). Locals and fields are full words: `config` (was cfg), `engineState` (the drivetrain state, car.engineState),
