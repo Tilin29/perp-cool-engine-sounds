@@ -91,8 +91,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   (`topRpm` at `config.topSpeed`); sets `config.gears` as overall ratios, `final = 1`, `config.shiftPlan` { up = rpm[g], down = m/s[g] }. Each gear at least
   `AudioEngine.GEAR_MIN_STEP` 1.1 taller. Kickdown/corner landings also stay under the target gear's up rpm.
   Fitted gearing comes from the top speed only, deliberately not realistic (the user's choice; a time-based, realistic spacing
-  with up to 7 gears was tried and reverted) (`AudioEngine.FitGearEnds`, `AudioEngine.GEAR_FIT`): 1 gear per `kmhPerGear` 40 km/h, steps at most
-  `stepMax` 2.3x, 1st ends at `firstShare` 0.28 of top speed (at least `firstMin` 25 km/h), gear ends evenly spaced in speed^`spread` 2.2;
+  with up to 7 gears was tried and reverted) (`AudioEngine.FitGearEnds`, `AudioEngine.GEAR_FIT`): 1 gear per `kmhPerGear` 20 km/h, steps at most
+  `stepMax` 2.3x, 1st ends at `firstShare` 0.28 of top speed (at least `firstMin` 25 km/h), gear ends evenly spaced in speed^`spread` 3
+  (was 40 / 2.2: most PERP cars, under ~140 km/h, got 3 gears and sat in the last for about half a flat-out pull, the user's complaint;
+  now ~0.2 of it, median, in the drive demo's acceleration model);
   2 to `maxCount` 5 gears (or the box's count if lower). The top speed is the tier script's MaxSpeed (PERP spawns base / upgrade_1 / upgrade_2,
   each with its own, so each tier has its own gearing; NW2 `audio_vmax`); used/ and spiked/ cars keep the gearing of the tier they came from
   (`config.gearTopSpeed`, NW2 `audio_gear_vmax`, sv_engine `AudioEngine.GearingTopSpeed`): used = the base script's MaxSpeed (read from the file,
