@@ -30,6 +30,9 @@ Drivetrain.REV = { rise = 500, fall = 500 }
 -- an upshift under load: the torque cut (s, sound throttle near 0) and how long the drive takes to
 -- take up again after it (s). Real gear changes have that articulation; a smooth ease sounded synthetic
 Drivetrain.UPSHIFT_CUT, Drivetrain.UPSHIFT_TAKE_UP = 0.09, 0.12
+-- how fast the revs fall to the new gear's on an upshift (follow rate, 1/s): 7 glided down over ~0.32 s,
+-- 14 (~0.15 s) dropped so fast the pitch sweep sounded robotic (the user); 8 is ~0.28 s
+Drivetrain.UPSHIFT_REV_RATE = 8
 
 -- Arcade gearbox shift points, as fractions of redline (cars can override with config.shift)
 Drivetrain.SHIFT = {
@@ -408,9 +411,8 @@ function Drivetrain.Step(engineState, config, deltaTime, controls)
 		-- top gear and faster than the gearing expects: sit just under redline, don't bounce
 		if engineState.gear > 0 and engineState.gear == #config.gears then targetRpm = min(targetRpm, config.redline * 0.985) end
 		local followRate
-		-- downshifts snap up to the new revs; upshifts drop in ~0.15 s (at 7 the revs glided down over
-		-- a third of a second: next to real recordings a synth's portamento, not a gear change)
-		if engineState.shiftTimer > 0 then followRate = engineState.shiftDirection == -1 and (engineState.softShift and 8 or 16) or 14
+		-- downshifts snap up to the new revs; upshifts fall at UPSHIFT_REV_RATE
+		if engineState.shiftTimer > 0 then followRate = engineState.shiftDirection == -1 and (engineState.softShift and 8 or 16) or Drivetrain.UPSHIFT_REV_RATE
 		elseif targetRpm > engineState.rpm then followRate = 5 + 5 * engineThrottle
 		else followRate = 6 end
 		engineState.rpm = engineState.rpm + (targetRpm - engineState.rpm) * min(1, deltaTime * followRate)

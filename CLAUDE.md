@@ -109,7 +109,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Downshifts with W held (kick/sag/corner) judge the wheels' revs, not `st.rpm`: converter slip keeps that over ~0.47 x redline
   with W held, so a car slowed by a turn stuck in its gear. No lazy upshift while slowing (`st.accel > 0`), and slowing isn't a stall.
   Upshifts under load: a torque cut `Drivetrain.UPSHIFT_CUT` 0.09 s (sound throttle 0.05) then `UPSHIFT_TAKE_UP` 0.12 s back,
-  the revs dropping at rate 14 (~0.15 s; was 7 with an ease from 0.3 over 0.32 s: next to recordings, a synth glide); cl_engine
+  the revs dropping at `Drivetrain.UPSHIFT_REV_RATE` 8 (~0.28 s; 14, ~0.15 s, swept the pitch down so fast the user heard it as
+  robotic; was 7 with an ease from 0.3 over 0.32 s); cl_engine
   follows the throttle at 30/s through it (12 otherwise), dev/drive_demo too.
   Braking downshifts are low and gentle (`brakeRpm` 0.45, `brakeLand` 0.70, `softShift`: blip 0.25, rise rate 8): at 0.80/0.96 with
   a full blip hard braking ran a sawtooth near redline that sounded cartoonish. cl_engine feeds the model the car's full speed
