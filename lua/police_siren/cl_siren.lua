@@ -224,6 +224,24 @@ local function distanceGain(vehicle)
 	return (falloff.volume or 0.4) ^ (math.log(meters / full) / math.log(at / full))
 end
 
+--[[
+	The air (CONFIG.air): wind and turbulence make a distant siren waver in loudness; a synthetic one
+	held dead steady. Two slow sines at unrelated rates and a random start per siren, `depth` dB at
+	`at` m, growing with the distance (none up close, at most twice that)
+]]
+local AIR_SECOND_RATE = 1.7   -- the second sine's rate, x the first's (unrelated: no repeating pattern)
+
+local function airGain(vehicle, state, now)
+	local air = PoliceSiren.CONFIG.air
+	if not air or (air.depth or 0) <= 0 then return 1 end
+	local meters = listenerPosition:Distance(vehicle:GetPos()) / UNITS_PER_METER
+	local reach = math.min(meters / math.max(air.at or 150, 1), 2)
+	local angle = 2 * math.pi * (air.rate or 0.5) * now
+	local waver = 0.6 * math.sin(angle + state.airPhase) + 0.4 * math.sin(angle * AIR_SECOND_RATE + state.airPhase2)
+
+	return 10 ^ (air.depth * reach * waver / 20)
+end
+
 local function startTone(vehicle, toneId, inside, fadeTime)
 	local config = PoliceSiren.CONFIG
 	local name = inside and soundNames[toneId].inside or soundNames[toneId].out
@@ -243,6 +261,7 @@ local function startTone(vehicle, toneId, inside, fadeTime)
 
 	return {
 		toneId = toneId, name = name, vehicle = vehicle, inside = inside, patch = patch, baseVolume = baseVolume,
+		airPhase = math.random() * 2 * math.pi, airPhase2 = math.random() * 2 * math.pi,
 		volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
 		pitch = BASE_PITCH, dopplerRatio = 1, velocityTrack = {}, nextReviveCheck = RealTime() + REVIVE_EVERY,
 	}
@@ -266,7 +285,7 @@ local function update(vehicle)
 	local listenerInside = wantedTone ~= nil and insideOf(vehicle)
 	if state and state.toneId == wantedTone and state.inside == listenerInside then
 		-- (a volume change in the frame the sound started doesn't take: the fade-in goes a frame later)
-		local volume = state.baseVolume * (state.inside and 1 or distanceGain(vehicle))
+		local volume = state.baseVolume * (state.inside and 1 or distanceGain(vehicle) * airGain(vehicle, state, RealTime()))
 		if state.fadeInVolume then
 			state.patch:ChangeVolume(volume, state.fadeTime)
 			state.fadeInVolume = nil

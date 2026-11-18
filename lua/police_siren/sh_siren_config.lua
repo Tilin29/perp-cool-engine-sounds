@@ -7,6 +7,11 @@
 	soundLevels  the same per car model, for cars whose engine is louder (lower-case model path)
 	distance     the siren's own fade with distance, on top of the game's: full volume up to `full` m, falling
 	             evenly to `volume` at `at` m and on (the game's alone hardly told how far a siren was)
+	street       the street around the siren, built into its sound: `level` of the reflections (the asphalt's
+	             bounce, then the buildings' echoes, duller and later; 0 = dry) and the street's `size`
+	             (x their delays: 1 = a town street, 2 = wide open, 0.5 = a narrow lane)
+	air          wind and air turbulence: a slow random waver in a distant siren's loudness, `depth` dB at `at` m
+	             (none up close, growing with distance, at most twice that), about `rate` times a second
 	doppler      Doppler pitch shift of passing cars: 0 = off, 1 = real, 0.5 = half (capped at +4 / -5 semitones).
 	             Each player scales it with audio_engine_police_doppler (1 = this)
 	attack       seconds a tone takes to fade in when it starts
@@ -48,6 +53,8 @@ POLICE_SIREN.CONFIG = {
 		["models/tdmcars/sl65amg.mdl"] = 92,
 	},
 	distance = { full = 20, at = 150, volume = 0.4 },
+	street = { level = 0.35, size = 1 },
+	air = { depth = 2, at = 150, rate = 0.5 },
 	doppler = 0.375,
 	attack = 0.05,
 	release = 0.08,

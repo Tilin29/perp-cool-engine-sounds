@@ -9,7 +9,8 @@
 	oscillator, wobble and the filters are made to line up at its ends:
 	  * frequencies are scaled (by well under a cent) so each voice ends on a whole cycle
 	  * vibrato and tremolo get a whole number of cycles per loop
-	  * the loop is rendered twice and the second pass kept, so the filters are already settled
+	  * the loop is rendered over and over and the last pass kept, so the filters are settled and the
+	    street's echoes (config.street) carry over from the pass before, the way they wrap in the loop
 	The inside-the-car version adds a steeper lowpass (the car's body muffling it).
 ]]
 POLICE_SIREN = POLICE_SIREN or {}
@@ -168,7 +169,21 @@ local function wholeRate(rate, loopSeconds)
 end
 
 --[[
-	Renders tone `tone` with the settings `cfg` (POLICE_SIREN.CONFIG's pitch/sampleRate/cabin).
+	The street (config.street): a real siren never reaches you dry. The asphalt under the car bounces
+	it back a few milliseconds late, the buildings along the road tens of milliseconds late, softer
+	and duller (walls soak up the highs). On a gliding tone each echo comes back at the pitch it had a
+	moment ago and beats against the direct sound: the shimmer that puts a wail out on a street.
+	{ delay (s, x street.size), gain } of each reflection; the walls' dulling is a lowpass at STREET_DULL Hz
+]]
+local STREET_TAPS = {
+	{ 0.0035, 0.35 },
+	{ 0.031, 0.32 }, { 0.047, -0.26 }, { 0.068, 0.22 }, { 0.093, -0.18 },
+	{ 0.127, 0.15 }, { 0.168, -0.12 }, { 0.221, 0.09 },
+}
+local STREET_DULL = 2500
+
+--[[
+	Renders tone `tone` with the settings `cfg` (POLICE_SIREN.CONFIG's pitch/sampleRate/cabin/street).
 	Returns the samples (1-based, peak PEAK), the sample rate and the loop length in samples.
 	`yield`, if given, is called every few thousand samples (the game renders in a coroutine).
 	`inside`: the version heard inside the car, muffled at config.cabin.muffle Hz.
@@ -217,9 +232,27 @@ function Synth.Render(tone, config, yield, inside)
 	local muffleLowpassA = muffleHz and biquad("lp", muffleHz, 0.707, 0, sampleRate)
 	local muffleLowpassB = muffleHz and biquad("lp", muffleHz, 0.707, 0, sampleRate)
 
+	-- the street's reflections, read from a ring of the speaker's output
+	local street = config.street or {}
+	local streetLevel = max(street.level or 0, 0)
+	local streetTaps, history, historySize, longestDelay = {}, {}, 1, 0
+	if streetLevel > 0 then
+		for _, tap in ipairs(STREET_TAPS) do
+			local delay = max(1, round(tap[1] * max(street.size or 1, 0.1) * sampleRate))
+			streetTaps[#streetTaps + 1] = { delay = delay, gain = tap[2] * streetLevel }
+			historySize = max(historySize, delay + 1)
+		end
+		longestDelay = historySize - 1
+		for i = 0, historySize - 1 do history[i] = 0 end
+	end
+	local streetDull = streetLevel > 0 and biquad("lp", STREET_DULL, 0.707, 0, sampleRate)
+
+	-- passes over the loop until the filters have settled and the longest echo has come round: the last is kept
+	local passCount = 2 + math.ceil(longestDelay / sampleCount)
 	local out, outPeak = {}, 0
 	local mainPhase, secondPhase = 0, 0
-	for pass = 1, 2 do
+	local written = 0
+	for pass = 1, passCount do
 		for i = 0, sampleCount - 1 do
 			mainPhase = (mainPhase + mainFrequencies[i] / sampleRate) % 1
 			local tablePosition = mainPhase * TABLE_SIZE
@@ -237,8 +270,19 @@ function Synth.Render(tone, config, yield, inside)
 			sample = runBiquad(highpass, sample)
 			if drive > 0 then sample = tanh(sample * drive) * driveNorm end
 			sample = runBiquad(lowpass, runBiquad(resonance, sample))
+			if streetDull then
+				local slot = written % historySize
+				history[slot] = sample
+				local reflected = 0
+				for t = 1, #streetTaps do
+					local tap = streetTaps[t]
+					reflected = reflected + tap.gain * history[(slot - tap.delay) % historySize]
+				end
+				sample = sample + runBiquad(streetDull, reflected)
+				written = written + 1
+			end
 			if muffleLowpassA then sample = runBiquad(muffleLowpassB, runBiquad(muffleLowpassA, sample)) end
-			if pass == 2 then
+			if pass == passCount then
 				out[i + 1] = sample
 				outPeak = max(outPeak, abs(sample))
 			end
