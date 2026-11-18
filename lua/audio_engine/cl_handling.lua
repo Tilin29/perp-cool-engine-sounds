@@ -269,12 +269,50 @@ local function widenBounds(entity, pad)
 	entity:SetRenderBounds(bounds.mins - padding, bounds.maxs + padding)
 end
 
+--[[
+	The render origin moves an entity's bones, so its attachments too, and the game builds the
+	driver's view from the car's eye attachment (and parents children to it). Left on between
+	frames, the view the game handed to CalcView was already moved by last frame's offset and
+	calcView moved it again: the camera ran ~2x the lead ahead of the car (out of sight, shaking
+	with every change of the lead), and attached children were moved twice. So the poses are only
+	worked out at CalcView (everything at Source's pose then), put on once drawing starts
+	(PreDrawOpaqueRenderables) and taken off when the frame is done (PostRender).
+]]
+local placements = {}     -- entity -> { position, angles } to draw it at this frame
+local placementsOn = false
+
 local function place(entity, position, angles, frame, pad)
-	entity:SetRenderOrigin(position)
-	setRenderAngles(entity, angles)
-	entity:InvalidateBoneCache()
+	local placement = placements[entity]
+	if not placement then placement = {}; placements[entity] = placement end
+	placement.position, placement.angles = position, angles
 	widenBounds(entity, pad)
 	overridden[entity] = frame
+end
+
+local function putPlacementsOn()
+	if placementsOn then return end
+	placementsOn = true
+	for entity, placement in pairs(placements) do
+		if IsValid(entity) then
+			entity:SetRenderOrigin(placement.position)
+			setRenderAngles(entity, placement.angles)
+			entity:InvalidateBoneCache()
+		end
+	end
+end
+
+local function takePlacementsOff()
+	if placementsOn then
+		for entity in pairs(placements) do
+			if IsValid(entity) then
+				entity:SetRenderOrigin(nil)
+				setRenderAngles(entity, nil)
+				entity:InvalidateBoneCache()
+			end
+		end
+	end
+	placementsOn = false
+	table.Empty(placements)
 end
 
 local function childrenOf(vehicle, now)
@@ -316,6 +354,7 @@ end
 local function clearStale(frame)
 	for entity, placedFrame in pairs(overridden) do
 		if placedFrame ~= frame then
+			placements[entity] = nil
 			if IsValid(entity) then
 				entity:SetRenderOrigin(nil)
 				setRenderAngles(entity, nil)
@@ -326,6 +365,13 @@ local function clearStale(frame)
 			overridden[entity], originalBounds[entity] = nil, nil
 		end
 	end
+end
+
+-- the velocity (inches/s, world) of the car you drive where it's predicted, or nil without a
+-- recent prediction (cl_engine's revs and gears: Source's position shows the speed ~a ping late)
+function AudioEngine.PredictedVelocity(vehicle)
+	if vehicle ~= own.vehicle or not own.velocity or RealTime() - (own.velocityAt or 0) > 0.1 then return nil end
+	return own.velocity
 end
 
 -- where an entity is drawn (other code drawing at a car: cl_police's lights). Its own pose when
@@ -455,6 +501,8 @@ local function updateFrame()
 	local frame = FrameNumber()
 	if updatedFrame == frame then return end
 	updatedFrame = frame
+	-- (everything at Source's pose while the new poses are worked out)
+	takePlacementsOff()
 	local realNow = RealTime()
 	local frameTime = clamp(realNow - lastRealTime, 0, 0.1)
 	lastRealTime = realNow
@@ -504,6 +552,9 @@ local function updateFrame()
 			stats.clamped = stats.clamped + 1
 		end
 		own.displayPosition, own.displayAngles = toPosition, Handling.AnglesOf(display)
+		own.velocity = own.velocity or Vector()
+		own.velocity:SetUnpacked(predicted.vx, predicted.vy, predicted.vz)
+		own.velocityAt = realNow
 		displace(vehicle, toPosition, own.displayAngles, frame, realNow)
 		updateLead(vehicle, base.time + (count + fraction) * deltaTime, realNow, frameTime)
 	else
@@ -555,17 +606,25 @@ timer.Create("audio_engine_predict_wrap", 2, 0, wrapHookCall)
 
 -- before anything is drawn: if the camera didn't run through us this frame, nothing may be moved
 -- (the car would leave the camera behind)
+-- (another view drawn before the main one, a mirror or camera, finds nothing moved yet: it's
+-- drawn at Source's poses, and the main view's CalcView still works this frame out)
 hook.Add("PreDrawOpaqueRenderables", "audio_engine_predict", function()
 	local frame = FrameNumber()
 	if updatedFrame ~= frame then
-		updatedFrame = frame
 		table.Empty(displaced)
+		takePlacementsOff()
 		clearStale(frame)
+		return
 	elseif own.vehicle and displaced[own.vehicle] and cameraFrame ~= frame then
 		table.Empty(displaced)
+		takePlacementsOff()
 		clearStale(frame + 1)
+		return
 	end
+	putPlacementsOn()
 end)
+
+hook.Add("PostRender", "audio_engine_predict", takePlacementsOff)
 
 ---------------------------------------------------------------------------
 -- drivers and passengers sit in the car as drawn
@@ -589,7 +648,7 @@ hook.Add("PostPlayerDraw", "audio_engine_predict", function(player)
 end)
 
 hook.Add("EntityRemoved", "audio_engine_predict", function(entity)
-	displaced[entity], overridden[entity], childrenCache[entity], originalBounds[entity] = nil, nil, nil, nil
+	displaced[entity], overridden[entity], childrenCache[entity], originalBounds[entity], placements[entity] = nil, nil, nil, nil, nil
 	if own.vehicle == entity then own.vehicle, own.base = nil, nil end
 end)
 

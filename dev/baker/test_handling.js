@@ -140,7 +140,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   check(near(c.cz, -1), 'centre of mass as PERP has it')
   check(near(c.psa, 150), 'handbrake slide as the PERP script has it')
   check(near(c.deg, 38.5), 'parking lock from the PERP script')
-  check(c.dfast > 1 && c.dfast < 5, "Source's wheel angle at speed fitted to the model's turn (PERP has 11)")
+  check(c.dfast > 5 && c.dfast < 10, "Source's wheel angle at speed fitted to the model's turn at 35 mph (PERP has 11)")
 
   // 2. SL65 on its own PERP script (the server): untouched
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/sl65amg.txt", SL65))`)
@@ -148,7 +148,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   console.log('SL65 on its PERP script:  ', c)
   check(c.perp === 'false', 'on its own script: no PERP physics put on')
   check(near(c.hp, 260) && near(c.mph, 94) && near(c.bf, 0.5), 'its script untouched')
-  check(c.trf === 0 && c.dfast < 5, "but Source's steering fitted to the model")
+  check(c.trf === 0 && c.dfast > 5 && c.dfast < 10, "but Source's steering fitted to the model")
 
   // 3. spiked: nothing
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/spiked/sl65amg.txt", SL65))`)

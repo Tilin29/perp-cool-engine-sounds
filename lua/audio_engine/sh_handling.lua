@@ -180,7 +180,14 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	end
 	share = share * fade
 
-	local slipAngle = DEG * atan2(abs(sideSpeed), max(abs(forwardSpeed), 1))
+	-- the sideways speed of a car rolling on its wheels: its rear axle runs along the rear wheels,
+	-- so the middle of the car moves into the turn at half the wheelbase x the yaw rate. Holding it
+	-- at 0 (as this did) set the rear tyres a few degrees across their path (8 at 10 m/s): Source's
+	-- tyres pushed one way, the model the other, and the scrub took the grip the car drives on.
+	-- (The old sv_stability's turn-in help and side grip were switched off for the same bleed.)
+	-- Slip angles are measured from it: the rear axle's
+	local rollingSide = -0.5 * spec.wheelbase / INCH * body.yawRate * RAD
+	local slipAngle = DEG * atan2(abs(sideSpeed - rollingSide), max(abs(forwardSpeed), 1))
 	local handbrake = has(buttons, 16) and forwardSpeed > 0
 	if handbrake and speed > settings.driftMinSpeed then state.drift = true
 	elseif state.drift and (slipAngle < settings.driftHold or forwardSpeed <= 0) then state.drift = false end
@@ -202,8 +209,11 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	end
 
 	local yawChange = (target - body.yawRate) * min(1, follow * deltaTime) * share
-	local removed = min(abs(sideSpeed), grip * GRAVITY_INCHES * deltaTime) * share
-	return yawChange, -sign(sideSpeed) * removed, asked
+	-- (a handbrake slide or a drift lets the rear go: there the sideways speed goes towards 0)
+	local wantedSide = (handbrake or state.drift) and 0 or -0.5 * spec.wheelbase / INCH * (body.yawRate + yawChange) * RAD
+	local sideError = sideSpeed - wantedSide
+	local removed = min(abs(sideError), grip * GRAVITY_INCHES * deltaTime) * share
+	return yawChange, -sign(sideError) * removed, asked
 end
 
 -- the yaw and sideways changes onto a body (prediction; the server puts them on the physics object)

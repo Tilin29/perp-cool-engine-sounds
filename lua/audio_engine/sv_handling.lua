@@ -174,12 +174,16 @@ end
 	    so a car couldn't pull through a corner. Off: the throttle is the driver's.
 	  * Source turns the wheels to degreesFast (PERP: ~11) at speed, where the model's grip-capped turn
 	    is only a few degrees (25 m/s: ~3): the front tyres stood across the car's path and scrubbed
-	    it down like a brake. degreesFast becomes the model's angle at STEER_FIT_SPEED; Source's
-	    line from degreesSlow (at a standstill) to it at FastCarSpeed (35 mph on nearly every PERP
-	    script) then stays within ~2.5 degrees of the model's turn. degreesSlow (parking) is kept.
+	    it down like a brake. degreesFast becomes the model's angle at STEER_FIT_SPEED, FastCarSpeed
+	    (35 mph on nearly every PERP script), where Source's line from degreesSlow (at a standstill)
+	    reaches it and stays. Fitted at 25 m/s instead (~3 deg), Source held 3 deg from 35 mph on
+	    where the model asks ~7: its front tyres pushed the car straight, and with the throttle on
+	    (no cut any more) cars hardly turned at 35-55 mph. Fitted here, Source's wheels never point
+	    less than the model's turn; over FastCarSpeed a little more (7 vs 3 deg at 25 m/s, PERP 11).
+	    degreesSlow (parking) is kept.
 	Changes `params` (GetVehicleParams layout) and returns true if the model runs on this car.
 ]]
-local STEER_FIT_SPEED = 25   -- m/s
+local STEER_FIT_SPEED = 35 * 0.44704   -- m/s: FastCarSpeed
 
 local function steerForModel(vehicle, params)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)

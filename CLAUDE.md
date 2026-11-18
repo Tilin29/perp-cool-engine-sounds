@@ -171,7 +171,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     sirens and the game's own sounds went missing. Groups also start only at `GROUP_START_VOLUME` 0.01 (~-40 dB; was any trace) and stop
     once under `GROUP_STOP_VOLUME` 0.004 for `GROUP_STOP_HOLD` 0.1 s (was 0.002 for 0.3 s).
     Offline check: the scratchpad-style mock test (mocked client + real sh_config/sh_presets/sh_drivetrain/cl_engine) is not in the repo.
-  - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out;
+  - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out; the car you drive takes the prediction's velocity instead (`AudioEngine.PredictedVelocity`, cl_handling, when it ran in the last 0.1 s: Source's position is ~a ping + interp late, so were the revs and gear changes pulling away / braking);
     the gearbox's speed (`car.driveSpeed`) moves at most `SPEED_SLEW` 40 m/s2. Dividing by the capped frame dt made stutters read as several times the real speed
   - Doppler (`audio_engine_doppler`: 1 = default, real, 4 = maximum, four times real. The scale was 0.25 = real until the user asked for 1:
     clients with the old `audio_engine_doppler_moved` cookie get their saved value x4 once (`audio_engine_doppler_real1` cookie)), road/wind, turbo/BOV from the env bank, pops logic
@@ -218,7 +218,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 4.5 / `steerReturn` 6 / `steerReverse` 9 per s), the yaw rate
     follows (`yawFollow` 8/s) a bicycle-model target (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 30 m/s, wheelbase from the
     attachments, `AudioEngine.CarGeometry`, moved here from sv_stability) capped at `grip` x g / speed, and sideways speed goes at up to
-    `grip` g; the speed along the nose is never touched (no launching, no scrub). Handbrake (Space, forward): grip x0.35, rotation x1.6,
+    `grip` g towards a rolling car's (the rear axle along its wheels: the middle moves into the turn at wheelbase/2 x yaw rate; slip
+    angles are the rear axle's): held at 0 it set the rear tyres across their path, Source's tyres fought the model and W-held turns bled
+    speed, as the old sv_stability's turn-in help / side grip did (both were off there for it); 0 in a handbrake slide or drift.
+    The speed along the nose is never touched (no launching). Handbrake (Space, forward): grip x0.35, rotation x1.6,
     follow 2/s; over `driftMinSpeed` 7 m/s starts a drift that lasts while the slip angle > `driftHold` 10 (grip x0.6, follow 2.5);
     past `spinAngle` 70 it's caught. Under `minSpeed` 1.5 m/s (+ `fadeSpeed` 3) Source alone. `AudioEngine.HANDLING` (debug-tunable, also
     sent to clients: Global2 `audio_dbg_handling`), per car `AudioEngine.CAR_HANDLING[name]` (sh_carlist: CAR_EMOTION grip 1.3, ECONOMY 1.05,
@@ -231,7 +234,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - `sv_handling.lua`: on spawn `AudioEngine.PrepareHandling` (before `captureBase`): PERP base physics from generated `sv_perp_physics.lua` onto
     cars on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), nothing else changed except, where
     the model runs (`steerForModel`, also in RebaseHandling; the drivemodel convar's change rebases every car), Source's steering: turnThrottleReduce 0
-    and degreesFast = the model's grip-capped turn at `STEER_FIT_SPEED` 25 m/s (`Handling.TurnAngle`, ~3 deg; PERP ~11): both braked cars in a turn
+    and degreesFast = the model's grip-capped turn at `STEER_FIT_SPEED` = FastCarSpeed 35 mph (`Handling.TurnAngle`, ~7.5 deg; PERP ~11; fitted at 25 m/s, ~3 deg, Source held 3 deg from 35 mph where the model asks ~7 and cars under throttle hardly turned): both braked cars in a turn
     (throttle cut up to 90%, front tyres scrubbing across the path). `audioScriptParams` stays the script's own; adds the
     PhysicsCollide callback (`audioImpactAt` on a velocity change over `impactSpeed` 120 in/s, not floor/ceiling normals: the model is off
     `impactHold` 0.35 s, eases back over `impactEase` 0.5). Tick: on driven cars, reads the physics, ground share from `GetWheelContactPoint`
@@ -245,7 +248,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     keeps each command's buttons by number (skip number 0, it happens); each frame, from the newest state, `Predict` through the commands
     after its number (at most `maxCommands` 32) + the fraction of the next; without matching numbers, one ping of the keys held. A new state's
     jump goes into the smoother (`smoothTime` 0.1 s, 0.04 during an impact, snap over 250 in). `clearShare`: a hull trace from the server's car
-    to the shown one at its leading end (world and props, not cars or players) stops it at a wall. Drawing: `SetRenderOrigin` + the Entity
+    to the shown one at its leading end (world and props, not cars or players) stops it at a wall. Drawing (poses worked out at CalcView with nothing moved, put on at PreDrawOpaqueRenderables, taken off at PostRender: the render origin moves bones and attachments, and left on, the game's eye-attachment view arrived already moved and the camera ran ~2x the lead ahead, out of sight and shaking, the first multiplayer test): `SetRenderOrigin` + the Entity
     `SetRenderAngles` (Player's is something else) + `InvalidateBoneCache` on the car and its children (pods, lightbar), render bounds widened
     by the offset (culling goes by Source's position: your car vanished otherwise), players in it via PrePlayerDraw; stale overrides cleared.
     `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it). The camera: `hook.Call` is wrapped for "CalcView" only
