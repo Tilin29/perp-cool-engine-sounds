@@ -413,7 +413,7 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
   A first try as a diaphragm horn at 156 Hz (from YouTube iG55bsscAHA) didn't sound right to the user; the user tunes it in the
   studio, which has a sweep section and presets; a sweep horn saved there before sweeps existed is replaced by the file's). Police cars: `CONFIG.scripts[script]` (horn per vehicle script, over `models`: the police cars share
   their civilian models; sv_horn reads the script on spawn, AudioPerpScript first, and sets NW2 `horn_id`, `CarHorn.ID_NW`,
-  which `HornOf` checks first) for the 9 marked police cars and the BearCat (also by model); the SL65 RTU addon picks it when
+  which `HornOf` checks first) for every police vehicle: the 9 marked cars, the Crown Victoria Unmarked, the BearCat, the SWAT Stockade and the Transit Prisoner Transport (own models also by model); the SL65 RTU addon picks it when
   it exists. Alt plays it; while the siren sounds Alt still plays the siren's honkTone (the user's pick).
   `models`: a horn per car model, picked by what the real car would have (the horn module doesn't read the engine's car list):
   trumpet = German/British luxury and classic GTs (Mercedes, BMW, Aston, Jaguar, Range Rover, Maserati, Lexus, Cayenne,
