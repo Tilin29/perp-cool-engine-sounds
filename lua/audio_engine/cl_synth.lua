@@ -283,7 +283,7 @@ function Synth.NewGen(sampleRate, config)
 		whineAmount = realism.whine * (character.whine or 0), whineOrder = whineOrder,
 		intakeEnvelope = 0, intakeDecay = 1, intakeState1 = 0, intakeState2 = 0, howlState1 = 0, howlState2 = 0,
 		valveEnvelope = 0, valveTickPending = false, valveState1 = 0, valveState2 = 0, valveHighState1 = 0, valveHighState2 = 0,
-		whinePhase = 0, bypassBuffer = nil,
+		whinePhase = 0, whineDrift1 = 0, whineDrift2 = 0, bypassBuffer = nil,
 		levellerMeanSquare = 0.002, levellerGain = 1, popEnvelope = 0,
 		electric = config.layout == "electric",
 		allowPops = true,  -- random overrun / limiter pops (off for loops; the game triggers them)
@@ -426,10 +426,30 @@ function Synth.EVRender(generator, out, offset, count)
 	generator.evRipple1, generator.evRipple2 = ripple1, ripple2
 end
 
+--[[
+	Measured against real recordings (dev: a simulated pull through the drive demo next to YouTube
+	clips of the same cars: M3 E92, S2000, Mustang GT, R8 V10). Real engines' sound above ~1 kHz is
+	harmonics locked to the revs, brightening towards redline; ours was noise there, a few pure tones
+	below it, and the low pipe resonance rang as a fixed-pitch drone under everything.
+	  PULSE_ATTACK_SHARE / MAX   the pulse's rise (share of its length, cap in s): steeper = more harmonics
+	  LOW_RESONANCE_DECAY        the low pipe mode's ring (s): 0.022 held a steady line at ~75-110 Hz
+	  NOISE_SHARE                the broadband noise riding on the pulses and the flow grit
+	  PULSE_SECONDS              an inline-4's exhaust pulse length (s), before the voice's width (high in the
+	                             revs it is capped at 42% of the gap between firings anyway; 0.004 changed
+	                             nothing there and thinned the idle)
+]]
+local PULSE_ATTACK_SHARE, PULSE_ATTACK_MAX, LOW_RESONANCE_DECAY, NOISE_SHARE, PULSE_SECONDS = 0.12, 0.0009, 0.010, 0.5, 0.007
+Synth.TONE_TUNING = function(attackShare, attackMax, lowDecay, noiseShare, pulseSeconds)
+	PULSE_ATTACK_SHARE, PULSE_ATTACK_MAX, LOW_RESONANCE_DECAY, NOISE_SHARE, PULSE_SECONDS = attackShare, attackMax, lowDecay, noiseShare, pulseSeconds
+end
+
 -- levels of the layers that skip the exhaust (relative to the exhaust's running level)
--- (measured in rms above 250 Hz at 70% of redline, full throttle: intake ~-9..-19 dB under the
--- exhaust, valvetrain ~-18..-27, whine ~-29..-34; off throttle the intake all but goes, the ticking stays)
-local INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = 0.15, 2, 0.07, 0.06
+-- (measured in rms above 250 Hz at 70% of redline, full throttle: intake ~-26..-34 dB under the
+-- exhaust, valvetrain ~-24..-33, whine ~-41..-46; off throttle the intake all but goes, the ticking
+-- stays. The first levels, 15 dB more intake, 6 dB more ticking and 12 dB more whine, covered the
+-- engine: the user heard mainly the gears, the steady whine sounded robotic, and the intake should
+-- be faint)
+local INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = 0.026, 0.35, 0.035, 0.015
 -- (for measuring the layers: dev tools set them, then put these back)
 Synth.BYPASS_LEVELS = function(intakeResonance, intakeHowl, valvetrain, whine)
 	INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = intakeResonance, intakeHowl, valvetrain, whine
@@ -448,14 +468,14 @@ function Synth.GenRender(generator, out, offset, count)
 	local midResonanceHz = ((230 + 190 * generator.tone) * (1 - voiceShare) + character.f2 * (0.85 + 0.3 * generator.tone) * voiceShare) * pitchRoot
 	local mufflerResonanceHz = (155 + (character.f3 - 155) * voiceShare) * pitchRoot
 	-- left / right bank pipes differ a little in length
-	local lowFeedback1, lowFeedback2, lowInputGain = resonator(lowResonanceHz * (1 - 0.03 * bankSpread), 0.022, sampleRate)
+	local lowFeedback1, lowFeedback2, lowInputGain = resonator(lowResonanceHz * (1 - 0.03 * bankSpread), LOW_RESONANCE_DECAY, sampleRate)
 	local midFeedback1, midFeedback2, midInputGain = resonator(midResonanceHz * (1 + 0.04 * bankSpread), 0.006, sampleRate)
 	local mufflerFeedback1, mufflerFeedback2, mufflerInputGain = resonator(mufflerResonanceHz * (1 - 0.05 * bankSpread), 0.012, sampleRate)
-	local lowFeedbackRight1, lowFeedbackRight2, lowInputGainRight = resonator(lowResonanceHz * (1 + 0.03 * bankSpread), 0.022, sampleRate)
+	local lowFeedbackRight1, lowFeedbackRight2, lowInputGainRight = resonator(lowResonanceHz * (1 + 0.03 * bankSpread), LOW_RESONANCE_DECAY, sampleRate)
 	local midFeedbackRight1, midFeedbackRight2, midInputGainRight = resonator(midResonanceHz * (1 - 0.04 * bankSpread), 0.006, sampleRate)
 	local mufflerFeedbackRight1, mufflerFeedbackRight2, mufflerInputGainRight = resonator(mufflerResonanceHz * (1 + 0.05 * bankSpread), 0.012, sampleRate)
 	local mufflerAmount = realism.mufflerMode
-	local basePulseTime = 0.007 * (4 / generator.cylinderCount) ^ 0.6 / pitchRoot * (1 + (character.w - 1) * voiceShare)
+	local basePulseTime = PULSE_SECONDS * (4 / generator.cylinderCount) ^ 0.6 / pitchRoot * (1 + (character.w - 1) * voiceShare)
 	local grit = generator.tone
 	local popChance = max(0, (generator.tone - 0.35) / 0.65)
 	local intervals = generator.firingIntervals
@@ -560,7 +580,10 @@ function Synth.GenRender(generator, out, offset, count)
 	local intakeState1, intakeState2, howlState1, howlState2 = generator.intakeState1, generator.intakeState2, generator.howlState1, generator.howlState2
 	local valveEnvelope, valveTickPending = generator.valveEnvelope, generator.valveTickPending
 	local valveState1, valveState2, valveHighState1, valveHighState2 = generator.valveState1, generator.valveState2, generator.valveHighState1, generator.valveHighState2
-	local whinePhase = generator.whinePhase
+	local whinePhase, whineDrift1, whineDrift2 = generator.whinePhase, generator.whineDrift1, generator.whineDrift2
+	-- the whine wavers (load and backlash): a slow random drift, ~3 Hz, in its level and a hair in its pitch
+	local whineDriftCoefficient = 1 - exp(-TAU * 3 / sampleRate)
+	local whineDriftNorm = 1 / (0.28 * sqrt(whineDriftCoefficient))
 	local intakeFeedback1, intakeFeedback2, intakeInputGain, howlB0, howlA1, howlA2, airflow, valveLevel, whineLevel
 	local valveFeedback1, valveFeedback2, valveInputGain, valveHighFeedback1, valveHighFeedback2, valveHighInputGain, whineRadiansPerRpm
 	if bypass then
@@ -606,7 +629,10 @@ function Synth.GenRender(generator, out, offset, count)
 			local softening = 1 + turboSoftening * throttle * boostShare
 			local pulseTime = min(basePulseTime * softening, gapSeconds * 0.42 * sqrt(softening))
 			local newSlowDecay = exp(-1 / (sampleRate * pulseTime))
-			local newFastDecay = exp(-1 / (sampleRate * min(pulseTime * 0.22, 0.0018)))
+			-- the attack: the faster pulse decays, the steeper the pulse rises (blowdown when the
+			-- exhaust valve cracks open), the further up its harmonics reach. It was 0.22 / 1.8 ms:
+			-- next to real recordings the harmonics stopped at ~600 Hz with only noise above
+			local newFastDecay = exp(-1 / (sampleRate * min(pulseTime * PULSE_ATTACK_SHARE, PULSE_ATTACK_MAX)))
 			local newNoiseDecay = exp(-1 / (sampleRate * pulseTime * 0.5))
 			if bypass then
 				-- the cylinder breathes in whether it fires or not; a valve closes now and halfway on
@@ -710,7 +736,7 @@ function Synth.GenRender(generator, out, offset, count)
 
 		local sample = (pulse + pulseRight) * 0.5 + (lowResonance + lowResonanceRight) * 1.1 + (midResonance + midResonanceRight) * (0.15 + 0.45 * grit)
 			+ (mufflerResonance + mufflerResonanceRight) * mufflerAmount
-			+ (noiseEnvelope + noiseEnvelopeRight) * noiseLowpass2 * (0.2 + 0.8 * grit)
+			+ (noiseEnvelope + noiseEnvelopeRight) * noiseLowpass2 * (0.2 + 0.8 * grit) * NOISE_SHARE
 			+ rumbleNoise * throttle * min(rpm / 9000, 1) * (0.1 + 0.25 * grit)
 		runningMeanSquare = runningMeanSquare + (sample * sample - runningMeanSquare) * meanSquareSmoothing
 		local runningLevel = sqrt(runningMeanSquare)
@@ -722,7 +748,7 @@ function Synth.GenRender(generator, out, offset, count)
 			local pulseModulation = (noiseEnvelope + noiseEnvelopeRight) * 1.2
 			if pulseModulation > 1.5 then pulseModulation = 1.5 end
 			-- grit rides on each exhaust pulse (rasp), rather than a steady hiss (scream)
-			sample = sample + flowSample * flowAmount * flowLoad * runningLevel * (0.12 + 0.88 * pulseModulation)
+			sample = sample + flowSample * flowAmount * flowLoad * runningLevel * (0.12 + 0.88 * pulseModulation) * NOISE_SHARE
 		end
 		-- (without the bypass, e.g. pop one-shots, the old faint ticking stays in the exhaust)
 		if not bypass and mechanicalEnvelope > 1e-5 then sample = sample + mechanicalEnvelope * runningLevel * (noise - noiseLowpass) end
@@ -762,11 +788,16 @@ function Synth.GenRender(generator, out, offset, count)
 			valveHighState2 = valveHighState1
 			valveHighState1 = valveRingHigh
 			-- whine: a thin tone locked to the crank
-			whinePhase = whinePhase + whineRadiansPerRpm * rpm
+			whineDrift1 = whineDrift1 + (noise - whineDrift1) * whineDriftCoefficient
+			whineDrift2 = whineDrift2 + (whineDrift1 - whineDrift2) * whineDriftCoefficient
+			local waver = whineDriftNorm * whineDrift2
+			whinePhase = whinePhase + whineRadiansPerRpm * rpm * (1 + 0.004 * waver)
 			if whinePhase > TAU then whinePhase = whinePhase - TAU end
+			local whineSway = 1 + 0.45 * waver
+			if whineSway < 0.1 then whineSway = 0.1 end
 			local bypassSample = airflow * (INTAKE_RESONANCE_LEVEL * intakeResonance + INTAKE_HOWL_LEVEL * howl)
 				+ valveLevel * VALVETRAIN_LEVEL * (valveRing + 0.6 * valveRingHigh + 0.25 * click)
-				+ whineLevel * WHINE_LEVEL * sin(whinePhase)
+				+ whineLevel * WHINE_LEVEL * whineSway * sin(whinePhase)
 			bypass[offset + i] = bypassSample * runningLevel * 0.3 * levellerGain * gain
 		end
 	end
@@ -775,7 +806,7 @@ function Synth.GenRender(generator, out, offset, count)
 		generator.intakeState1, generator.intakeState2, generator.howlState1, generator.howlState2 = intakeState1, intakeState2, howlState1, howlState2
 		generator.valveEnvelope, generator.valveTickPending = valveEnvelope, valveTickPending
 		generator.valveState1, generator.valveState2, generator.valveHighState1, generator.valveHighState2 = valveState1, valveState2, valveHighState1, valveHighState2
-		generator.whinePhase = whinePhase
+		generator.whinePhase, generator.whineDrift1, generator.whineDrift2 = whinePhase, whineDrift1, whineDrift2
 	end
 
 	generator.rpm = smoothedRpm
@@ -883,8 +914,10 @@ function Synth.CutoffFor(rpm, throttle, tone, pitch, voice)
 	local cutoff = (420 + 1500 * throttle * (0.5 + tone) + rpm * 0.22) * pitch
 	if voice and voice > 0 then
 		-- the engine's body, not its fizz: a lower, gentler opening with revs and throttle
-		local darkCutoff = (320 + 1000 * throttle * (0.5 + tone) + rpm * 0.12) * pitch
-		if darkCutoff > 2800 then darkCutoff = 2800 end
+		-- (was 320 + 1000 x throttle + 0.12 x rpm, capped at 2.8 kHz: real engines brighten far
+		-- more towards redline under load)
+		local darkCutoff = (340 + 1300 * throttle * (0.5 + tone) + rpm * 0.3) * pitch
+		if darkCutoff > 4800 then darkCutoff = 4800 end
 		cutoff = cutoff + (darkCutoff - cutoff) * voice
 	end
 	if cutoff < 200 then cutoff = 200 elseif cutoff > 5500 then cutoff = 5500 end
@@ -921,12 +954,13 @@ function Synth.NewChain(sampleRate, config)
 		sampleRate = sampleRate,
 		highpass = biquad("highpass", 30, sampleRate, 0.7),
 		drive = driveAmount, driveNorm = 1 / tanh(driveAmount),
-		bodyPeak = biquad("peaking", 95, sampleRate, 1.0, 3 + tone * 5),
+		-- (the 95 Hz boost was a fixed hum under every engine: half of it with the engine's voice)
+		bodyPeak = biquad("peaking", 95, sampleRate, 1.0, (3 + tone * 5) * (1 - 0.5 * realism.voice)),
 		lowShelf = biquad("lowshelf", 130 + 20 * realism.voice, sampleRate, 1, 4 + 2 * realism.voice),
 		trackingLowpass = biquad("lowpass", 700, sampleRate, 0.5),
-		topLowpass = biquad("lowpass", (4200 - 800 * realism.voice) * (1 - 0.5 * muffle), sampleRate, 0.6),
+		topLowpass = biquad("lowpass", (4200 + 1300 * realism.voice) * (1 - 0.5 * muffle), sampleRate, 0.6),
 		tubeLowpass = biquad("lowpass", 1900, sampleRate, 1),
-		highShelf = biquad("highshelf", 2500, sampleRate, 1, -8 - 8 * muffle),
+		highShelf = biquad("highshelf", 2500, sampleRate, 1, -8 + 4 * realism.voice - 10 * muffle),
 		tubeDelay = zeros(tubeSamples), tubeLength = tubeSamples, tubePosition = 1,
 		tailDelay = zeros(tailSamples), tailLength = tailSamples, tailPosition = 1, tailLowpassState = 0,
 		tailWet = realism.tailpipe, tailLowpassCoefficient = 1 - exp(-TAU * 1200 / sampleRate),

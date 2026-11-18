@@ -7,11 +7,15 @@
   Heard from the driver's seat: no Doppler, pass-by or headroom.
 
     node dev/drive_demo/render.js "Audi S5" "Volvo S60" ...   -> dev/drive_demo/out/<car>.wav
+
+  AE_SOUND=<dir> plays a test bake instead (bake.js --out <dir> --only ...: its WAVs and its
+  <dir>/cl_baked.lua; the env bank stays the addon's); AE_OUT=<dir> writes there.
 */
 const fs = require('fs'), path = require('path')
 const { LuaFactory } = require(path.resolve(__dirname, '../baker/node_modules/wasmoon'))
 const ADDON = path.resolve(__dirname, '../..'), LUA = path.join(ADDON, 'lua/audio_engine')
-const OUT = path.join(__dirname, 'out'); fs.mkdirSync(OUT, { recursive: true })
+const OUT = process.env.AE_OUT || path.join(__dirname, 'out'); fs.mkdirSync(OUT, { recursive: true })
+const SOUND = process.env.AE_SOUND || path.join(ADDON, 'sound/audio_engine')
 const SR = 44100, FPS = 60
 // electric motors play at this share of their banks in game (cl_engine.lua)
 const CL_ENGINE = fs.readFileSync(path.join(LUA, 'cl_engine.lua'), 'utf8')
@@ -71,8 +75,9 @@ while t < 60 do
 	elseif inp.backward then v = math.max(0, v - 7 * dt)
 	else v = math.max(0, v - (0.4 + 0.0006 * v * v) * dt) end
 	local limTarget = (drive and st.gear == 0 and st.limiterHoldTimer > 0 and st.lastPedal and st.rpm > cfg.redline * 0.9) and 1 or 0
-	out[#out + 1] = string.format("%.1f,%.3f,%d,%.3f,%d,%.3f,%.3f,%d,%.3f", st.rpm, st.soundThrottle, st.gear, v, limTarget,
-		st.boost or 0, st.blowOffEvent or 0, (st.phase == "run") and 1 or 0, st.fuelCut and 1 or 0)
+	out[#out + 1] = string.format("%.1f,%.3f,%d,%.3f,%d,%.3f,%.3f,%d,%.3f,%d", st.rpm, st.soundThrottle, st.gear, v, limTarget,
+		st.boost or 0, st.blowOffEvent or 0, (st.phase == "run") and 1 or 0, st.fuelCut and 1 or 0,
+		(st.shiftTimer > 0 and st.shiftDirection == 1) and 1 or 0)
 	t = t + dt
 end
 local L = {} for i, r in ipairs(bk.layers) do L[i] = r end
@@ -92,7 +97,8 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
   await L.doString(`math.Clamp=function(x,a,b) return math.max(a,math.min(b,x)) end
     IsValid=function(e) return e~=nil end; ErrorNoHalt=print; CLIENT=true; SERVER=false; table.Copy=function(t) local r={} for k,v in pairs(t) do r[k]=v end return r end
     AUDIO_ENGINE={}; local E=AUDIO_ENGINE; E.Cars={}; function E.RegisterCar(m,c) c.model=m; E.Cars[m]=c; return c end`)
-  for (const f of ['sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'cl_baked.lua']) await L.doString(fs.readFileSync(path.join(LUA, f), 'utf8'))
+  for (const f of ['sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'cl_baked.lua'])
+    await L.doString(fs.readFileSync(f === 'cl_baked.lua' && process.env.AE_SOUND ? path.join(SOUND, f) : path.join(LUA, f), 'utf8'))
   const phys = fs.readFileSync(path.join(LUA, 'sv_perp_physics.lua'), 'utf8'); let pl = 'PHYS={}\n'
   for (const b of phys.split('\n\t["').slice(1)) { const s = b.split('"]')[0], g = k => { const m = b.match(new RegExp(k + ' = ([\\d.]+)')); return m ? +m[1] : 0 }
     pl += `PHYS[${JSON.stringify(s)}]={hp=${g('horsepower')},mph=${g('maxspeed')},mass=${g('massoverride') || 1500}}\n` }
@@ -107,7 +113,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     const [dir, layersS, trimsS, limRpm, redline, sFade, sDur, eFade, eDur, emoS, emo, flare, turbo, bov, sc, scPitch, pops, nPops, volume, top, ends, engine, electric, framesS] = f
     const layers = layersS.split(' ').map(Number), trims = trimsS ? trimsS.split(' ').map(Number) : layers.map(() => 1)
     const frames = framesS.split(';').map(r => r.split(',').map(Number))
-    const D = path.join(ADDON, 'sound/audio_engine', dir), red = +redline
+    const D = path.join(SOUND, dir), red = +redline
     const on = layers.map((_, i) => W(path.join(D, `b${i + 1}on.wav`))), off = layers.map((_, i) => W(path.join(D, `b${i + 1}off.wav`)))
     const lim = W(path.join(D, 'lim.wav')), road = W(path.join(env, 'road.wav')), wind = W(path.join(env, 'wind.wav')), turboW = W(path.join(env, 'turbo.wav'))
     // the start-up one-shot: the emotion start's closest flare variant
@@ -135,13 +141,13 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     let chimed = !+electric   // the chime plays once the car is ready (cl_engine EV_CHIME_VOLUME)
     let tPhase = null
     for (let fi = 0; fi < frames.length; fi++) {
-      const [rpm0, sThr, gear, v, limT, boost, bovE, run, cut] = frames[fi]; const dt = 1 / FPS, t = fi * dt
+      const [rpm0, sThr, gear, v, limT, boost, bovE, run, cut, upshifting] = frames[fi]; const dt = 1 / FPS, t = fi * dt
       const rpm = Math.max(rpm0, 50)
       if (!chimed && +run) { chimed = true; shots.push({ w: W(path.join(env, 'evchime.wav')), pos: 0, vol: 0.3, pitch: 1, at: fi }) }
       // loops muted until the start one-shot reaches its fade point
       const target = t < fadeAt ? 0 : 1; const rate = t < fadeAt ? 8 : 1 / Math.max(0.05, sdur - fadeAt)
       loopGain += Math.max(-rate * dt, Math.min(rate * dt, target - loopGain))
-      thrS += (sThr - thrS) * Math.min(1, dt * 12)
+      thrS += (sThr - thrS) * Math.min(1, dt * (upshifting ? 30 : 12))   // cl_engine: faster through an upshift's cut
       limW += Math.max(-dt / 0.03, Math.min(dt / 0.06, limT - limW))
       const lr = Math.log(rpm); xr = xr == null ? lr : xr + (lr - xr) * Math.min(1, dt * 20)
       const w = new Array(layers.length).fill(0), n = layers.length

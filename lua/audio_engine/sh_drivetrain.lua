@@ -27,6 +27,10 @@ Drivetrain.TMAX = 320 -- Rev Bench reference torque (the baked limiter loops and
 ]]
 Drivetrain.REV = { rise = 500, fall = 500 }
 
+-- an upshift under load: the torque cut (s, sound throttle near 0) and how long the drive takes to
+-- take up again after it (s). Real gear changes have that articulation; a smooth ease sounded synthetic
+Drivetrain.UPSHIFT_CUT, Drivetrain.UPSHIFT_TAKE_UP = 0.09, 0.12
+
 -- Arcade gearbox shift points, as fractions of redline (cars can override with config.shift)
 Drivetrain.SHIFT = {
 	upRpm = 0.92,      -- W held: shift up here...
@@ -404,15 +408,20 @@ function Drivetrain.Step(engineState, config, deltaTime, controls)
 		-- top gear and faster than the gearing expects: sit just under redline, don't bounce
 		if engineState.gear > 0 and engineState.gear == #config.gears then targetRpm = min(targetRpm, config.redline * 0.985) end
 		local followRate
-		if engineState.shiftTimer > 0 then followRate = engineState.shiftDirection == -1 and (engineState.softShift and 8 or 16) or 7   -- downshifts snap up to the new revs
+		-- downshifts snap up to the new revs; upshifts drop in ~0.15 s (at 7 the revs glided down over
+		-- a third of a second: next to real recordings a synth's portamento, not a gear change)
+		if engineState.shiftTimer > 0 then followRate = engineState.shiftDirection == -1 and (engineState.softShift and 8 or 16) or 14
 		elseif targetRpm > engineState.rpm then followRate = 5 + 5 * engineThrottle
 		else followRate = 6 end
 		engineState.rpm = engineState.rpm + (targetRpm - engineState.rpm) * min(1, deltaTime * followRate)
 
 		if engineState.shiftTimer > 0 and engineState.shiftDirection == 1 then
-			-- upshift: the gearbox briefly pulls torque, it doesn't cut it
-			local upshiftProgress = 1 - engineState.shiftTimer / 0.32
-			engineState.soundThrottle = engineThrottle * (0.3 + 0.7 * upshiftProgress * upshiftProgress)
+			-- upshift: the torque is cut for a moment while the gears change (the ignition cut of a
+			-- modern box), then the drive takes up again quickly. It used to ease back from 0.3 over
+			-- the whole 0.32 s: no articulation, the note just slid down
+			local sinceShift = 0.32 - engineState.shiftTimer
+			local takenUp = clamp((sinceShift - Drivetrain.UPSHIFT_CUT) / Drivetrain.UPSHIFT_TAKE_UP, 0, 1)
+			engineState.soundThrottle = engineThrottle * (0.05 + 0.95 * takenUp)
 		elseif engineState.shiftTimer > 0 and engineState.shiftDirection == -1 then
 			engineState.soundThrottle = max(engineThrottle, engineState.softShift and 0.25 or 0.6)   -- downshift: rev-matching throttle blip
 		else

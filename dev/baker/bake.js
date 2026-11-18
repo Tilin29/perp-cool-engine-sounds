@@ -9,7 +9,8 @@
     node bake.js --list                print the engine numbers and exit
     node bake.js --dry                 render everything, write nothing; print each engine's band
                                        loudness (dB, rms above 250 Hz of the on-throttle loops)
-    node bake.js --out <dir> --only 3  write the WAVs somewhere else (listening tests)
+    node bake.js --out <dir> --only 3,7  write the WAVs and a manifest (<dir>/cl_baked.lua, just these
+                                       engines) somewhere else: listening tests, dev/drive_demo AE_SOUND
     node bake.js --electric            re-bake only the electric motors and the shared env bank;
                                        every other engine keeps its entry and folder from the
                                        current manifest (only after changes to EV-only code)
@@ -33,8 +34,10 @@ const { fork } = require('child_process')
 const ADDON = path.resolve(__dirname, '..', '..')
 const LUA = path.join(ADDON, 'lua', 'audio_engine')
 const DRY = process.argv.includes('--dry')
+const OUT_DIR = process.argv.includes('--out')
 const SOUND_OUT = process.argv.includes('--out') ? path.resolve(process.argv[process.argv.indexOf('--out') + 1]) : path.join(ADDON, 'sound', 'audio_engine')
-const MANIFEST = path.join(LUA, 'cl_baked.lua')
+const MANIFEST = process.argv.includes('--out') && !process.argv.includes('--worker')
+  ? path.join(path.resolve(process.argv[process.argv.indexOf('--out') + 1]), 'cl_baked.lua') : path.join(LUA, 'cl_baked.lua')
 const ADDON_FILES = ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'cl_synth.lua', 'cl_soundbank.lua']
 
 function arg(name, def) {
@@ -162,7 +165,7 @@ async function main() {
   console.log(`${n} stock engine families at ${RATE} Hz, synth version ${version}, ${JOBS} workers`)
   let todo = items
   const entries = new Array(n + 1)
-  if (ONLY) todo = items.filter((it) => it.i === parseInt(ONLY, 10))
+  if (ONLY) { const only = ONLY.split(',').map(Number); todo = items.filter((it) => only.includes(it.i)) }
   else if (ELECTRIC) {
     // everything else stays as baked: its manifest entry and its folder must both be there
     const old = oldEntries()
@@ -222,10 +225,10 @@ async function main() {
   })
   console.log(`baked ${done} engines, ${(total / 1048576).toFixed(1)} MB, ${((Date.now() - t0) / 1000).toFixed(0)} s` +
     (failed ? `, ${failed} FAILED` : ''))
-  if (ONLY || failed || DRY) { console.log('manifest not written'); process.exit(failed ? 1 : 0) }
+  if ((ONLY && !OUT_DIR) || failed || DRY) { console.log('manifest not written'); process.exit(failed ? 1 : 0) }
   const header = await call(`__result(BAKE.header(${JSON.stringify(version)}))`)
   const families = await call('__result(BAKE.familyEntry())')
-  const body = [header + envEntry, families + 'E.BAKED = {', ...entries.slice(1), '}', ''].join('\n')
+  const body = [header + (envEntry || ''), families + 'E.BAKED = {', ...entries.slice(1).filter(Boolean), '}', ''].join('\n')
   fs.writeFileSync(MANIFEST, body)
   console.log('wrote', path.relative(ADDON, MANIFEST))
 }

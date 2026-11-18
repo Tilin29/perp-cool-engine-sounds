@@ -108,6 +108,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Cornering (A/D, networked as input bit 8; `inp.steer`): no lazy/stall upshifts, changes down below `cornerRpm` 0.65 (to under `cornerLand` 0.88); coasting lugRpm 0.4.
   Downshifts with W held (kick/sag/corner) judge the wheels' revs, not `st.rpm`: converter slip keeps that over ~0.47 x redline
   with W held, so a car slowed by a turn stuck in its gear. No lazy upshift while slowing (`st.accel > 0`), and slowing isn't a stall.
+  Upshifts under load: a torque cut `Drivetrain.UPSHIFT_CUT` 0.09 s (sound throttle 0.05) then `UPSHIFT_TAKE_UP` 0.12 s back,
+  the revs dropping at rate 14 (~0.15 s; was 7 with an ease from 0.3 over 0.32 s: next to recordings, a synth glide); cl_engine
+  follows the throttle at 30/s through it (12 otherwise), dev/drive_demo too.
   Braking downshifts are low and gentle (`brakeRpm` 0.45, `brakeLand` 0.70, `softShift`: blip 0.25, rise rate 8): at 0.80/0.96 with
   a full blip hard braking ran a sawtooth near redline that sounded cartoonish. cl_engine feeds the model the car's full speed
   signed by the nose (`car.driveSpeed`), not the speed along the nose, which collapsed in a slide (revs plunged, then shot back up).
@@ -120,8 +123,19 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   cuts it 60%), valvetrain (clicks at each firing and halfway, ringing `valveHz` and 1.47x), gear whine (a sine at `whineOrder` per
   crank turn, 0 = 17..31 from the seed, 0.25 + 0.75 x throttle). Per-layout defaults `INDUCTION_DEFAULTS`, merged into CHARACTER;
   a voice can set them (`AudioEngine.CHARACTER_FIELDS` in sh_presets = the character fields in the sound key). Levels
-  `INTAKE_RESONANCE_LEVEL` 0.15 / `INTAKE_HOWL_LEVEL` 2 / `VALVETRAIN_LEVEL` 0.07 / `WHINE_LEVEL` 0.06: at 70% redline full throttle
-  intake -9..-19 dB under the exhaust, valvetrain -18..-27, whine -29..-34 (rms above 250 Hz). Not yet heard by the user. `Synth.EVRender` for the electric motor, after the e-NVH literature (the user asked for real EV
+  `INTAKE_RESONANCE_LEVEL` 0.026 / `INTAKE_HOWL_LEVEL` 0.35 / `VALVETRAIN_LEVEL` 0.035 / `WHINE_LEVEL` 0.015: at 70% redline full
+  throttle intake -26..-34 dB under the exhaust, valvetrain -24..-33, whine -41..-46 (rms above 250 Hz). The user's: the first
+  levels (15 dB more intake, 6 more ticking, 12 more whine) covered the engine ("mainly the gears"), the steady whine sounded
+  robotic, the intake should be faint. The whine wavers (~3 Hz drift, +-45% level, 0.4% pitch).
+  Compared with real recordings (YouTube: M3 E92, S2000, Mustang GT, R8 V10 pulls next to drive_demo renders): real engines'
+  sound above ~1 kHz is rev-locked harmonics, ours was noise; the low pipe mode rang as a fixed drone (~75-110 Hz); gear
+  changes glided. So: a steeper pulse attack (`PULSE_ATTACK_SHARE` 0.12 / `PULSE_ATTACK_MAX` 0.9 ms, was 0.22 / 1.8),
+  broadband noise x `NOISE_SHARE` 0.5, `LOW_RESONANCE_DECAY` 10 ms (was 22), the tracking low-pass with voice opens to
+  340 + 1300 x throttle x (0.5 + tone) + 0.3 x rpm, cap 4.8 kHz (was 320 + 1000 .. + 0.12 x rpm, cap 2.8 kHz), top low-pass
+  4200 + 1300 x voice (was - 800), high shelf -8 + 4 x voice (- 10 x muffle), the 95 Hz body peak halved with voice. 1-2 kHz
+  line-ness (mean/median power) went from 2.2-3.4 dB to 2.8-4.6 (real 2.5-5.4); the fixed 65-100 Hz share in the upper bands
+  is 5-9 dB lower. Tried and dropped: shorter pulses (`PULSE_SECONDS` 0.004: high in the revs pulses are capped at 42% of the
+  firing gap anyway) and double cylinder variation (no change; the cabin clips' low end is the cabin's). Not yet heard by the user. `Synth.EVRender` for the electric motor, after the e-NVH literature (the user asked for real EV
   sound): orders per motor turn `EV_PARTIALS` 9.5 (reduction gear 2nd stage mesh, the classic whine: ~1 kHz at 60 mph), 19, 24 (motor
   electromagnetic), 31 (1st stage mesh), 48 (31/48 kept faint, 0.16/0.08: at 0.30/0.24 the top of the revs whistled at 7-11 kHz, the user
   said too high), gear meshes rattling at the shaft rate (`EV_MESH_RATTLE`, side tones +-1 order), a slight speed ripple, a bearing/air
@@ -459,7 +473,8 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   `node bake.js --electric` re-bakes only the electric motors + env bank (~15 s) and keeps every other entry and folder:
   only for changes that can't touch other engines (it fails if any other engine's sound key is missing from the manifest).
   `node bake.js --dry` renders everything and writes nothing, printing each engine's band levels as played (`bank.levelReport`);
-  `--out <dir>` writes the WAVs elsewhere (listening tests, with `--only`).
+  `--out <dir> --only 3,7` writes those engines' WAVs and a manifest for just them to <dir> (dev/drive_demo plays them with
+  `AE_SOUND=<dir>`, `AE_OUT` for its output: compare against recordings without touching the shipped bake).
   `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling (PERP physics on the test script) and the handling model with a fake vehicle. `test_prediction.js` checks the driving prediction. `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - Offline harnesses run under LuaJIT (`luajit file.lua` from `dev/`). Fix the hard-coded paths at the top first: they point at /home/claude/....
