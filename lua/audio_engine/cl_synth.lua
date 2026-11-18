@@ -448,8 +448,10 @@ end
 -- exhaust, valvetrain ~-24..-33, whine ~-41..-46; off throttle the intake all but goes, the ticking
 -- stays. The first levels, 15 dB more intake, 6 dB more ticking and 12 dB more whine, covered the
 -- engine: the user heard mainly the gears, the steady whine sounded robotic, and the intake should
--- be faint)
-local INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = 0.026, 0.35, 0.035, 0.015
+-- be faint. Then, revving, the intake's noise still sounded like a vacuum cleaner (0.026 / 0.35:
+-- 25-38 dB under the exhaust at 50-95% redline, more exposed once the exhaust's own noise was
+-- halved): 8 dB down to 0.010 / 0.14)
+local INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = 0.010, 0.14, 0.035, 0.015
 -- (for measuring the layers: dev tools set them, then put these back)
 Synth.BYPASS_LEVELS = function(intakeResonance, intakeHowl, valvetrain, whine)
 	INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = intakeResonance, intakeHowl, valvetrain, whine
@@ -598,7 +600,11 @@ function Synth.GenRender(generator, out, offset, count)
 		airflow = intakeAmount * (0.06 + 0.94 * smoothedThrottle ^ 1.5) * (0.35 + 0.65 * redlineShare)
 		valveFeedback1, valveFeedback2, valveInputGain = resonator(generator.valveHz, 0.0016, sampleRate)
 		valveHighFeedback1, valveHighFeedback2, valveHighInputGain = resonator(generator.valveHz * 1.47, 0.0009, sampleRate)
-		valveLevel = valvetrainAmount * (0.55 + 0.45 * redlineShare)
+		-- the ticking as at idle, fading with revs (the clicks come faster, twice per firing, and high up
+		-- merge into a hiss) and off throttle (the exhaust drops away, it doesn't). It was
+		-- 0.55 + 0.45 x revs at any throttle: above 2 kHz revving it was within 3-12 dB of the exhaust
+		-- on throttle and 4-6 dB over it off throttle, the vacuum-cleaner sound the user heard revving
+		valveLevel = valvetrainAmount * 0.55 * (1 - 0.6 * redlineShare) * (0.5 + 0.5 * smoothedThrottle)
 		whineLevel = whineAmount * (0.25 + 0.75 * smoothedThrottle) * (0.3 + 0.7 * redlineShare)
 		whineRadiansPerRpm = TAU * generator.whineOrder * pitch / 60 / sampleRate
 	end

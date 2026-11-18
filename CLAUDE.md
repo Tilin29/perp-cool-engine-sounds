@@ -91,8 +91,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   (`topRpm` at `config.topSpeed`); sets `config.gears` as overall ratios, `final = 1`, `config.shiftPlan` { up = rpm[g], down = m/s[g] }. Each gear at least
   `AudioEngine.GEAR_MIN_STEP` 1.1 taller. Kickdown/corner landings also stay under the target gear's up rpm.
   Fitted gearing comes from the top speed only, deliberately not realistic (the user's choice; a time-based, realistic spacing
-  with up to 7 gears was tried and reverted) (`AudioEngine.FitGearEnds`, `AudioEngine.GEAR_FIT`): 1 gear per `kmhPerGear` 40 km/h, steps at most
-  `stepMax` 2.3x, 1st ends at `firstShare` 0.28 of top speed (at least `firstMin` 25 km/h), gear ends evenly spaced in speed^`spread` 2.2;
+  with up to 7 gears was tried and reverted) (`AudioEngine.FitGearEnds`, `AudioEngine.GEAR_FIT`): 1 gear per `kmhPerGear` 20 km/h, steps at most
+  `stepMax` 2.3x, 1st ends at `firstShare` 0.28 of top speed (at least `firstMin` 25 km/h), gear ends evenly spaced in speed^`spread` 3
+  (was 40 / 2.2: most PERP cars, under ~140 km/h, got 3 gears and sat in the last for about half a flat-out pull, the user's complaint;
+  now ~0.2 of it, median, in the drive demo's acceleration model);
   2 to `maxCount` 5 gears (or the box's count if lower). The top speed is the tier script's MaxSpeed (PERP spawns base / upgrade_1 / upgrade_2,
   each with its own, so each tier has its own gearing; NW2 `audio_vmax`); used/ and spiked/ cars keep the gearing of the tier they came from
   (`config.gearTopSpeed`, NW2 `audio_gear_vmax`, sv_engine `AudioEngine.GearingTopSpeed`): used = the base script's MaxSpeed (read from the file,
@@ -109,7 +111,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   Downshifts with W held (kick/sag/corner) judge the wheels' revs, not `st.rpm`: converter slip keeps that over ~0.47 x redline
   with W held, so a car slowed by a turn stuck in its gear. No lazy upshift while slowing (`st.accel > 0`), and slowing isn't a stall.
   Upshifts under load: a torque cut `Drivetrain.UPSHIFT_CUT` 0.09 s (sound throttle 0.05) then `UPSHIFT_TAKE_UP` 0.12 s back,
-  the revs dropping at rate 14 (~0.15 s; was 7 with an ease from 0.3 over 0.32 s: next to recordings, a synth glide); cl_engine
+  the revs dropping at `Drivetrain.UPSHIFT_REV_RATE` 8 (~0.28 s; 14, ~0.15 s, swept the pitch down so fast the user heard it as
+  robotic; was 7 with an ease from 0.3 over 0.32 s); cl_engine
   follows the throttle at 30/s through it (12 otherwise), dev/drive_demo too.
   Braking downshifts are low and gentle (`brakeRpm` 0.45, `brakeLand` 0.70, `softShift`: blip 0.25, rise rate 8): at 0.80/0.96 with
   a full blip hard braking ran a sawtooth near redline that sounded cartoonish. cl_engine feeds the model the car's full speed
@@ -120,11 +123,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   a tester heard as "too similar, robotic"; electric keeps the old seed). Layers that skip the exhaust's filters (`bypassBuffer`, filled
   by GenRender, added after the chain in `RenderControlled`; not in pop/bang renders, which keep the old in-exhaust ticking): intake
   (each firing's breath ringing an airbox resonance `intakeHz` + a throttle-body howl band, airflow ~ throttle^1.5 and revs; muffle
-  cuts it 60%), valvetrain (clicks at each firing and halfway, ringing `valveHz` and 1.47x), gear whine (a sine at `whineOrder` per
+  cuts it 60%), valvetrain (clicks at each firing and halfway, ringing `valveHz` and 1.47x; 0.55 x (1 - 0.6 x revs share) x (0.5 + 0.5 x throttle):
+  it rose with revs at any throttle and high up the dense clicks were a hiss, over the exhaust above 2 kHz off throttle, the
+  "vacuum" the user heard revving), gear whine (a sine at `whineOrder` per
   crank turn, 0 = 17..31 from the seed, 0.25 + 0.75 x throttle). Per-layout defaults `INDUCTION_DEFAULTS`, merged into CHARACTER;
   a voice can set them (`AudioEngine.CHARACTER_FIELDS` in sh_presets = the character fields in the sound key). Levels
-  `INTAKE_RESONANCE_LEVEL` 0.026 / `INTAKE_HOWL_LEVEL` 0.35 / `VALVETRAIN_LEVEL` 0.035 / `WHINE_LEVEL` 0.015: at 70% redline full
-  throttle intake -26..-34 dB under the exhaust, valvetrain -24..-33, whine -41..-46 (rms above 250 Hz). The user's: the first
+  `INTAKE_RESONANCE_LEVEL` 0.010 / `INTAKE_HOWL_LEVEL` 0.14 / `VALVETRAIN_LEVEL` 0.035 / `WHINE_LEVEL` 0.015: at 50-95% redline full
+  throttle intake -33..-45 dB under the exhaust (0.026 / 0.35, -25..-38, revved like a vacuum cleaner: the user), valvetrain -24..-33, whine -41..-46 (rms above 250 Hz). The user's: the first
   levels (15 dB more intake, 6 more ticking, 12 more whine) covered the engine ("mainly the gears"), the steady whine sounded
   robotic, the intake should be faint. The whine wavers (~3 Hz drift, +-45% level, 0.4% pitch).
   Compared with real recordings (YouTube: M3 E92, S2000, Mustang GT, R8 V10 pulls next to drive_demo renders): real engines'

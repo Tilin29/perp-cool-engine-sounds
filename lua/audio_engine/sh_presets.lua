@@ -289,8 +289,11 @@ end
 	faster it goes, so each gear spans less speed than the one before. If that makes a step over
 	stepMax (few gears over a wide span) the spread is lowered until it fits.
 	upShare: where the debug module's gearing editor puts a gear's upshift (share of redline).
+	kmhPerGear was 40 and spread 2.2: most PERP cars top out under ~140 km/h and got 3 gears, the
+	last taking about half of a flat-out pull (the user: "through the gears very quickly, then stay on
+	the last one for a long time"). At 20 / 3 the last gear is ~0.2 of the pull (median; drive demo model).
 ]]
-AudioEngine.GEAR_FIT = { firstMin = 25, firstShare = 0.28, kmhPerGear = 40, stepMax = 2.3, spread = 2.2, maxCount = 5, upShare = 0.92 }
+AudioEngine.GEAR_FIT = { firstMin = 25, firstShare = 0.28, kmhPerGear = 20, stepMax = 2.3, spread = 3, maxCount = 5, upShare = 0.92 }
 
 --[[
 	A guess at the car's full-throttle acceleration (AudioEngine.GearAccel), only for audio_engine_accel_log
