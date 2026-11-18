@@ -229,7 +229,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     offset + small rotation, `SmootherDecay` time constant, `SmootherApply`). Buttons are a number (1 W, 2 S, 4 A, 8 D, 16 Space; no bit lib).
     `audio_engine_drivemodel` (replicated, archived, default 1) is created here.
   - `sv_handling.lua`: on spawn `AudioEngine.PrepareHandling` (before `captureBase`): PERP base physics from generated `sv_perp_physics.lua` onto
-    cars on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), nothing else changed; adds the
+    cars on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), nothing else changed except, where
+    the model runs (`steerForModel`, also in RebaseHandling; the drivemodel convar's change rebases every car), Source's steering: turnThrottleReduce 0
+    and degreesFast = the model's grip-capped turn at `STEER_FIT_SPEED` 25 m/s (`Handling.TurnAngle`, ~3 deg; PERP ~11): both braked cars in a turn
+    (throttle cut up to 90%, front tyres scrubbing across the path). `audioScriptParams` stays the script's own; adds the
     PhysicsCollide callback (`audioImpactAt` on a velocity change over `impactSpeed` 120 in/s, not floor/ceiling normals: the model is off
     `impactHold` 0.35 s, eases back over `impactEase` 0.5). Tick: on driven cars, reads the physics, ground share from `GetWheelContactPoint`
     (trace fallback), runs Control and applies it (`AddAngleVelocity` local z, `AddVelocity` along the right); controlShare 0 on spiked cars,

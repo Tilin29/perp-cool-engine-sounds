@@ -161,6 +161,40 @@ local function onCollide(vehicle, data)
 	vehicle.audioImpactAt = CurTime()
 end
 
+-- whether the handling model runs on this car (with audio_engine_drivemodel on)
+local function modelAllowed(vehicle, carConfig)
+	return not vehicle.audioSpiked and not (carConfig and carConfig.stability == false)
+end
+
+--[[
+	Source's steering under the model. The model owns the rotation and sideways grip, but Source
+	still steers its front wheels and still runs the scripts' throttle cut while steering, and
+	both slowed every car in a turn:
+	  * turnThrottleReduceSlow/Fast (PERP: up to 0.9 at speed) cut the throttle while a key is held,
+	    so a car couldn't pull through a corner. Off: the throttle is the driver's.
+	  * Source turns the wheels to degreesFast (PERP: ~11) at speed, where the model's grip-capped turn
+	    is only a few degrees (25 m/s: ~3): the front tyres stood across the car's path and scrubbed
+	    it down like a brake. degreesFast becomes the model's angle at STEER_FIT_SPEED; Source's
+	    line from degreesSlow (at a standstill) to it at FastCarSpeed (35 mph on nearly every PERP
+	    script) then stays within ~2.5 degrees of the model's turn. degreesSlow (parking) is kept.
+	Changes `params` (GetVehicleParams layout) and returns true if the model runs on this car.
+]]
+local STEER_FIT_SPEED = 25   -- m/s
+
+local function steerForModel(vehicle, params)
+	local carConfig = AudioEngine.GetCarConfig(vehicle)
+	if not (driveModelConVar:GetBool() and carConfig and modelAllowed(vehicle, carConfig)) then return false end
+	local steering = params.steering
+	if not istable(steering) then return false end
+	setValue(steering, "turnThrottleReduceSlow", 0)
+	setValue(steering, "turnThrottleReduceFast", 0)
+	if steering.degreesFast then
+		local spec = Handling.SpecFor(vehicle)
+		steering.degreesFast = math.min(steering.degreesFast, Handling.TurnAngle(spec.settings, spec.wheelbase, STEER_FIT_SPEED))
+	end
+	return true
+end
+
 function AudioEngine.PrepareHandling(vehicle)
 	if vehicle.audioPrepared then return end
 	vehicle.audioPrepared = true
@@ -186,6 +220,7 @@ function AudioEngine.PrepareHandling(vehicle)
 	end
 	-- the car's script handling: AudioEngine.RebaseHandling starts from it
 	vehicle.audioScriptParams = table.Copy(params)
+	if steerForModel(vehicle, params) then AudioEngine.SetParams(vehicle, params) end
 end
 
 --[[
@@ -198,11 +233,19 @@ function AudioEngine.RebaseHandling(vehicle, scriptParams)
 	local savedParams = vehicle.audioScriptParams
 	if not savedParams then return false end
 	local params = table.Copy(savedParams)
+	steerForModel(vehicle, params)
 	vehicle.audioBase = params
 	if AudioEngine.RefreshCarStats then AudioEngine.RefreshCarStats(vehicle, params) end
 	if AudioEngine.ApplyPerformance then AudioEngine.ApplyPerformance(vehicle, AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", ""))) end
 	return true
 end
+
+-- the model switched on or off: Source's steering goes back to the scripts' own, or the model's
+cvars.AddChangeCallback("audio_engine_drivemodel", function()
+	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
+		if IsValid(vehicle) and vehicle.audioScriptParams then AudioEngine.RebaseHandling(vehicle) end
+	end
+end, "audio_engine_handling")
 
 ---------------------------------------------------------------------------
 -- every tick: the model on the driven cars, their state to their drivers
@@ -296,7 +339,7 @@ local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
 	local impactShare = impactShareOf(vehicle, spec.settings, now)
 	-- (carConfig.stability = false: a car registered without the model)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)
-	local modelHere = modelOn and not vehicle.audioSpiked and not (carConfig and carConfig.stability == false)
+	local modelHere = modelOn and modelAllowed(vehicle, carConfig)
 	body.controlShare = modelHere and impactShare or 0
 
 	local buttons = Handling.ButtonsFrom(keyDown, driver)

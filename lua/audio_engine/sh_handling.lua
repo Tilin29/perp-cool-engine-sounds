@@ -116,6 +116,14 @@ function Handling.Lock(settings, speed)
 	return settings.lockFast + (settings.lockSlow - settings.lockFast) * share ^ settings.lockFadePower
 end
 
+-- the front wheel angle (degrees) a full-lock turn at `speed` (m/s) amounts to: the lock, or less
+-- where the tyres' grip caps the rotation (the bicycle model's angle for the yaw rate Control asks)
+function Handling.TurnAngle(settings, wheelbase, speed)
+	local lock = Handling.Lock(settings, speed)
+	local gripAngle = DEG * math.atan(settings.grip * GRAVITY * wheelbase / max(speed * speed, 1))
+	return min(lock, gripAngle)
+end
+
 ---------------------------------------------------------------------------
 -- inputs: the keys as one number (no bit library: the same code runs under Lua 5.4 offline)
 ---------------------------------------------------------------------------

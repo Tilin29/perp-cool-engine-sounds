@@ -1,7 +1,8 @@
 /*
   Offline checks of sv_handling.lua with a fake vehicle (no Garry's Mod needed):
     - a PERP car spawned on the generic test script gets its PERP base-script physics, and no
-      other change to its script's handling (on its own script and spiked: none at all)
+      other change to its script's handling than Source's steering fitted to the model (no throttle
+      cut while steering, the wheel angle at speed); on its own script only that; spiked: none at all
     - the handling model (sh_handling.lua): steering turns the car, the turn never asks more than the
       tyres' grip, sideways speed goes at the grip limit, the speed along the nose is never touched,
       the handbrake lets the rear go, the model off (controlShare 0) does nothing; grip per kind of car
@@ -79,6 +80,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
       function veh:GetModel() return model end
       function veh:AddCallback(name, callback) self.callbacks = self.callbacks or {}; self.callbacks[name] = callback end
       function veh:GetKeyValues() return self.kv end
+      function veh:LookupAttachment() return 0 end   -- (no wheel attachments: the default wheelbase)
       function veh:GetVehicleParams() return table.Copy(self.params) end
       function veh:SetVehicleParams(p)
         p = table.Copy(p)
@@ -134,23 +136,25 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   check(c.gears === '5.5,4.2,3.7,2.2,1', 'expected the SL65 gears')
   check(near(c.mass, 2050), 'expected 2050 kg')
   check(near(c.bf, 0.5) && near(c.br, 0.5), 'brakes as PERP has them (50/50)')
-  check(near(c.trf, 0.75), 'turnThrottleReduceFast as PERP has it')
+  check(c.trf === 0, 'no throttle cut while steering under the model (PERP has 0.75)')
   check(near(c.cz, -1), 'centre of mass as PERP has it')
   check(near(c.psa, 150), 'handbrake slide as the PERP script has it')
-  check(near(c.deg, 38.5) && near(c.dfast, 11), 'steering lock from the PERP script')
+  check(near(c.deg, 38.5), 'parking lock from the PERP script')
+  check(c.dfast > 1 && c.dfast < 5, "Source's wheel angle at speed fitted to the model's turn (PERP has 11)")
 
   // 2. SL65 on its own PERP script (the server): untouched
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/sl65amg.txt", SL65))`)
   c = parse(res)
   console.log('SL65 on its PERP script:  ', c)
   check(c.perp === 'false', 'on its own script: no PERP physics put on')
-  check(near(c.hp, 260) && near(c.mph, 94) && near(c.bf, 0.5) && near(c.trf, 0.75), 'its script untouched')
+  check(near(c.hp, 260) && near(c.mph, 94) && near(c.bf, 0.5), 'its script untouched')
+  check(c.trf === 0 && c.dfast < 5, "but Source's steering fitted to the model")
 
   // 3. spiked: nothing
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/spiked/sl65amg.txt", SL65))`)
   c = parse(res)
   console.log('SL65 on spiked tyres:     ', c)
-  check(c.spiked === 'true' && c.perp === 'false', 'spiked: left alone')
+  check(c.spiked === 'true' && c.perp === 'false' && near(c.trf, 0.75) && near(c.dfast, 14), 'spiked: left alone')
 
   // 4. the handling model on a body going along +y (the TDM nose) at `speed` m/s, `side` m/s sideways
   await L.doString(`
