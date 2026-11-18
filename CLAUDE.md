@@ -123,7 +123,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   a tester heard as "too similar, robotic"; electric keeps the old seed). Layers that skip the exhaust's filters (`bypassBuffer`, filled
   by GenRender, added after the chain in `RenderControlled`; not in pop/bang renders, which keep the old in-exhaust ticking): intake
   (each firing's breath ringing an airbox resonance `intakeHz` + a throttle-body howl band, airflow ~ throttle^1.5 and revs; muffle
-  cuts it 60%), valvetrain (clicks at each firing and halfway, ringing `valveHz` and 1.47x), gear whine (a sine at `whineOrder` per
+  cuts it 60%), valvetrain (clicks at each firing and halfway, ringing `valveHz` and 1.47x; 0.55 x (1 - 0.6 x revs share) x (0.5 + 0.5 x throttle):
+  it rose with revs at any throttle and high up the dense clicks were a hiss, over the exhaust above 2 kHz off throttle, the
+  "vacuum" the user heard revving), gear whine (a sine at `whineOrder` per
   crank turn, 0 = 17..31 from the seed, 0.25 + 0.75 x throttle). Per-layout defaults `INDUCTION_DEFAULTS`, merged into CHARACTER;
   a voice can set them (`AudioEngine.CHARACTER_FIELDS` in sh_presets = the character fields in the sound key). Levels
   `INTAKE_RESONANCE_LEVEL` 0.010 / `INTAKE_HOWL_LEVEL` 0.14 / `VALVETRAIN_LEVEL` 0.035 / `WHINE_LEVEL` 0.015: at 50-95% redline full

@@ -600,7 +600,11 @@ function Synth.GenRender(generator, out, offset, count)
 		airflow = intakeAmount * (0.06 + 0.94 * smoothedThrottle ^ 1.5) * (0.35 + 0.65 * redlineShare)
 		valveFeedback1, valveFeedback2, valveInputGain = resonator(generator.valveHz, 0.0016, sampleRate)
 		valveHighFeedback1, valveHighFeedback2, valveHighInputGain = resonator(generator.valveHz * 1.47, 0.0009, sampleRate)
-		valveLevel = valvetrainAmount * (0.55 + 0.45 * redlineShare)
+		-- the ticking as at idle, fading with revs (the clicks come faster, twice per firing, and high up
+		-- merge into a hiss) and off throttle (the exhaust drops away, it doesn't). It was
+		-- 0.55 + 0.45 x revs at any throttle: above 2 kHz revving it was within 3-12 dB of the exhaust
+		-- on throttle and 4-6 dB over it off throttle, the vacuum-cleaner sound the user heard revving
+		valveLevel = valvetrainAmount * 0.55 * (1 - 0.6 * redlineShare) * (0.5 + 0.5 * smoothedThrottle)
 		whineLevel = whineAmount * (0.25 + 0.75 * smoothedThrottle) * (0.3 + 0.7 * redlineShare)
 		whineRadiansPerRpm = TAU * generator.whineOrder * pitch / 60 / sampleRate
 	end
