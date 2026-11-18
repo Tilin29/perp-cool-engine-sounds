@@ -124,8 +124,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   cuts it 60%), valvetrain (clicks at each firing and halfway, ringing `valveHz` and 1.47x), gear whine (a sine at `whineOrder` per
   crank turn, 0 = 17..31 from the seed, 0.25 + 0.75 x throttle). Per-layout defaults `INDUCTION_DEFAULTS`, merged into CHARACTER;
   a voice can set them (`AudioEngine.CHARACTER_FIELDS` in sh_presets = the character fields in the sound key). Levels
-  `INTAKE_RESONANCE_LEVEL` 0.026 / `INTAKE_HOWL_LEVEL` 0.35 / `VALVETRAIN_LEVEL` 0.035 / `WHINE_LEVEL` 0.015: at 70% redline full
-  throttle intake -26..-34 dB under the exhaust, valvetrain -24..-33, whine -41..-46 (rms above 250 Hz). The user's: the first
+  `INTAKE_RESONANCE_LEVEL` 0.010 / `INTAKE_HOWL_LEVEL` 0.14 / `VALVETRAIN_LEVEL` 0.035 / `WHINE_LEVEL` 0.015: at 50-95% redline full
+  throttle intake -33..-45 dB under the exhaust (0.026 / 0.35, -25..-38, revved like a vacuum cleaner: the user), valvetrain -24..-33, whine -41..-46 (rms above 250 Hz). The user's: the first
   levels (15 dB more intake, 6 more ticking, 12 more whine) covered the engine ("mainly the gears"), the steady whine sounded
   robotic, the intake should be faint. The whine wavers (~3 Hz drift, +-45% level, 0.4% pitch).
   Compared with real recordings (YouTube: M3 E92, S2000, Mustang GT, R8 V10 pulls next to drive_demo renders): real engines'
