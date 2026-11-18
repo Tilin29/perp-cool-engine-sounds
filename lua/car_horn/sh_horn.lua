@@ -1,6 +1,8 @@
 --[[
 	Car horn: which horn a car has and whether it sounds. Separate from the audio engine: any
-	car (prop_vehicle_jeep) has a horn, CONFIG.models' for its model or CONFIG.default.
+	car (prop_vehicle_jeep) has a horn: CONFIG.scripts' for its vehicle script (the server finds it on
+	spawn and sets NW2 horn_id: clients don't know a car's script), else CONFIG.models' for its model,
+	else CONFIG.default.
 
 	The driver's honk key sets NW2 horn_on on the car (sv_horn.lua) and counts every press in
 	horn_presses: a tap's press and release can land in the same tick, and the count still tells
@@ -11,6 +13,8 @@ local CarHorn = CAR_HORN
 CarHorn.ON_NW = "horn_on"
 CarHorn.PRESSES_NW = "horn_presses"
 CarHorn.PRESSES_WRAP = 1024
+-- the horn picked by the car's vehicle script (CONFIG.scripts), set by sv_horn.lua on spawn
+CarHorn.ID_NW = "horn_id"
 -- overuse (CONFIG.limit): on the car, how strong its horn sounds (1 full .. 0 its weakest); on the
 -- player, their charge as the server last worked it out, the CurTime() it was at and whether it ran out
 CarHorn.POWER_NW = "horn_power"
@@ -108,7 +112,8 @@ end
 function CarHorn.HornOf(vehicle)
 	if not IsValid(vehicle) or vehicle:GetClass() ~= "prop_vehicle_jeep" then return nil end
 	local config = CarHorn.CONFIG
-	local hornId = config.models[string.lower(vehicle:GetModel() or "")]
+	local hornId = vehicle:GetNW2String(CarHorn.ID_NW, "")
+	if not config.horns[hornId] then hornId = config.models[string.lower(vehicle:GetModel() or "")] end
 	if not config.horns[hornId or ""] then hornId = config.default end
 
 	return config.horns[hornId] and hornId or nil

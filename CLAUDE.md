@@ -406,7 +406,15 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
   the studio's export. Must stay plain Lua.
   Horns (the user kept these; a meep and a klaxon were dropped): dual (disc pair 415/520), trumpet, sport, american, airhorn
   (semi truck: two trumpets, the user's 190/246.4, 24 brassy harmonics, roughness 35 cents + growl 0.2 + heavy rasp, no
-  grille, a ragged 0.12 s start with only a 5% pitch rise).
+  grille, a ragged 0.12 s start with only a 5% pitch rise), police (a siren amplifier's electronic "air horn" through its PA speaker: `sweep`, a square wave swept
+  `low` -> `high` and back `rate` times a second, `rise`/`hold` shares, `riseCurve`/`fallCurve`; the rate is the buzz you hear.
+  Federal Signal patent US4980837: 500 -> 1650 Hz in 2.2 ms, hold 1.1, back over 8.4 ms, 85/s. Set from the user's recording
+  (police Dacia Logan): 68.5/s, ~540 <-> 1200 Hz, rising slow then fast; PA speaker 500-1500 Hz, an 850 Hz body resonance at 1.5 with direct 0.59 (the user's tuning); the user: "perfect".
+  A first try as a diaphragm horn at 156 Hz (from YouTube iG55bsscAHA) didn't sound right to the user; the user tunes it in the
+  studio, which has a sweep section and presets; a sweep horn saved there before sweeps existed is replaced by the file's). Police cars: `CONFIG.scripts[script]` (horn per vehicle script, over `models`: the police cars share
+  their civilian models; sv_horn reads the script on spawn, AudioPerpScript first, and sets NW2 `horn_id`, `CarHorn.ID_NW`,
+  which `HornOf` checks first) for the 9 marked police cars and the BearCat (also by model); the SL65 RTU addon picks it when
+  it exists. Alt plays it; while the siren sounds Alt still plays the siren's honkTone (the user's pick).
   `models`: a horn per car model, picked by what the real car would have (the horn module doesn't read the engine's car list):
   trumpet = German/British luxury and classic GTs (Mercedes, BMW, Aston, Jaguar, Range Rover, Maserati, Lexus, Cayenne,
   Veyron, the 250s and Miura), sport = supercars, american = US cars/trucks/work vehicles (+ Holden, DeLorean, Tesla),
