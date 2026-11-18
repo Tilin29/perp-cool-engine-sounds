@@ -86,7 +86,25 @@ Synth.LAYOUTS = {
 	electric = { angles = { 0 }, amp = { 1 }, banks = "L" },
 }
 
--- separate, fixed-seed generator for the engine's "build character" (same on every client)
+-- a number from a string, the same in LuaJIT and Lua 5.4 (it stays under 2^31: exact in doubles)
+function Synth.SeedFor(text)
+	local hash = 7
+	for i = 1, #text do hash = (hash * 31 + text:byte(i)) % 2147483629 end
+	return hash + 1   -- xorshift needs a state that isn't 0
+end
+
+--[[
+	Every engine's own random numbers, from its sound key without the redline (an engine family
+	sounds the same at any redline: a baked bank serves the lower ones). It used to be one seed
+	for every engine: all of them had the same cylinder-to-cylinder unevenness, only scaled, and
+	drew the same firing jitter. Electric motors keep the old seed.
+]]
+function Synth.EngineSeed(config)
+	if config.layout == "electric" then return 0x2545F491 end
+	return Synth.SeedFor(config.familyKey or config.id or config.soundKey or config.layout or "")
+end
+
+-- separate generator for the engine's "build character" (same on every client)
 local function seededRand(seed)
 	local state = seed
 	return function()
@@ -128,15 +146,51 @@ Synth.CHARACTER = {
 }
 
 --[[
+	What an engine sounds like apart from its exhaust (each layout's defaults, merged into its
+	CHARACTER; a car's or a preset's character can set them too). These skip the exhaust's filters:
+	  intake      induction: each cylinder's breath through the airbox (a resonance at intakeHz)
+	              and the throttle body's howl, both rising with throttle and revs
+	  valvetrain  valve gear ticking: metallic clicks twice per firing, ringing at valveHz
+	  whine       gearbox / drive gear whine, a thin tone at whineOrder per crank turn (0 = the
+	              engine's own, picked by its seed), stronger under load
+]]
+local INDUCTION_DEFAULTS = {
+	single  = { intake = 1.0, intakeHz = 210, valvetrain = 1.2, valveHz = 2600, whine = 0.6 },
+	vtwin   = { intake = 1.0, intakeHz = 200, valvetrain = 1.2, valveHz = 2500, whine = 0.6 },
+	ptwin   = { intake = 1.0, intakeHz = 230, valvetrain = 1.1, valveHz = 2700, whine = 0.6 },
+	triple  = { intake = 0.9, intakeHz = 250, valvetrain = 1.1, valveHz = 2900, whine = 0.9 },
+	i4      = { intake = 1.0, intakeHz = 280, valvetrain = 1.0, valveHz = 3100, whine = 1.0 },
+	boxer   = { intake = 0.8, intakeHz = 230, valvetrain = 1.3, valveHz = 2400, whine = 0.9 },
+	i5      = { intake = 1.0, intakeHz = 250, valvetrain = 1.0, valveHz = 2900, whine = 1.0 },
+	i6      = { intake = 1.1, intakeHz = 240, valvetrain = 0.9, valveHz = 3000, whine = 1.0 },
+	v6odd   = { intake = 0.9, intakeHz = 220, valvetrain = 1.1, valveHz = 2600, whine = 1.0 },
+	v8cross = { intake = 1.0, intakeHz = 180, valvetrain = 0.8, valveHz = 2300, whine = 1.0 },
+	v8flat  = { intake = 1.3, intakeHz = 240, valvetrain = 1.0, valveHz = 3200, whine = 1.0 },
+	v10     = { intake = 1.3, intakeHz = 250, valvetrain = 1.0, valveHz = 3300, whine = 1.0 },
+	v12     = { intake = 1.2, intakeHz = 230, valvetrain = 0.5, valveHz = 3400, whine = 1.0 },
+	v6      = { intake = 1.0, intakeHz = 230, valvetrain = 1.0, valveHz = 2900, whine = 1.0 },
+	flat6   = { intake = 1.3, intakeHz = 260, valvetrain = 1.2, valveHz = 2800, whine = 1.0 },
+	flat12  = { intake = 1.2, intakeHz = 240, valvetrain = 0.9, valveHz = 3200, whine = 1.0 },
+	w16     = { intake = 0.8, intakeHz = 170, valvetrain = 0.7, valveHz = 2600, whine = 1.2 },
+	rotary2 = { intake = 1.1, intakeHz = 300, valvetrain = 0.0, valveHz = 3000, whine = 0.9 },   -- ports, no valves
+	rotary3 = { intake = 1.1, intakeHz = 300, valvetrain = 0.0, valveHz = 3000, whine = 0.9 },
+	electric = { intake = 0, intakeHz = 250, valvetrain = 0, valveHz = 3000, whine = 0 },
+}
+for layoutKey, character in pairs(Synth.CHARACTER) do
+	for key, value in pairs(INDUCTION_DEFAULTS[layoutKey] or INDUCTION_DEFAULTS.i4) do character[key] = value end
+	character.whineOrder = 0
+end
+
+--[[
 	cylinderVariation / cylinderTiming: how different each cylinder is (fraction of strength, degrees).
 	o1 / halfOrder: low-order shaping of the cylinder strengths (see CHARACTER).
 	Returns firing intervals, strengths, cylinder count and the exhaust bank (1/2) per firing.
 ]]
-function Synth.LayoutParams(layoutKey, cylinderVariation, cylinderTiming, firstOrder, halfOrder)
+function Synth.LayoutParams(layoutKey, cylinderVariation, cylinderTiming, firstOrder, halfOrder, seed)
 	local layout = Synth.LAYOUTS[layoutKey] or Synth.LAYOUTS.i4
 	local firingCount = #layout.angles
 	local angles, strengths, banks = {}, {}, {}
-	local random = seededRand(0x1F2E3D4C)
+	local random = seededRand(seed or 0x1F2E3D4C)
 	for i = 1, firingCount do
 		angles[i] = layout.angles[i] + (cylinderTiming or 0) * random()
 		local angleRadians = layout.angles[i] * pi / 180
@@ -178,6 +232,8 @@ local function realismOf(config)
 		cylinderTiming = profileRealism.cylinderTiming or 0,
 		flowNoise = profileRealism.flowNoise or 0,
 		mechanical = profileRealism.mechanical or 0,
+		intake = profileRealism.intake or 0,
+		whine = profileRealism.whine or 0,
 		mufflerMode = profileRealism.mufflerMode or 0,
 		-- the turbo is a separate, shared sound now (switching it never needs a new engine), so
 		-- the exhaust pulses are rendered the same with or without it
@@ -193,8 +249,14 @@ Synth.RealismOf = realismOf
 
 function Synth.NewGen(sampleRate, config)
 	local realism = realismOf(config)
+	local engineSeed = Synth.EngineSeed(config)
 	local intervals, strengths, cylinderCount, banks = Synth.LayoutParams(config.layout, realism.cylinderVariation, realism.cylinderTiming,
-		realism.character.o1 * realism.voice, realism.character.o05 * realism.voice)
+		realism.character.o1 * realism.voice, realism.character.o05 * realism.voice, engineSeed)
+	local character = realism.character
+	-- the gear whine's order: the voice's own, else a whole order from 17 to 31 picked by the seed
+	local whineOrder = (character.whineOrder or 0) > 0 and character.whineOrder or 17 + engineSeed % 15
+	local firingSeed = bxor(engineSeed, 0x2545F491)
+	if firingSeed == 0 then firingSeed = 0x2545F491 end
 	return {
 		sampleRate = sampleRate, rpm = 0, targetRpm = 0, throttle = 0, targetThrottle = 0,
 		pitch = config.pitch or 1, tone = config.tone or 0.55, cylinderCount = cylinderCount, firingIntervals = intervals, firingStrengths = strengths, firingBanks = banks,
@@ -211,7 +273,17 @@ function Synth.NewGen(sampleRate, config)
 		mufflerResonanceRightState1 = 0, mufflerResonanceRightState2 = 0,
 		pulseSlowDecayRight = 1, pulseFastDecayRight = 1, noiseDecayRight = 1,
 		flowFilterState1 = 0, flowFilterState2 = 0, mechanicalEnvelope = 0, runningMeanSquare = 0.01, gurgleDrift = 0,
-		popImpulse = 0, noiseLowpass = 0, noiseLowpass2 = 0, rumbleNoise = 0, dcBlockInput = 0, dcBlockOutput = 0, seed = 0x2545F491,
+		popImpulse = 0, noiseLowpass = 0, noiseLowpass2 = 0, rumbleNoise = 0, dcBlockInput = 0, dcBlockOutput = 0,
+		seed = firingSeed,   -- the firing's random numbers: the engine's own too
+		-- intake, valvetrain and whine: Synth.GenRender writes them to bypassBuffer when it's set
+		-- (they skip the exhaust's filters; Synth.RenderControlled adds them after the chain)
+		-- a silencer (economy cars, config.muffle) comes with a quiet airbox
+		intakeAmount = realism.intake * (character.intake or 0) * (1 - 0.6 * (config.muffle or 0)), intakeHz = character.intakeHz or 250,
+		valvetrainAmount = realism.mechanical * (character.valvetrain or 0), valveHz = character.valveHz or 3000,
+		whineAmount = realism.whine * (character.whine or 0), whineOrder = whineOrder,
+		intakeEnvelope = 0, intakeDecay = 1, intakeState1 = 0, intakeState2 = 0, howlState1 = 0, howlState2 = 0,
+		valveEnvelope = 0, valveTickPending = false, valveState1 = 0, valveState2 = 0, valveHighState1 = 0, valveHighState2 = 0,
+		whinePhase = 0, bypassBuffer = nil,
 		levellerMeanSquare = 0.002, levellerGain = 1, popEnvelope = 0,
 		electric = config.layout == "electric",
 		allowPops = true,  -- random overrun / limiter pops (off for loops; the game triggers them)
@@ -354,6 +426,15 @@ function Synth.EVRender(generator, out, offset, count)
 	generator.evRipple1, generator.evRipple2 = ripple1, ripple2
 end
 
+-- levels of the layers that skip the exhaust (relative to the exhaust's running level)
+-- (measured in rms above 250 Hz at 70% of redline, full throttle: intake ~-9..-19 dB under the
+-- exhaust, valvetrain ~-18..-27, whine ~-29..-34; off throttle the intake all but goes, the ticking stays)
+local INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = 0.15, 2, 0.07, 0.06
+-- (for measuring the layers: dev tools set them, then put these back)
+Synth.BYPASS_LEVELS = function(intakeResonance, intakeHowl, valvetrain, whine)
+	INTAKE_RESONANCE_LEVEL, INTAKE_HOWL_LEVEL, VALVETRAIN_LEVEL, WHINE_LEVEL = intakeResonance, intakeHowl, valvetrain, whine
+end
+
 -- render n samples of raw generator output into out[o] .. out[o+n-1]
 function Synth.GenRender(generator, out, offset, count)
 	if generator.electric then return Synth.EVRender(generator, out, offset, count) end
@@ -471,6 +552,34 @@ function Synth.GenRender(generator, out, offset, count)
 	end
 	local mechanicalLevel = mechanicalAmount * 0.6 * (0.8 - 0.3 * redlineShare)
 
+	-- intake, valvetrain and whine (into generator.bypassBuffer, not through the exhaust chain)
+	local bypass = generator.bypassBuffer
+	local intakeAmount, valvetrainAmount, whineAmount = generator.intakeAmount, generator.valvetrainAmount, generator.whineAmount
+	if bypass and intakeAmount <= 0 and valvetrainAmount <= 0 and whineAmount <= 0 then bypass = nil end
+	local intakeEnvelope, intakeDecay = generator.intakeEnvelope, generator.intakeDecay
+	local intakeState1, intakeState2, howlState1, howlState2 = generator.intakeState1, generator.intakeState2, generator.howlState1, generator.howlState2
+	local valveEnvelope, valveTickPending = generator.valveEnvelope, generator.valveTickPending
+	local valveState1, valveState2, valveHighState1, valveHighState2 = generator.valveState1, generator.valveState2, generator.valveHighState1, generator.valveHighState2
+	local whinePhase = generator.whinePhase
+	local intakeFeedback1, intakeFeedback2, intakeInputGain, howlB0, howlA1, howlA2, airflow, valveLevel, whineLevel
+	local valveFeedback1, valveFeedback2, valveInputGain, valveHighFeedback1, valveHighFeedback2, valveHighInputGain, whineRadiansPerRpm
+	if bypass then
+		-- the airbox / runner resonance, a little higher with revs (the air column moves faster)
+		intakeFeedback1, intakeFeedback2, intakeInputGain = resonator(generator.intakeHz * (0.92 + 0.16 * redlineShare), 0.006, sampleRate)
+		-- the throttle body's howl: a broad band that climbs with the airflow
+		local howlHz = 900 + 0.18 * smoothedRpm * pitch
+		local omega = TAU * howlHz / sampleRate
+		local alpha = sin(omega) / (2 * 0.9)
+		howlB0, howlA1, howlA2 = alpha / (1 + alpha), -2 * cos(omega) / (1 + alpha), (1 - alpha) / (1 + alpha)
+		-- air through the engine: barely any with the throttle shut, full at full throttle and revs
+		airflow = intakeAmount * (0.06 + 0.94 * smoothedThrottle ^ 1.5) * (0.35 + 0.65 * redlineShare)
+		valveFeedback1, valveFeedback2, valveInputGain = resonator(generator.valveHz, 0.0016, sampleRate)
+		valveHighFeedback1, valveHighFeedback2, valveHighInputGain = resonator(generator.valveHz * 1.47, 0.0009, sampleRate)
+		valveLevel = valvetrainAmount * (0.55 + 0.45 * redlineShare)
+		whineLevel = whineAmount * (0.25 + 0.75 * smoothedThrottle) * (0.3 + 0.7 * redlineShare)
+		whineRadiansPerRpm = TAU * generator.whineOrder * pitch / 60 / sampleRate
+	end
+
 	local function nextRandom()
 		seed = bxor(seed, lshift(seed, 13)); seed = bxor(seed, rshift(seed, 17)); seed = bxor(seed, lshift(seed, 5))
 		return seed / 2147483648
@@ -499,6 +608,13 @@ function Synth.GenRender(generator, out, offset, count)
 			local newSlowDecay = exp(-1 / (sampleRate * pulseTime))
 			local newFastDecay = exp(-1 / (sampleRate * min(pulseTime * 0.22, 0.0018)))
 			local newNoiseDecay = exp(-1 / (sampleRate * pulseTime * 0.5))
+			if bypass then
+				-- the cylinder breathes in whether it fires or not; a valve closes now and halfway on
+				intakeEnvelope = intakeEnvelope + 1
+				intakeDecay = exp(-1 / (sampleRate * gapSeconds * 0.45))
+				valveEnvelope = valveEnvelope + 1
+				valveTickPending = true
+			end
 			local rightBank = banks[firingIndex + 1] == 2
 			if rightBank then
 				pulseSlowDecayRight = newSlowDecay
@@ -608,7 +724,8 @@ function Synth.GenRender(generator, out, offset, count)
 			-- grit rides on each exhaust pulse (rasp), rather than a steady hiss (scream)
 			sample = sample + flowSample * flowAmount * flowLoad * runningLevel * (0.12 + 0.88 * pulseModulation)
 		end
-		if mechanicalEnvelope > 1e-5 then sample = sample + mechanicalEnvelope * runningLevel * (noise - noiseLowpass) end
+		-- (without the bypass, e.g. pop one-shots, the old faint ticking stays in the exhaust)
+		if not bypass and mechanicalEnvelope > 1e-5 then sample = sample + mechanicalEnvelope * runningLevel * (noise - noiseLowpass) end
 		-- pops fade in over ~1 ms so they never start with a click
 		popEnvelope = popEnvelope + (popImpulse - popEnvelope) * popEnvelopeSmoothing; popImpulse = popImpulse * popDecay
 		if popEnvelope > 0.002 then sample = sample + popEnvelope * noiseLowpass * 2.2 end
@@ -624,6 +741,41 @@ function Synth.GenRender(generator, out, offset, count)
 			levellerGain = levellerGain + (wantedGain - levellerGain) * levellerSmoothing
 		end
 		out[offset + i] = scaledSample * levellerGain * gain
+		if bypass then
+			if valveTickPending and crankAngle >= firingGap * 0.5 then valveEnvelope = valveEnvelope + 0.7; valveTickPending = false end
+			intakeEnvelope = intakeEnvelope * intakeDecay
+			valveEnvelope = valveEnvelope * mechanicalDecay
+			-- intake: the breath rings the airbox; the howl is the air rushing past the throttle
+			local breath = noise * intakeEnvelope
+			local intakeResonance = intakeFeedback1 * intakeState1 - intakeFeedback2 * intakeState2 + breath * intakeInputGain
+			intakeState2 = intakeState1
+			intakeState1 = intakeResonance
+			local howl = howlB0 * breath + howlState1
+			howlState1 = -howlA1 * howl + howlState2
+			howlState2 = -howlB0 * breath - howlA2 * howl
+			-- valvetrain: a click ringing two metal modes
+			local click = valveEnvelope * (noise - noiseLowpass)
+			local valveRing = valveFeedback1 * valveState1 - valveFeedback2 * valveState2 + click * valveInputGain
+			valveState2 = valveState1
+			valveState1 = valveRing
+			local valveRingHigh = valveHighFeedback1 * valveHighState1 - valveHighFeedback2 * valveHighState2 + click * valveHighInputGain
+			valveHighState2 = valveHighState1
+			valveHighState1 = valveRingHigh
+			-- whine: a thin tone locked to the crank
+			whinePhase = whinePhase + whineRadiansPerRpm * rpm
+			if whinePhase > TAU then whinePhase = whinePhase - TAU end
+			local bypassSample = airflow * (INTAKE_RESONANCE_LEVEL * intakeResonance + INTAKE_HOWL_LEVEL * howl)
+				+ valveLevel * VALVETRAIN_LEVEL * (valveRing + 0.6 * valveRingHigh + 0.25 * click)
+				+ whineLevel * WHINE_LEVEL * sin(whinePhase)
+			bypass[offset + i] = bypassSample * runningLevel * 0.3 * levellerGain * gain
+		end
+	end
+	if bypass then
+		generator.intakeEnvelope, generator.intakeDecay = intakeEnvelope, intakeDecay
+		generator.intakeState1, generator.intakeState2, generator.howlState1, generator.howlState2 = intakeState1, intakeState2, howlState1, howlState2
+		generator.valveEnvelope, generator.valveTickPending = valveEnvelope, valveTickPending
+		generator.valveState1, generator.valveState2, generator.valveHighState1, generator.valveHighState2 = valveState1, valveState2, valveHighState1, valveHighState2
+		generator.whinePhase = whinePhase
 	end
 
 	generator.rpm = smoothedRpm
@@ -982,6 +1134,8 @@ function Synth.RenderControlled(generator, chain, opts, total, yieldFn)
 	local tone, pitch = generator.tone, generator.pitch
 	local skip = opts.skip or 0
 	local scratch = {}
+	local bypass = not generator.electric and {} or nil
+	generator.bypassBuffer = bypass
 	local sinceYield = 0
 	while position < total do
 		if position >= nextControl then
@@ -995,8 +1149,10 @@ function Synth.RenderControlled(generator, chain, opts, total, yieldFn)
 		end
 		local count = min(BLOCK_SIZE, nextControl - position, total - position)
 		updateCutoff(chain, count)
+		if bypass then for i = 1, count do bypass[i] = 0 end end
 		Synth.GenRender(generator, scratch, 1, count)
 		chainBlock(chain, scratch, 1, count)
+		if bypass then for i = 1, count do scratch[i] = scratch[i] + bypass[i] end end
 		for i = 1, count do
 			local outIndex = position + i - skip
 			if outIndex >= 1 then out[outIndex] = scratch[i] end
@@ -1005,6 +1161,7 @@ function Synth.RenderControlled(generator, chain, opts, total, yieldFn)
 		sinceYield = sinceYield + count
 		if yieldFn and sinceYield >= 4096 then sinceYield = 0; yieldFn() end
 	end
+	generator.bypassBuffer = nil
 	return out
 end
 
