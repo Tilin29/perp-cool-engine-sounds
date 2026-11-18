@@ -25,8 +25,14 @@ CarHorn.EXHAUSTED_NW = "horn_exhausted"
 CarHorn.LimitConVar = CreateConVar("car_horn_limit", "1", { FCVAR_ARCHIVE, FCVAR_REPLICATED },
 	"1 = a player's horn runs out of breath when overused (CAR_HORN.CONFIG.limit), 0 = no limit")
 
-function CarHorn.Limited()
-	return CarHorn.LimitConVar:GetBool()
+-- with a vehicle: whether its horn has the limit (an `unlimited` horn, the police PA horn, never runs out)
+function CarHorn.Limited(vehicle)
+	if not CarHorn.LimitConVar:GetBool() then return false end
+	if vehicle == nil then return true end
+	local hornId = CarHorn.HornOf(vehicle)
+	local horn = hornId and CarHorn.CONFIG.horns[hornId]
+
+	return not (horn and horn.unlimited)
 end
 
 --[[

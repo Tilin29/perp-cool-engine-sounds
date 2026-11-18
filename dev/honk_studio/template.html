@@ -183,7 +183,7 @@ function status(t, cls) { $('status').textContent = t; $('status').className = c
 // ---------------------------------------------------------------------------------------------
 const tilted = (count, power) => Array.from({ length: count }, (_, i) => +Math.pow(i + 1, -power).toFixed(2))
 const HORN_SHAPE = {
-  name: 'Horn', level: 1, units: [{ f: 415, level: 1 }, { f: 520, level: 0.85 }],
+  name: 'Horn', level: 1, unlimited: false, units: [{ f: 415, level: 1 }, { f: 520, level: 0.85 }],
   harmonics: tilted(24, 0.35), strike: 1,
   rasp: 0.35, air: 0, jitter: { rate: 3, depth: 3 }, shimmer: 0.15, grille: 0.6, roughness: 6, growl: 0, flutter: { rate: 0, depth: 0 },
   direct: 0.25, resonances: [{ f: 2350, q: 6, level: 1 }, { f: 3500, q: 8, level: 0.55 }, { f: 1100, q: 2, level: 0.35 }],
@@ -222,6 +222,8 @@ function normalize(c) {
   // an electronic (sweep) horn of the file saved here before the studio knew sweeps: the file's
   for (const [id, h] of Object.entries(d.horns || {})) {
     if (h.sweep && h.sweep.level > 0 && c.horns[id] && !c.horns[id].sweep) c.horns[id] = clone(h)
+    // saved before the studio knew `unlimited`: the file's
+    if (h.unlimited && c.horns[id] && c.horns[id].unlimited === undefined) c.horns[id].unlimited = true
   }
   if (!c.scripts || typeof c.scripts !== 'object' || Array.isArray(c.scripts)) c.scripts = {}
   for (const [k, id] of Object.entries(d.scripts || {})) if (!(k in c.scripts)) c.scripts[k] = id
@@ -271,7 +273,7 @@ let inside = false
 // the release is played, not rendered: it isn't part of the key
 function renderKey(id) {
   const h = Object.assign({}, CFG.horns[id])
-  delete h.release; delete h.level; delete h.name
+  delete h.release; delete h.level; delete h.name; delete h.unlimited
   return JSON.stringify([h, CFG.sampleRate, inside && CFG.cabin.muffle])
 }
 function requestRender(id) {
@@ -344,7 +346,8 @@ function levelOf(id) { const h = CFG.horns[id]; return CFG.volume * (h ? h.level
 const charge = { charge: null, at: 0, honking: false, exhausted: false, croakUntil: null }
 let muted = false   // this press is silent: run dry, or pressed while exhausted
 const nowSeconds = () => performance.now() / 1000
-const limiting = () => $('limitOn').checked
+// the overuse limit, as in game: not for a horn that never runs out (unlimited, the police PA horn)
+const limiting = (id = SEL) => $('limitOn').checked && !(CFG && CFG.horns[id] && CFG.horns[id].unlimited)
 function advanceCharge(now) {
   const limit = CFG.limit
   if (charge.charge === null) charge.charge = limit.charge
@@ -388,7 +391,7 @@ function relaxFactor(heldFor) {
 }
 // the voice's level and pitch now: weakened by the charge, eased down on a long hold
 function voiceTargets(v) {
-  if (!limiting()) return [levelOf(v.id), 1]
+  if (!limiting(v.id)) return [levelOf(v.id), 1]
   const [weakVolume, weakPitch] = weakFactors(chargeStrength())
   return [levelOf(v.id) * weakVolume * relaxFactor(ctx.currentTime - v.startedAt), weakPitch]
 }
@@ -779,6 +782,11 @@ function buildEditor() {
         field('Air', h, 'air', { min: 0, max: 0.5, step: 0.005, change: onHorn }),
         el('p', { class: 'hint' }, 'A rush of air under the tone, there from the moment it\'s pressed (an air horn).'),
         field('Horn level', h, 'level', { min: 0, max: 1, step: 0.01, change: onHornPlayed }),
+        (() => {
+          const box = el('input', { type: 'checkbox', checked: !!h.unlimited, onchange: () => { h.unlimited = box.checked; save(); updateExport() } })
+          return el('div', { class: 'row' }, el('label', null, 'Never runs out'), box)
+        })(),
+        el('p', { class: 'hint' }, 'The overuse limit skips this horn: no weakening, croak or easing down (the police PA horn).'),
       ),
       el('div', null,
         field('Flutter rate', h.flutter, 'rate', { min: 0, max: 30, step: 0.5, unit: 'Hz', change: onHorn }),
@@ -994,7 +1002,7 @@ window.addEventListener('resize', () => drawWave())
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
 const GLOBAL_ORDER = ['volume', 'soundLevel', 'sampleRate', 'doppler', 'distance', 'limit', 'cabin', 'keys', 'default', 'models', 'scripts', 'horns']
-const HORN_ORDER = ['name', 'level', 'units', 'harmonics', 'strike', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'direct', 'resonances', 'sweep', 'attack', 'release', 'speaker']
+const HORN_ORDER = ['name', 'level', 'unlimited', 'units', 'harmonics', 'strike', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'direct', 'resonances', 'sweep', 'attack', 'release', 'speaker']
 const SUB_ORDER = {
   units: ['f', 'level'], resonances: ['f', 'q', 'level'], sweep: ['low', 'high', 'rate', 'rise', 'hold', 'riseCurve', 'fallCurve', 'level'], flutter: ['rate', 'depth'], jitter: ['rate', 'depth'], attack: ['time', 'pitch', 'curve'], release: ['time', 'pitch'],
   speaker: ['highpass', 'lowpass', 'drive', 'asymmetry', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['honk'], cabin: ['volume', 'muffle'], distance: ['full', 'at', 'volume', 'silent'],
@@ -1022,6 +1030,7 @@ function exportLua() {
         out.push(tab(2) + luaKey(id) + ' = {')
         for (const hk of HORN_ORDER) {
           const hv = h[hk]
+          if (hk === 'unlimited' && !hv) continue
           if (hk === 'units' || hk === 'resonances') {
             if (!hv.length) { out.push(tab(3) + hk + ' = {},'); continue }
             out.push(tab(3) + hk + ' = {')

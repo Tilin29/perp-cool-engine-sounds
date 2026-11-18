@@ -106,7 +106,7 @@ net.Receive("car_horn", function(_, player)
 	-- a honk something else plays (car_horn/replace: the police siren's horn override) isn't charged.
 	-- horn_on is still set: that's how whatever replaces it hears the key
 	player.hornReplaced = hook.Run("car_horn/replace", vehicle) == true
-	if CarHorn.Limited() and not player.hornReplaced then
+	if CarHorn.Limited(vehicle) and not player.hornReplaced then
 		local state = chargeOf(player)
 		local sounds = CarHorn.PressCharge(state, now)
 		sendCharge(player)
@@ -128,7 +128,7 @@ hook.Add("Tick", "car_horn", function()
 		local vehicle = IsValid(player) and player.hornVehicle
 		if not IsValid(vehicle) or vehicle:GetDriver() ~= player then
 			if IsValid(player) then stopHonk(player) else honking[player] = nil end
-		elseif CarHorn.Limited() and not player.hornReplaced then
+		elseif CarHorn.Limited(vehicle) and not player.hornReplaced then
 			local state = chargeOf(player)
 			if CarHorn.HoldCharge(state, now) then
 				setPower(vehicle, CarHorn.ChargeStrength(state))

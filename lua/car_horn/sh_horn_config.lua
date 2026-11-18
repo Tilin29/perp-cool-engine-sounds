@@ -24,6 +24,7 @@
 	horns[id]
 	  name       shown in the studio
 	  level      the horn's own volume, 0..1
+	  unlimited  true = never runs out of breath (the overuse limit skips it: the police PA horn)
 	  units      the horn units sounding together: f (Hz), level. A car's pair is usually a major
 	             third apart (a high and a low horn), a truck's air horn two or three trumpets
 	  harmonics  level of harmonic 1, 2, 3...: the diaphragm's buzz (all of them, slowly falling = brassy).
@@ -333,6 +334,7 @@ CAR_HORN.CONFIG = {
 		police = {
 			name = "Police electronic",
 			level = 1,
+			unlimited = true,
 			units = {},
 			harmonics = { 1 },
 			strike = 0,
