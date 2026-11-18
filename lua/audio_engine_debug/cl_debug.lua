@@ -1403,16 +1403,17 @@ local function buildHandlingPage(pagePanel)
 		for _, cvarName in ipairs(EngineDebug.HANDLING_CVARS) do changes[#changes + 1] = { cvarName, checked and 0 or 1 } end
 		sendCvars(changes)
 	end)
-	paragraph(scrollPanel, "Off = the cars drive on their vehicle script alone, as on PERP without this addon: no anti-spin setup, traction control " ..
-		"or stability control. PERP's physics still go onto cars that fell back to the test script, so they match the server.")
+	paragraph(scrollPanel, "Off = the cars drive on their vehicle script alone, as on PERP without this addon: Source's own tyres, " ..
+		"no handling model. PERP's physics still go onto cars that fell back to the test script, so they match the server. " ..
+		"The driver's prediction (audio_engine_predict, client) runs either way.")
 	local boxes = {}
-	for _, cvarName in ipairs({ "audio_engine_handling", "audio_engine_traction", "audio_engine_stability", "audio_engine_cruise" }) do
+	for _, cvarName in ipairs({ "audio_engine_drivemodel", "audio_engine_cruise" }) do
 		local cvarEntry = EngineDebug.SERVER_CVAR_SET[cvarName]
 		boxes[cvarName] = check(scrollPanel, cvarEntry[3] .. "   (" .. cvarName .. ")", true, function(checked) sendCvars({ { cvarName, checked and 1 or 0 } }) end)
 	end
-	paragraph(scrollPanel, "Power cut after a turn: when you let go of A/D with W held, the stability control's straight-line hold takes over " ..
-		"and counts the car's leftover rotation from the turn as sliding; traction control then takes the power down to the slide " ..
-		"floor. Switch traction or stability off above, or lower Straight-line hold / raise the slide floor below, to compare.", COLORS.amber)
+	paragraph(scrollPanel, "Prediction (this client): audio_engine_predict, audio_engine_predict_others; audio_engine_predict_debug 1 draws the " ..
+		"server's car red, Source's yellow and the predicted one green; audio_engine_predict_stats prints how it's doing. " ..
+		"It only shows on a server you joined (not single player or a listen server's host): try net_fakelag 150 there.", COLORS.amber)
 
 	heading(scrollPanel, "Values (live, until a map change)")
 	local sliders = {}
@@ -1431,7 +1432,7 @@ local function buildHandlingPage(pagePanel)
 	buttons:Add("Copy values as Lua", function()
 		local lines = {}
 		for i, tunable in ipairs(EngineDebug.TUNABLES) do
-			local sourceFile = tunable[1] == "STABILITY_DEFAULTS" and "sv_stability.lua" or "sv_handling.lua"
+			local sourceFile = "sh_handling.lua"
 			lines[#lines + 1] = string.format("E.%s.%s = %s   -- %s", tunable[1], tunable[2], KeyValues.Num(serverState.tunables[i] or 0), sourceFile)
 		end
 		SetClipboardText(table.concat(lines, "\n"))

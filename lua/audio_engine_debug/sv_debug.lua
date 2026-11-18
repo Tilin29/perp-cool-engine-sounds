@@ -84,12 +84,8 @@ net.Receive("audio_dbg_tune", function(_, requester)
 	local targetTable = tunable and AudioEngine[tunable[1]]
 	if not (targetTable and newValue == newValue) then return end
 	targetTable[tunable[2]] = math.Clamp(newValue, tunable[3], tunable[4])
-	-- the anti-spin setup is built into each car's params: rebuild them
-	if tunable[1] == "ANTI_SPIN" and AudioEngine.RebaseHandling then
-		for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
-			if IsValid(vehicle) then AudioEngine.RebaseHandling(vehicle) end
-		end
-	end
+	-- the clients' prediction runs the same model: they get the tuned values too
+	if tunable[1] == "HANDLING" then SetGlobal2String("audio_dbg_handling", EngineDebug.EncodeHandling(EngineDebug.HANDLING_DEFAULT)) end
 	sendState(requester)
 end)
 
@@ -294,6 +290,7 @@ cvars.AddChangeCallback("audio_engine_debug", function(_, _, newValue)
 		if value ~= nil and AudioEngine[tunable[1]] then AudioEngine[tunable[1]][tunable[2]] = value end
 	end
 	SetGlobal2String("audio_dbg_rev", "")
+	SetGlobal2String("audio_dbg_handling", "")
 	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
 		if IsValid(vehicle) then
 			vehicle:SetNW2String("audio_dbg_gear", "")

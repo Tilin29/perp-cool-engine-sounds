@@ -123,12 +123,8 @@ function AudioEngine.ApplyPerformance(vehicle, profile)
 	local accelerationScale = profile and profile.accel or 1
 	local topSpeedOverride = profile and profile.vmax or 0
 	local adjusted = table.Copy(base)
-	-- audioLimiterPower: cruise control's power trim (sv_cruise.lua, sv_handling.lua)
-	-- audioTractionPower: launch traction control's power trim; audioSteerLockScale: the lock at speed (sv_handling.lua)
-	adjusted.engine.horsepower = base.engine.horsepower * accelerationScale * (vehicle.audioTractionPower or 1) * (vehicle.audioLimiterPower or 1)
-	if adjusted.steering and adjusted.steering.degreesFast and vehicle.audioSteerLockScale then
-		adjusted.steering.degreesFast = base.steering.degreesFast * vehicle.audioSteerLockScale
-	end
+	-- audioLimiterPower: the speed limiter's power trim (sv_cruise.lua)
+	adjusted.engine.horsepower = base.engine.horsepower * accelerationScale * (vehicle.audioLimiterPower or 1)
 	if topSpeedOverride > 0 then adjusted.engine.maxSpeed = topSpeedOverride / 1.609344 * HU_PER_MPH end
 	AudioEngine.SetParams(vehicle, adjusted)
 end
@@ -136,8 +132,8 @@ end
 local function track(entity)
 	if not isOurs(entity) then return end
 	trackedVehicles[entity] = true
-	-- PERP physics on the test script and the anti-spin setup (sv_handling.lua), before the
-	-- car's physics are captured as the base the tuning menu works from
+	-- PERP physics on the test script (sv_handling.lua), before the car's physics are captured
+	-- as the base the tuning menu works from
 	AudioEngine.PrepareHandling(entity)
 	-- a spiked car PERP spawned in place of one it removed keeps that one's gearing
 	if entity.audioReplacedGearing == nil then entity.audioReplacedGearing = entity.audioSpiked and findReplacedCar(entity) or false end

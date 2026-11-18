@@ -24,7 +24,10 @@
 	  level      the horn's own volume, 0..1
 	  units      the horn units sounding together: f (Hz), level. A car's pair is usually a major
 	             third apart (a high and a low horn), a truck's air horn two or three trumpets
-	  harmonics  level of harmonic 1, 2, 3...: the diaphragm's buzz (all of them, slowly falling = brassy)
+	  harmonics  level of harmonic 1, 2, 3...: the diaphragm's buzz (all of them, slowly falling = brassy).
+	             With resonances, keep them nearly flat and let the resonances colour it
+	  strike     0..1: how sharply the diaphragm hits its stop each cycle (1 = every harmonic peaking at
+	             once, a kick that sets the resonances ringing; 0 = a smooth wave)
 	  rasp       noise each cycle where the diaphragm strikes its stop, 0 = clean: the grit of a cheap horn
 	  air        a steady rush of air under the tone, 0 = none: an air horn's, there from the moment it's pressed
 	  jitter     rate (Hz) and depth (cents) of each unit's own random pitch drift: a steady pitch sounds synthetic
@@ -34,10 +37,19 @@
 	  growl      every other cycle stronger, 0..1: a rumble an octave under the note
 	  grille     the bumper and grille in front of the horn, 0..1: their short reflections colour it (0 = in free air)
 	  flutter    rate (Hz) and depth (cents) of a pitch wobble (an air horn's reed)
+	  resonances the horn's body: its tone disc (or a trumpet's air column) rung by every strike, at its own
+	             fixed pitches whatever note the units buzz at: f (Hz), q (higher = narrower, rings longer),
+	             level. This, not the harmonics, is what makes it sound like a horn rather than a note
+	  direct     how much of the diaphragm's own buzz passes by the resonances (only with resonances)
 	  attack     on pressing: time (s) to reach full pitch and level, starting at `pitch` x the
-	             horn's, shaped by `curve` (1 = even, below 1 = fast at first, above 1 = slow at first)
-	  release    on letting go: time (s) to fade out, falling to `pitch` x the horn's
-	  speaker    highpass / lowpass (Hz), drive (0 = clean, more = a harsher driver),
+	             horn's, shaped by `curve` (1 = even, below 1 = fast at first, above 1 = slow at first).
+	             A real electric horn is at full within ~10-15 ms with hardly any pitch rise: a long
+	             scoop up to pitch is a cartoon "bwah"
+	  release    on letting go: time (s) to fade out, falling to `pitch` x the horn's. An electric horn
+	             stops within a few cycles at its own pitch (1): a pitch fall is a cartoon "boop"
+	             (an air horn sags a little as its air runs out)
+	  speaker    highpass / lowpass (Hz), drive (0 = clean, more = a harsher driver), asymmetry 0..0.9
+	             (the drive clipping one way sooner: the pair's units mix, a low snarl under the note),
 	             resonance (Hz), resonanceQ, resonanceGain (dB): the horn trumpet's peak
 ]]
 CAR_HORN = CAR_HORN or {}
@@ -175,18 +187,25 @@ CAR_HORN.CONFIG = {
 				{ f = 415, level = 1 },
 				{ f = 520, level = 0.85 },
 			},
-			harmonics = { 0.5, 0.6, 0.75, 0.9, 1, 1, 0.85, 0.7, 0.55, 0.42, 0.32, 0.25, 0.19, 0.15, 0.11, 0.08 },
-			rasp = 0.2,
+			harmonics = { 1, 0.78, 0.68, 0.62, 0.57, 0.53, 0.51, 0.48, 0.46, 0.45, 0.43, 0.42, 0.41, 0.4, 0.39, 0.38, 0.37, 0.36, 0.36, 0.35, 0.34, 0.34, 0.33, 0.33 },
+			strike = 1,
+			rasp = 0.35,
 			air = 0,
-			jitter = { rate = 9, depth = 10 },
-			shimmer = 0.12,
+			jitter = { rate = 3, depth = 3 },
+			shimmer = 0.15,
 			grille = 0.6,
-			roughness = 0,
+			roughness = 6,
 			growl = 0,
 			flutter = { rate = 0, depth = 0 },
-			attack = { time = 0.025, pitch = 0.92, curve = 0.5 },
-			release = { time = 0.06, pitch = 0.94 },
-			speaker = { highpass = 250, lowpass = 6500, drive = 1.5, resonance = 2500, resonanceQ = 1.2, resonanceGain = 4 },
+			direct = 0.25,
+			resonances = {
+				{ f = 2350, q = 6, level = 1 },
+				{ f = 3500, q = 8, level = 0.55 },
+				{ f = 1100, q = 2, level = 0.35 },
+			},
+			attack = { time = 0.012, pitch = 0.97, curve = 0.5 },
+			release = { time = 0.03, pitch = 1 },
+			speaker = { highpass = 300, lowpass = 7000, drive = 3.5, asymmetry = 0.2, resonance = 2500, resonanceQ = 1.2, resonanceGain = 0 },
 		},
 		trumpet = {
 			name = "Trumpet pair",
@@ -195,18 +214,25 @@ CAR_HORN.CONFIG = {
 				{ f = 360, level = 1 },
 				{ f = 452, level = 0.9 },
 			},
-			harmonics = { 0.85, 1, 0.9, 0.75, 0.6, 0.5, 0.4, 0.32, 0.25, 0.2, 0.15, 0.12 },
-			rasp = 0.12,
+			harmonics = { 1, 0.71, 0.58, 0.5, 0.45, 0.41, 0.38, 0.35, 0.33, 0.32, 0.3, 0.29, 0.28, 0.27, 0.26, 0.25, 0.24, 0.24, 0.23, 0.22 },
+			strike = 0.8,
+			rasp = 0.18,
 			air = 0,
-			jitter = { rate = 8, depth = 8 },
+			jitter = { rate = 3, depth = 3 },
 			shimmer = 0.1,
 			grille = 0.5,
-			roughness = 0,
+			roughness = 4,
 			growl = 0,
 			flutter = { rate = 0, depth = 0 },
-			attack = { time = 0.035, pitch = 0.93, curve = 0.5 },
-			release = { time = 0.08, pitch = 0.95 },
-			speaker = { highpass = 180, lowpass = 5000, drive = 1.2, resonance = 1300, resonanceQ = 0.9, resonanceGain = 4 },
+			direct = 0.5,
+			resonances = {
+				{ f = 1250, q = 2.5, level = 1 },
+				{ f = 2500, q = 4, level = 0.5 },
+				{ f = 620, q = 1.5, level = 0.3 },
+			},
+			attack = { time = 0.015, pitch = 0.98, curve = 0.5 },
+			release = { time = 0.035, pitch = 1 },
+			speaker = { highpass = 200, lowpass = 6000, drive = 1.8, asymmetry = 0.2, resonance = 1300, resonanceQ = 0.9, resonanceGain = 0 },
 		},
 		sport = {
 			name = "Sport pair",
@@ -215,18 +241,25 @@ CAR_HORN.CONFIG = {
 				{ f = 500, level = 1 },
 				{ f = 630, level = 0.85 },
 			},
-			harmonics = { 0.5, 0.65, 0.85, 1, 1, 0.85, 0.65, 0.5, 0.38, 0.28, 0.2, 0.15 },
-			rasp = 0.15,
+			harmonics = { 1, 0.78, 0.68, 0.62, 0.57, 0.53, 0.51, 0.48, 0.46, 0.45, 0.43, 0.42, 0.41, 0.4, 0.39, 0.38, 0.37, 0.36, 0.36, 0.35 },
+			strike = 1,
+			rasp = 0.3,
 			air = 0,
-			jitter = { rate = 10, depth = 9 },
-			shimmer = 0.1,
+			jitter = { rate = 3, depth = 3 },
+			shimmer = 0.13,
 			grille = 0.6,
-			roughness = 0,
+			roughness = 6,
 			growl = 0,
 			flutter = { rate = 0, depth = 0 },
-			attack = { time = 0.02, pitch = 0.93, curve = 0.5 },
-			release = { time = 0.05, pitch = 0.95 },
-			speaker = { highpass = 300, lowpass = 7500, drive = 1.3, resonance = 3000, resonanceQ = 1.2, resonanceGain = 4 },
+			direct = 0.25,
+			resonances = {
+				{ f = 3000, q = 6, level = 1 },
+				{ f = 4400, q = 8, level = 0.5 },
+				{ f = 1400, q = 2, level = 0.3 },
+			},
+			attack = { time = 0.01, pitch = 0.97, curve = 0.5 },
+			release = { time = 0.025, pitch = 1 },
+			speaker = { highpass = 350, lowpass = 8500, drive = 3.2, asymmetry = 0.2, resonance = 3000, resonanceQ = 1.2, resonanceGain = 0 },
 		},
 		american = {
 			name = "American pair",
@@ -235,18 +268,25 @@ CAR_HORN.CONFIG = {
 				{ f = 330, level = 1 },
 				{ f = 415, level = 0.9 },
 			},
-			harmonics = { 0.7, 0.8, 0.9, 1, 0.95, 0.85, 0.75, 0.62, 0.5, 0.4, 0.32, 0.25, 0.2, 0.15, 0.12, 0.09 },
-			rasp = 0.18,
+			harmonics = { 1, 0.76, 0.64, 0.57, 0.53, 0.49, 0.46, 0.44, 0.42, 0.4, 0.38, 0.37, 0.36, 0.35, 0.34, 0.33, 0.32, 0.31, 0.31, 0.3, 0.3, 0.29, 0.29, 0.28 },
+			strike = 0.9,
+			rasp = 0.28,
 			air = 0,
-			jitter = { rate = 8, depth = 10 },
-			shimmer = 0.12,
+			jitter = { rate = 3, depth = 3 },
+			shimmer = 0.13,
 			grille = 0.6,
-			roughness = 0,
+			roughness = 5,
 			growl = 0,
 			flutter = { rate = 0, depth = 0 },
-			attack = { time = 0.03, pitch = 0.92, curve = 0.5 },
-			release = { time = 0.07, pitch = 0.94 },
-			speaker = { highpass = 200, lowpass = 6000, drive = 1.6, resonance = 1900, resonanceQ = 1.1, resonanceGain = 4 },
+			direct = 0.35,
+			resonances = {
+				{ f = 1700, q = 3.5, level = 1 },
+				{ f = 2900, q = 5, level = 0.5 },
+				{ f = 800, q = 2, level = 0.3 },
+			},
+			attack = { time = 0.014, pitch = 0.97, curve = 0.5 },
+			release = { time = 0.035, pitch = 1 },
+			speaker = { highpass = 220, lowpass = 6500, drive = 3.2, asymmetry = 0.2, resonance = 1900, resonanceQ = 1.1, resonanceGain = 0 },
 		},
 		airhorn = {
 			name = "Air horn",
@@ -256,6 +296,7 @@ CAR_HORN.CONFIG = {
 				{ f = 246.4, level = 0.9 },
 			},
 			harmonics = { 0.8, 1, 0.95, 0.9, 0.82, 0.75, 0.68, 0.6, 0.53, 0.47, 0.42, 0.37, 0.33, 0.29, 0.26, 0.23, 0.2, 0.18, 0.16, 0.14, 0.12, 0.1, 0.09, 0.08 },
+			strike = 0,
 			rasp = 0.5,
 			air = 0.04,
 			jitter = { rate = 4, depth = 6 },
@@ -264,9 +305,11 @@ CAR_HORN.CONFIG = {
 			roughness = 35,
 			growl = 0.2,
 			flutter = { rate = 0, depth = 0 },
+			direct = 1,
+			resonances = {},
 			attack = { time = 0.12, pitch = 0.95, curve = 0.5 },
 			release = { time = 0.18, pitch = 0.93 },
-			speaker = { highpass = 120, lowpass = 6000, drive = 3, resonance = 700, resonanceQ = 0.7, resonanceGain = 5 },
+			speaker = { highpass = 120, lowpass = 6000, drive = 3, asymmetry = 0, resonance = 700, resonanceQ = 0.7, resonanceGain = 5 },
 		},
 	},
 }

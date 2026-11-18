@@ -5,8 +5,8 @@
 	it's on: the limit moves to the next 5 mph step up or down.
 
 	You still drive the car: W accelerates at full power up to AudioEngine.CRUISE.band under the limit,
-	then the engine's power is trimmed to hold the limit exactly (sv_handling.lua,
-	vehicle.audioLimiterPower: smooth, no surging). Let go of W and the car coasts as usual. Over the
+	then the engine's power is trimmed to hold the limit exactly (vehicle.audioLimiterPower, put
+	on the car by sv_engine's AudioEngine.ApplyPerformance: smooth, no surging). Let go of W and the car coasts as usual. Over the
 	limit (it was lowered, or downhill) the power is cut and it brakes, harder the further over
 	it is, up to brakeMax: a lowered limit pulls the car down briskly, but like real brakes.
 	Getting out and the engine stopping switch it off.
@@ -27,13 +27,13 @@ AudioEngine.CRUISE = {
 	-- difference, so it finds the power that holds the speed by itself, for any car. (A PI on
 	-- the speed error overshot by 1-2 mph and settled slowly.)
 	band = 6, accelerationGain = 1.2, powerGain = 0.25, minPower = 0.02,
+	powerStep = 0.02, -- the trim is re-sent to the physics when it moved this much
 	reentry = 0.1,    -- the power when the brake lets go (it's slowing to a lower speed)
 	-- over the limit: power off and braking from brakeOver mph over until under brakeOff
 	brakeOver = 0.6, brakeOff = 0.15,
 	brakeBase = 0.6,  -- m/s2 as it starts...
 	brakeGain = 0.7,  -- ...more per mph over...
 	brakeMax = 3.5,   -- ...up to this (~0.35 g): 60 to 40 mph in about 2.5 s
-	powerStep = 0.02,   -- the power is re-sent to the physics when it moved this much
 }
 
 local function speedMph(vehicle)
@@ -91,6 +91,31 @@ hook.Add("StartCommand", "audio_engine_cruise", function(player, command)
 	if mph ~= currentLimit then vehicle.audioSpeedLimit = mph; vehicle:SetNW2Float("audio_cruise", mph) end
 end)
 
+-- the power that holds the limit: the acceleration it wants shrinks to nothing at the limit, and
+-- the power follows; over it, off (it brakes there too). Sent to the physics only on a real change
+local function powerTrim(vehicle, mph, deltaTime)
+	local limiterConfig = AudioEngine.CRUISE
+	-- the car's acceleration (mph/s, smoothed)
+	local acceleration = vehicle.audioLimiterLastMph and (mph - vehicle.audioLimiterLastMph) / deltaTime or 0
+	vehicle.audioLimiterAcceleration = (vehicle.audioLimiterAcceleration or 0) + (acceleration - (vehicle.audioLimiterAcceleration or 0)) * math.min(1, deltaTime * 10)
+	vehicle.audioLimiterLastMph = mph
+	local limiterPower
+	if vehicle.audioLimiterBraking then
+		limiterPower = limiterConfig.minPower
+	elseif vehicle.audioLimiterHolding then
+		local wantedAcceleration = limiterConfig.accelerationGain * (vehicle.audioSpeedLimit - mph)
+		local powerChange = limiterConfig.powerGain * (wantedAcceleration - vehicle.audioLimiterAcceleration) * deltaTime
+		vehicle.audioLimiterHoldPower = math.Clamp((vehicle.audioLimiterHoldPower or 1) + powerChange, limiterConfig.minPower, 1)
+		limiterPower = vehicle.audioLimiterHoldPower
+	end
+	vehicle.audioLimiterPower = limiterPower
+	local sent = vehicle.audioLimiterPowerSent
+	if math.abs((limiterPower or 1) - (sent or 1)) >= limiterConfig.powerStep or (limiterPower == nil and sent ~= nil) or (limiterPower ~= nil and sent == nil) then
+		vehicle.audioLimiterPowerSent = limiterPower
+		AudioEngine.ApplyPerformance(vehicle, AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", "")))
+	end
+end
+
 hook.Add("Tick", "audio_engine_cruise", function()
 	local limiterConfig, deltaTime = AudioEngine.CRUISE, engine.TickInterval()
 	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
@@ -108,7 +133,7 @@ hook.Add("Tick", "audio_engine_cruise", function()
 				elseif vehicle.audioLimiterBraking and overLimit < limiterConfig.brakeOff then
 					vehicle.audioLimiterBraking, vehicle.audioLimiterHoldPower = false, limiterConfig.reentry
 				end
-				-- W held near the limit: the power trim holds it (sv_handling.lua)
+				-- W held near the limit: the power trim holds it (powerTrim below)
 				local holding = driver:KeyDown(IN_FORWARD) and overLimit > -limiterConfig.band
 				if holding and not vehicle.audioLimiterHolding and not vehicle.audioLimiterBraking then vehicle.audioLimiterHoldPower = 1 end
 				vehicle.audioLimiterHolding = holding
@@ -119,7 +144,14 @@ hook.Add("Tick", "audio_engine_cruise", function()
 					physics:ApplyForceCenter(-velocity:GetNormalized() * physics:GetMass() * deceleration / 0.0254 * deltaTime)
 				end
 				setState(vehicle, vehicle.audioLimiterBraking and 2 or holding and 1 or 0)
+				powerTrim(vehicle, speed, deltaTime)
 			end
+		end
+		-- the limit gone: full power back
+		if IsValid(vehicle) and not vehicle.audioSpeedLimit and vehicle.audioLimiterPowerSent ~= nil then
+			vehicle.audioLimiterPower, vehicle.audioLimiterPowerSent = nil, nil
+			vehicle.audioLimiterLastMph, vehicle.audioLimiterAcceleration = nil, nil
+			AudioEngine.ApplyPerformance(vehicle, AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", "")))
 		end
 	end
 end)

@@ -949,14 +949,18 @@ local function median(samples, value)
 	return max(min(samples[1], samples[2]), min(max(samples[1], samples[2]), samples[3]))
 end
 
-local function sampleSpeed(car, noseDirection)
+-- isOwnCar: the car you drive, whose speed is taken from the driving prediction when it runs
+-- (cl_handling): Source's position is ~a ping + interpolation behind, and the revs and gear
+-- changes pulling away or braking followed it that late
+local function sampleSpeed(car, noseDirection, isOwnCar)
 	local now = RealTime()
 	local elapsed = now - car.sampleTime
 	if elapsed < SPEED_SAMPLE then return end
 	local position = car.entity:GetPos()
-	local measuredVelocity = (position - car.samplePosition) / elapsed                  -- inches/s
+	local predictedVelocity = isOwnCar and AudioEngine.PredictedVelocity and AudioEngine.PredictedVelocity(car.entity)
+	local measuredVelocity = predictedVelocity or (position - car.samplePosition) / elapsed   -- inches/s
 	car.samplePosition, car.sampleTime = position, now
-	if elapsed > SPEED_GAP or measuredVelocity:Length() * 0.0254 > 150 then return end   -- (over 150 m/s: teleported)
+	if not predictedVelocity and (elapsed > SPEED_GAP or measuredVelocity:Length() * 0.0254 > 150) then return end   -- (over 150 m/s: teleported)
 	car.velocity = car.velocity + (measuredVelocity - car.velocity) * min(1, elapsed * 8)
 	local upDirection = car.entity:GetUp()
 	car.measuredSpeedAlongNose = median(car.speedAlongNoseSamples, measuredVelocity:Dot(noseDirection) * 0.0254)
@@ -1100,7 +1104,7 @@ local function updateCar(car, deltaTime)
 	car.worldNoseDirection = noseDirection
 	noseDirection:Set(localForward(car))
 	noseDirection:Rotate(entity:GetAngles())
-	sampleSpeed(car, noseDirection)
+	sampleSpeed(car, noseDirection, isOwnCar)
 	car.speedAlongNose = car.speedAlongNose + (car.measuredSpeedAlongNose - car.speedAlongNose) * min(1, deltaTime * 10)
 	-- driving it but watching from a camera, you hear it from outside like anyone else
 	local listenerInside = isOwnCar and GetViewEntity() == player
