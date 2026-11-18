@@ -110,13 +110,33 @@ Also remove the engine `Gear`/`State` sounds from that script, or they play on t
 - less rear brake bias and slight front drive
 - only a touch of power cut while steering
 
-On top of that, a server-side **stability control** (`sv_stability.lua`) works out how fast the car *should* be rotating for your steering keys at that speed, and compares it with how fast it *is* rotating:
-- rotating more than you asked (a spin starting): it catches it. With the handbrake held it allows much more, so drifts still work.
-- rotating against your steering (counter-steering out of a slide): it helps stop the rotation
-- rotating less than you asked (pushing wide): it adds a little turn-in
-- last resort: if the tail still slides out past the drift angle, it pulls the car's travel back toward the nose without losing speed
+### Handling model and prediction
+Source simulates every car on the server only. Your key reaches the server half a ping later, and the result
+comes back the other half later, then waits in the interpolation buffer: at 150 ms ping a steering key shows
+about 0.25 s after you press it. Moving the cars to the clients would make crashes between players disagree,
+so the server stays the only authority, and the driver's client runs ahead of it:
 
-It never reacts to the normal angle of a car in a tight bend, only to the tail stepping out. It only acts on the ground, moving forward. Tune it per car with the `stability` table in `sh_config.lua`.
+- **On the server** (`sv_handling.lua`), Source's jeep still handles the engine, brakes, suspension and every
+  collision. On top of it, a handling model (`sh_handling.lua`) takes over the car's rotation and sideways
+  grip each tick. The rotation follows what the steering asks at that speed (never more than the tyres can
+  hold), and a slide loses its sideways speed at the grip limit. It never touches the speed along the nose, so it
+  can't launch a car and corners don't scrub speed. The handbrake lets the rear go and starts a drift, which
+  lasts while the car stays sideways. A spin is caught. After a crash the model lets go until the crash has played
+  out. Spiked tyres get no model.
+- **On the driver's client** (`cl_handling.lua`), the server sends the car's state every other tick with the
+  last command it ran. The client replays every command since through the same model, plus how this car
+  accelerates (learned from those states), and draws the car, its driver, passengers and lightbar there, with
+  the camera. Each correction from the server fades out in about 0.1 s, so the car never snaps. A wall the
+  prediction would drive through stops it at the wall. Other moving cars are drawn where they are now too, so you
+  don't see yourself drive into a car you're only following.
+
+Nothing on the client moves a physics object, so crashes, pushes and ramming stay exactly what the server
+decided, for everyone. They show up one ping late, blended in. Offline (`dev/baker/test_prediction.js`, 150 ms
+ping with jitter and lost packets), the car on screen is about 0.2 m from where the server will have it, against
+about 6 m for plain Source. A steering key shows about 250 ms sooner.
+
+Prediction is off in single player and for a listen server's host, where there's no delay to hide. To try it,
+join a server and use `net_fakelag 150`.
 
 ## Convars
 | Convar | Realm | Default | |
@@ -143,9 +163,10 @@ It never reacts to the normal angle of a car in a tight bend, only to the tail s
 | `audio_engine_emotionstart` | server | 1 | rev flare on start-up (high-powered cars only: `CAR_EMOTION`) |
 | `audio_engine_keeprunning` | server | 1 | keep idling after the driver gets out (0 = getting out switches the engine off; not saved, set it in server.cfg) |
 | `audio_engine_cruise` | server | 1 | speed limiter on registered cars (middle mouse switches it, the mouse wheel sets the limit) |
-| `audio_engine_stability` | server | 0 | drift-friendly stability assist (all cars except spiked tyres) |
-| `audio_engine_handling` | server | 0 | anti-spin setup: front brake bias, less power while steering at speed, lower centre of mass, wider lock at speed (applies at once) |
-| `audio_engine_traction` | server | 0 | traction control: less power while the driven wheels spin |
+| `audio_engine_drivemodel` | shared | 1 | the handling model on registered cars (rotation follows the steering, grip limit, handbrake drifts); 0 = Source's own tyres alone |
+| `audio_engine_predict` | client | 1 | your own car is shown where it will be when the server runs your keys (no input delay) |
+| `audio_engine_predict_others` | client | 1 | while you drive with prediction, other moving cars are shown where they are now too |
+| `audio_engine_predict_debug` | client | 0 | draw the server's car (red), Source's (yellow) and the predicted one (green) |
 | `audio_engine_editor` | shared | 0 | 1 = the in-game engine tuning menu is available (`!engine`, `audio_engine_menu`, context menu) |
 | `audio_engine_debug` | shared | 1 | the debug tools for superadmins; 0 = off (debug module only) |
 | `audio_engine_tuneaccess` | server | 1 | who can retune engines: 0 = whoever drives the car, 1 = admins, 2 = superadmins |
@@ -155,7 +176,8 @@ Commands:
 - `audio_engine_menu` opens the tuning menu (also `!engine` in chat), when `audio_engine_editor` is 1.
 - `audio_engine_debug_menu` opens the debug tools (also `!enginedebug`; superadmins, debug module).
 - `audio_engine_handling_info` (admins) prints the handling setup of the car you're in or looking at.
-- `audio_engine_accel_log [seconds]` (admins) logs speed, gear, rpm, wheel slip and power trims of the car you drive to the console (default 12 s, max 60).
+- `audio_engine_accel_log [seconds]` (admins) logs speed, gear, rpm, the steering and the rotation asked vs. what the car does, to the console (default 12 s, max 60).
+- `audio_engine_predict_stats` prints how the driving prediction is doing: corrections, wall stops, the lead, the learned samples.
 - `audio_engine_toggle` (bindable) switches the engine of the car you're driving on or off, like the start key.
 - `audio_engine_rebuild` regenerates all engine sounds (after editing the synth or presets).
 - `audio_engine_wingflap` (superadmins) shows the brake flap for 10 s on the P1 or SLR you're in or looking at.

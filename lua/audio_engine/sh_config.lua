@@ -16,7 +16,7 @@
 	  wheelRadius  metres
 	  soundLevel   dB, how far the engine carries
 	  volume       overall loudness for this car
-	  stability    the drift-friendly handling assist (false = off for this car)
+	  stability    false = no handling model (sh_handling.lua) on this car: Source's tyres alone
 	  gearing      the car's own shift speeds per gear (sh_presets.lua AudioEngine.ApplyGearing)
 	  rev          { rise, fall }: how quickly it revs in neutral (sh_drivetrain.lua Drivetrain.REV)
 ]]

@@ -1,7 +1,7 @@
 # Porting the engine sounds into PERP
 
 This guide adds only the new engine sounds to PERP. You don't need a tuning menu, handling
-changes, stability assist, speed limiter, ignition key or HUD. The cars drive exactly as PERP's
+changes, handling model, speed limiter, ignition key or HUD. The cars drive exactly as PERP's
 vehicle scripts say. Only what you hear changes.
 
 Paths are relative to this addon unless stated. Background: `CLAUDE.md`.
@@ -69,8 +69,7 @@ Don't copy these files. They hold the extras:
 | File | What it does |
 |---|---|
 | `sv_engine.lua` | ignition key that holds the car until start-up ends, tuning net message, `!engine`, brake wings (P1, SLR) |
-| `sv_handling.lua`, `sv_perp_physics.lua` | anti-spin, traction control, physics changes |
-| `sv_stability.lua` | stability assist |
+| `sh_handling.lua`, `sv_handling.lua`, `cl_handling.lua`, `sv_perp_physics.lua` | the handling model and the driver's prediction, PERP physics on the test script |
 | `sv_cruise.lua` | speed limiter (middle mouse) |
 | `cl_menu.lua` | tuning menu |
 | `cl_hud.lua` | rpm/speed HUD |

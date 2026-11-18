@@ -56,7 +56,7 @@ const LUA = path.join(ADDON, 'lua')
     GLOBAL2 = {}
     function GetGlobal2String(k, d) return GLOBAL2[k] or d end
     AUDIO_ENGINE = {}`)
-  for (const f of ['audio_engine/sh_config.lua', 'audio_engine/sh_presets.lua', 'audio_engine/sh_drivetrain.lua', 'audio_engine/sh_carlist.lua',
+  for (const f of ['audio_engine/sh_config.lua', 'audio_engine/sh_presets.lua', 'audio_engine/sh_drivetrain.lua', 'audio_engine/sh_handling.lua', 'audio_engine/sh_carlist.lua',
     'audio_engine_debug/sh_kv.lua', 'audio_engine_debug/sh_debug.lua', 'audio_engine/sv_perp_physics.lua'])
     await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
 

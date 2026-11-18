@@ -7,7 +7,7 @@ is rendered offline by that same synth (`dev/baker`) and shipped as WAVs; only e
 Keep the synth the single source of every sound (no recordings). Porting the sounds into PERP: `PORTING.md`.
 
 ## Layout
-- `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu, cl_police. Server: sv_engine, sv_stability, sv_cruise, sv_police, sv_seats.
+- `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_handling, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_synth, cl_soundbank, cl_engine, cl_hud, cl_menu, cl_police, cl_handling. Server: sv_perp_physics, sv_handling, sv_engine, sv_cruise, sv_police, sv_seats.
   Then the debug module (`lua/audio_engine_debug/`, see "Debug module" below), if that folder exists: deleting it is all it takes to ship without it.
 - `sh_config.lua`: `RegisterCar(model, cfg)`, `GetCarConfig` (keeps each model path's lower case: called per car per tick/frame). `audio_engine_editor`
   (shared, default 0, `AudioEngine.EditorEnabled()`): the Rev Bench menu (cl_menu: command, `!engine`, context menu; sv_engine rejects `audio_engine_set`) only when 1.
@@ -171,7 +171,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     sirens and the game's own sounds went missing. Groups also start only at `GROUP_START_VOLUME` 0.01 (~-40 dB; was any trace) and stop
     once under `GROUP_STOP_VOLUME` 0.004 for `GROUP_STOP_HOLD` 0.1 s (was 0.002 for 0.3 s).
     Offline check: the scratchpad-style mock test (mocked client + real sh_config/sh_presets/sh_drivetrain/cl_engine) is not in the repo.
-  - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out;
+  - speed (`sampleSpeed`): position change over real time, sampled every 0.05 s or more, median of 3, frames over 0.3 s held, motion along the car's up axis left out; the car you drive takes the prediction's velocity instead (`AudioEngine.PredictedVelocity`, cl_handling, when it ran in the last 0.1 s: Source's position is ~a ping + interp late, so were the revs and gear changes pulling away / braking);
     the gearbox's speed (`car.driveSpeed`) moves at most `SPEED_SLEW` 40 m/s2. Dividing by the capped frame dt made stutters read as several times the real speed
   - Doppler (`audio_engine_doppler`: 1 = default, real, 4 = maximum, four times real. The scale was 0.25 = real until the user asked for 1:
     clients with the old `audio_engine_doppler_moved` cookie get their saved value x4 once (`audio_engine_doppler_real1` cookie)), road/wind, turbo/BOV from the env bank, pops logic
@@ -205,46 +205,65 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
 - `sv_cruise.lua`: speed limiter (was cruise control). Middle mouse on at exactly the current speed / off; mouse wheel moves the
   limit to the next 5 mph step (`StartCommand`: `cmd:GetMouseWheel()`). The driver's own W drives: from `band` 6 mph under the limit
-  the horsepower is trimmed (`vehicle.audioLimiterPower`, sv_handling's tick, applied in `ApplyPerformance`) by tracking a wanted acceleration
+  the horsepower is trimmed (`vehicle.audioLimiterPower`, sv_cruise's `powerTrim`, applied in `ApplyPerformance` on a 0.02 change) by tracking a wanted acceleration
   `k` x (mph to go), which finds the holding power for any car (a PI on the speed error overshot 1-2 mph). Over the limit (lowered,
   downhill): power off and a braking impulse from 0.6 mph over until 0.15 (0.6 + 0.7/mph, max 3.5 m/s2: 60 to 40 mph in ~2.5 s).
   Exit/engine off cancel. NW2 `audio_cruise` (limit, mph) for the HUD ("LIMIT"), `audio_limst` 0 free / 1 holding (sounds like
   steady part throttle, `inp.cruise`) / 2 over (throttle shut). `audio_engine_cruise`.
-- Handling: the PERPHeads server's by default (the user's choice; the shipped port, PORTING.md, has no handling changes at all):
-  `audio_engine_handling`, `audio_engine_stability` and `audio_engine_traction` default 0, all archived (a server keeps what it saved).
-  The cars then drive on PERP's vehicle scripts only (`addons/perp_vehicle_scripts_local` locally; on the test-script fallback
-  `applyPerpPhysics` puts PERP's values on). The assists below are kept, switched off; the speed limiter only acts when switched on.
-- `sv_stability.lua`: steering-intent ESC (reference yaw from the A/D keys, catches spins, allows handbrake drifts). Skips `vehicle.audioSpiked`.
-  Straight-line hold: W with no A/D, no handbrake/drift holds the heading from a standstill (`straightDamp`/`straightHold`/`straightMax`)
-  and reports any rotation as `vehicle.audioSlideAmount`, so traction control cuts the power. Taken over from a turn (still rotating), it only damps
-  the rotation and follows the car's heading until under `holdSettled` 3 deg/s (at most `holdGrace` 1 s), then holds that line: holding
-  the line from the moment the keys were let go turned the car back against its tyres for seconds (yaw off 10-20 deg/s), read as a slide. `audio_engine_accel_log` prints the yaw off what's asked (hold or steering) and the slip angle.
-  Slip limit (no handbrake): past `slipMax` 4 deg tail-out the nose rotates no faster than the path (yaw - slipAngleChange/dt); the turn-in help
-  stops while the tail is out, so fast corners turn instead of drifting.
-  Lateral grip (no handbrake, also in the straight-line hold): `gripAssist` g of extra side grip removes sideways speed at any slip
-  angle, forward speed untouched (turning the whole velocity toward the nose launched cars before). Off: 0 (was 1).
-  Turn-in help (understeer): up to `turnShare` of the asked rotation at `turnHelp` 4/s. Off: 0 (was 0.9; with W held it pushed the
-  tyres to their side limit, no grip left to drive: turns at 60 mph bled 3-4 mph/s at full power; the user prefers both off).
-  Braking (S, locked fronts plough on) still up to `brakeTurn` 0.6 at `brakeHelp` 6/s.
-  Never turns a sliding car's velocity (that launched cars toward the nose). A drift starts with the handbrake and lasts while
-  the slide angle > `driftHold`; while drifting counter-steer isn't damped. Grip 1.5 g; `vehicle.audioFastSteerScale` widens the lock at speed.
-- `sv_handling.lua`: on spawn (`AudioEngine.PrepareHandling`, before `captureBase`): PERP base physics from generated `sv_perp_physics.lua` onto cars
-  on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), anti-spin `AudioEngine.ANTI_SPIN`
-  (`audio_engine_handling`; also steering at speed x1.5, handbrake slide left as scripted),
-  launch traction control `AudioEngine.TRACTION` (`audio_engine_traction`): driven-wheel slip from `GetWheel` angular speed trims
-  horsepower via `vehicle.audioTractionPower` in `ApplyPerformance` (strong light cars like the Veyron spun their tyres off the line); it may cut to
-  `floor` 0.25 at launch, rising to `floorFast` 0.6 by 16 m/s; while sliding (`vehicle.audioSlideAmount` from sv_stability: tail out / over-rotating,
-  not in a handbrake drift) it cuts at `slideCut` down to `slideFloor` 0.2 at any speed (no hard speed cut-off: that held cars at 1/4 power, then gave it all back),
-  only to `slideTurnFloor` 0.6 when it isn't over-rotating (`vehicle.audioOverRotating` false: tail out in a fast corner, `slideFrom` 8 .. `slideFull` 16 deg),
-  for at most `slideMaxTime` 1 s of unbroken slide, then restores (`vehicle.audioSlideSince`; it only ever recovered on releasing W, so a stuck slide reading held a car at 0.2);
-  the lock at speed tightens to x0.9 between 45 and 90 mph (`AudioEngine.HIGH_SPEED_STEER`, `vehicle.audioSteerLockScale`; x1.3 x0.65 turned too little), and is
-  capped by `AudioEngine.STEER_GRIP` (angle a `g` 1.5 turn needs at that speed and wheelbase, `AudioEngine.CarGeometry`, + `slip` 6 deg): keyboard steering is
-  always full lock, and the curve's ~20 deg at 60 mph scrubbed ~1 g off turns once the turn-in help was off; the scripts'
-  power cut while steering at speed (`turnThrottleReduceFast` 0.5-0.9) is capped at `AudioEngine.ANTI_SPIN.throttleReduceFast` 0.2: fast turns kept their revs. `audio_engine_accel_log`
-  logs Source's gear/rpm (GetOperatingParams), slip and trims while driving. Also spiked detection from the `vehiclescript` keyvalue, per-car ESC steering. `AudioEngine.SetParams` = checked SetVehicleParams.
-  `vehicle.audioScriptParams` = params after PERP physics, before the anti-spin setup; `AudioEngine.RebaseHandling(veh[, params])` rebuilds `vehicle.audioBase`
-  from it (anti-spin only while `audio_engine_handling` is on; off clears the lock-at-speed state), refreshes NW2 `audio_vmax`/`audio_pwr`
-  (`AudioEngine.RefreshCarStats`, sv_engine) and re-applies performance. The `audio_engine_handling` change callback runs it on every car: it applies at once.
+- Handling (the user scrapped the old assists, sv_stability / anti-spin / traction control / lock at speed, for this): every car's motion
+  is the server's alone (Source's jeep: engine, brakes, suspension, all collisions), so crashes between players agree; the driver's
+  client only draws ahead of it. The average PERP player has 150 ms ping: a key showed ~0.25 s late (half ping up, half down, cl_interp 0.1).
+  - `sh_handling.lua` (`AudioEngine.Handling`): the model, plain Lua on numbers (no Vector/Angle: no allocations, and it runs offline).
+    Bodies { px.. position, vx.. velocity (in/s), ax.. model x axis, bx.. y (left), cx.. z (up), yawRate (deg/s, left +), groundShare,
+    controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 4.5 / `steerReturn` 6 / `steerReverse` 9 per s), the yaw rate
+    follows (`yawFollow` 8/s) a bicycle-model target (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 30 m/s, wheelbase from the
+    attachments, `AudioEngine.CarGeometry`, moved here from sv_stability) capped at `grip` x g / speed, and sideways speed goes at up to
+    `grip` g towards a rolling car's (the rear axle along its wheels: the middle moves into the turn at wheelbase/2 x yaw rate; slip
+    angles are the rear axle's): held at 0 it set the rear tyres across their path, Source's tyres fought the model and W-held turns bled
+    speed, as the old sv_stability's turn-in help / side grip did (both were off there for it); 0 in a handbrake slide or drift.
+    The speed along the nose is never touched (no launching). Handbrake (Space, forward): grip x0.35, rotation x1.6,
+    follow 2/s; over `driftMinSpeed` 7 m/s starts a drift that lasts while the slip angle > `driftHold` 10 (grip x0.6, follow 2.5);
+    past `spinAngle` 70 it's caught. Under `minSpeed` 1.5 m/s (+ `fadeSpeed` 3) Source alone. `AudioEngine.HANDLING` (debug-tunable, also
+    sent to clients: Global2 `audio_dbg_handling`), per car `AudioEngine.CAR_HANDLING[name]` (sh_carlist: CAR_EMOTION grip 1.3, ECONOMY 1.05,
+    others 1.15), read through `Handling.SettingsFor` (metatable over HANDLING). Also: `Integrate` (prediction: gravity along the ground,
+    learned acceleration along the nose, rotation about up; velocity not turned), the learner (`NewLearner`/`Learn`/`LearnedAcceleration`:
+    per `DriveMode` (coast, throttle, brake, reverse, handbrake, limited, idle) x 2.5 m/s bins, starts from power to weight `audio_pwr` and
+    `audio_vmax`), `Predict` (replay: integrate then control, the server's order), the smoother (`SmootherAbsorb`: a correction kept as
+    offset + small rotation, `SmootherDecay` time constant, `SmootherApply`). Buttons are a number (1 W, 2 S, 4 A, 8 D, 16 Space; no bit lib).
+    `audio_engine_drivemodel` (replicated, archived, default 1) is created here.
+  - `sv_handling.lua`: on spawn `AudioEngine.PrepareHandling` (before `captureBase`): PERP base physics from generated `sv_perp_physics.lua` onto
+    cars on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), nothing else changed except, where
+    the model runs (`steerForModel`, also in RebaseHandling; the drivemodel convar's change rebases every car), Source's steering: turnThrottleReduce 0
+    and degreesFast = the model's grip-capped turn at `STEER_FIT_SPEED` = FastCarSpeed 35 mph (`Handling.TurnAngle`, ~7.5 deg; PERP ~11; fitted at 25 m/s, ~3 deg, Source held 3 deg from 35 mph where the model asks ~7 and cars under throttle hardly turned): both braked cars in a turn
+    (throttle cut up to 90%, front tyres scrubbing across the path). `audioScriptParams` stays the script's own; adds the
+    PhysicsCollide callback (`audioImpactAt` on a velocity change over `impactSpeed` 120 in/s, not floor/ceiling normals: the model is off
+    `impactHold` 0.35 s, eases back over `impactEase` 0.5). Tick: on driven cars, reads the physics, ground share from `GetWheelContactPoint`
+    (trace fallback), runs Control and applies it (`AddAngleVelocity` local z, `AddVelocity` along the right); controlShare 0 on spiked cars,
+    `carConfig.stability == false`, or with the convar off. Every ~30 ms (every other tick at 66) an unreliable net `audio_engine_drive` to the
+    driver: entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
+    velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state (~60 bytes). No vehicle params set while
+    driving. `AudioEngine.RebaseHandling(veh[, params])` rebuilds `vehicle.audioBase` from `vehicle.audioScriptParams`, refreshes NW2
+    `audio_vmax`/`audio_pwr` (`AudioEngine.RefreshCarStats`, sv_engine) and re-applies performance. `audio_engine_accel_log`, `audio_engine_handling_info`.
+  - `cl_handling.lua`: the driver's prediction (`audio_engine_predict` 1; off in single player / for a listen host). Client `StartCommand`
+    keeps each command's buttons by number (skip number 0, it happens); each frame, from the newest state, `Predict` through the commands
+    after its number (at most `maxCommands` 32) + the fraction of the next; without matching numbers, one ping of the keys held. A new state's
+    jump goes into the smoother (`smoothTime` 0.1 s, 0.04 during an impact, snap over 250 in). `clearShare`: a hull trace from the server's car
+    to the shown one at its leading end (world and props, not cars or players) stops it at a wall. Drawing (poses worked out at CalcView with nothing moved, put on at PreDrawOpaqueRenderables, taken off at PostRender: the render origin moves bones and attachments, and left on, the game's eye-attachment view arrived already moved and the camera ran ~2x the lead ahead, out of sight and shaking, the first multiplayer test): `SetRenderOrigin` + the Entity
+    `SetRenderAngles` (Player's is something else) + `InvalidateBoneCache` on the car and its children (pods, lightbar), render bounds widened
+    by the offset (culling goes by Source's position: your car vanished otherwise), players in it via PrePlayerDraw; stale overrides cleared.
+    `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it). The camera: `hook.Call` is wrapped for "CalcView" only
+    (re-wrapped every 2 s if a hook library replaced it), so any gamemode/addon camera is moved with the car; if the camera didn't run through
+    it in a frame, nothing is moved (PreDrawOpaqueRenderables). Others (`audio_engine_predict_others` 1): the nearest 16 moving cars within
+    5000 in are carried on over the lead (their smoothed velocity and yaw rate from interpolated poses, along the arc, wall-traced): without
+    it your car (drawn ~RTT + interp ahead) drove into ones you only followed. The lead: found by matching Source's interpolated car to the
+    received states' path (the server time it shows) against the predicted one's, smoothed; until then ping + interp. `audio_engine_predict_debug`
+    (red server / yellow Source / green shown boxes), `audio_engine_predict_stats`. Not yet run in game: the hook.Call path for CalcView,
+    SetRenderOrigin on players in seats, shadows following the render origin and StartCommand's client command numbers in a vehicle are
+    the things to check first. Own car's engine sound stays at Source's position (a few metres behind the camera at speed).
+  - `dev/baker/test_prediction.js [ping]`: a "Source" server the client doesn't know (own engine, brakes, tyres, lock, bumps), 150 ms with
+    jitter and 3% loss, 144 fps: predicted ~0.2 m off where the server will be vs ~6 m plain, steering shows ~250 ms sooner, corrections
+    under 7 cm a frame, an unpredicted crash back within 0.5 m ~80 ms after its state arrives.
+  - Speed limiter (`sv_cruise`) still trims horsepower through `ApplyPerformance`, nothing else does now.
 - The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
 
 ## SL65 AMG RTU (separate addon, temporary)
@@ -390,7 +409,7 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
 - `sh_kv.lua`: Valve KeyValues parse into entries with value spans (`KeyValues.Rebuild` keeps the file byte for byte; `root` = top block, `KeyValues.EntryId` = root/path|key|occurrence, the same across cars' scripts;
   `KeyValues.IsHandling`: false for all of vehicle_sounds and `KeyValues.NOT_HANDLING` (steering dustcloud): this addon never uses the scripts' sounds), `KeyValues.PARAMS` script key -> GetVehicleParams
   field, `KeyValues.ApplyValue` scales by new / file value (unit-free; a file 0 is taken as is, mph -> in/s for speeds). Unmapped keys (wheel radius, materials, sounds) = respawn.
-- `sh_debug.lua`: `EngineDebug.SERVER_CVARS`, `EngineDebug.TUNABLES` (AudioEngine.TRACTION / STABILITY_DEFAULTS / ANTI_SPIN / HIGH_SPEED_STEER values set live), gearing text
+- `sh_debug.lua`: `EngineDebug.SERVER_CVARS`, `EngineDebug.TUNABLES` (AudioEngine.HANDLING values set live; mirrored to clients through Global2 `audio_dbg_handling`, `EngineDebug.FollowGlobalHandling` in the GetEngineConfig wrapper), gearing text
   (`EngineDebug.EncodeGearing`), `EngineDebug.GearingFromConfig`, rev "rise,fall". Live overrides: NW2 `audio_dbg_gear` / `audio_dbg_rev` per car, Global2 `audio_dbg_rev` -> Drivetrain.REV.
 - `sv_debug.lua`: net `audio_dbg_*` (`audio_dbg_copy_req`/`audio_dbg_copy`: another car's script text for copying: a spawned car's, or a path under scripts/vehicles/, PERP_PHYSICS fallback). Script = the car's `vehiclescript`, or on test_car the PERP script it stands for, synthesized as test_car.txt with
   `AudioEngine.PERP_PHYSICS` values; baseline (`vehicle.audioDebugBaseline`: file text, params, mass) taken on first request, edits always scaled from it. `audio_engine_debug 0` undoes everything.
@@ -400,7 +419,7 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   script + tier, chosen parts (body, engine, steering, axles; wheel radius off) into the editor unapplied, only keys both scripts have;
   save history: every Apply live / Save to data/ / overlay Save version adds v<n> + time + values changed from the file (unchanged = no new
   version) to data/audio_engine_debug/history/<script>.json, hover = changes from the previous version, click = load into the editor), Gearing (shift speeds, chart, audibility
-  check, copies an AudioEngine.CAR_GEARING entry), Rev response (copies AudioEngine.CAR_REV / Drivetrain.REV), Handling (PERP default handling = handling/traction/stability 0), Settings.
+  check, copies an AudioEngine.CAR_GEARING entry), Rev response (copies AudioEngine.CAR_REV / Drivetrain.REV), Handling (PERP default handling = audio_engine_drivemodel 0; the HANDLING values), Settings.
 - `cl_handling_overlay.lua`: while driving, the pinned and changed values on the right of the HUD; holding C (sandbox
   context menu) shows an editable copy parented to `g_ContextMenu` (it needs `SetMouseInputEnabled(true)`: a context-menu child takes no clicks
   otherwise, the first version's buttons did nothing; keyboard via sandbox's OnTextEntryGetFocus/LoseFocus hooks). - / + / scroll (Shift finer) apply
@@ -422,16 +441,13 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   Memory: generated banks keep their samples in Lua tables (8 B each, held by the sound.Generate callbacks) + the engine's copy
   (~2 B); counted as `bank.samples` (cl_soundbank); baked banks = their WAV file sizes; the siren's `PoliceSiren.Stats()` (cl_siren).
   Smoke-tested in a mock (wrappers off after each run); not yet measured in game.
-- Power cut after a turn: releasing A/D with W held enters sv_stability's straight-line hold, which counted the turn's leftover yaw as `audioSlideAmount`,
-  and traction control cut to `slideFloor` 0.2. In game the reading stayed 0.4-1.0 for 3-6 s (wheel slip 0) until W was pressed again: now
-  `holdGrace` and `slideMaxTime` (both on the Handling page). Why the hold's reading persisted isn't known yet: the log's last two columns show it.
 
 ## dev/ (not needed in game)
 - `dev/baker/` (Node + wasmoon@1.16.0, `npm install` there): `node bake.js` renders all stock engines (~6 min on 5 workers) into
   `sound/audio_engine/` + `lua/audio_engine/cl_baked.lua`. Re-bake after changing cl_synth, cl_soundbank, sh_presets or the car list.
   `node bake.js --electric` re-bakes only the electric motors + env bank (~15 s) and keeps every other entry and folder:
   only for changes that can't touch other engines (it fails if any other engine's sound key is missing from the manifest).
-  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling with a fake vehicle. `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
+  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling (PERP physics on the test script) and the handling model with a fake vehicle. `test_prediction.js` checks the driving prediction. `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - Offline harnesses run under LuaJIT (`luajit file.lua` from `dev/`). Fix the hard-coded paths at the top first: they point at /home/claude/....
   - `gmod_sim5.lua`: drive mix
@@ -475,7 +491,7 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
 - Kept as they were, because something outside the code reads or writes them: convar, NW2, net, hook and concommand names, sound
   file names, profile fields (accel, vmax, popVol, turboVol, bovVol... and the pipe string), preset / CHARACTER (f1, w, o1, o05) /
   LAYOUTS fields, the bake manifest (cl_baked.lua: sr, cyl, dur ...), siren CONFIG fields, CAR_GEARING { mph, rpm, down, topRpm },
-  the tables the debug menu tunes by key name (TRACTION, ANTI_SPIN, STABILITY_DEFAULTS, ...), sh_police lamp data keys
+  the tables the debug menu tunes by key name (HANDLING, CRUISE, ...), sh_police lamp data keys
   (position, normal, width, height). Filter maths keeps the Audio EQ Cookbook names (b0..a2, w0, alpha).
 - The baker's folder hash covers cl_synth / cl_soundbank / sh_presets sources: the next bake after a rename-only change gives every
   engine new file names (a full re-download for players), though the sound is bit-identical.
