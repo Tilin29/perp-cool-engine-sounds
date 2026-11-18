@@ -32,6 +32,16 @@
 	  * SETTLE_SECONDS of steady sound after the attack feeds the filters and the grille exactly what the
 	    loop's end does, so they're in the same state when it wraps
 	The inside-the-car version adds a steeper lowpass (the car's body muffling it).
+
+	`sweep`: an electronic horn, the "air horn" tone of a siren amplifier played through its PA
+	speaker. Not a buzzing diaphragm: a square wave oscillator whose pitch is swept from `low` up to
+	`high` and back `rate` times a second (Federal Signal's patent US4980837: 500 -> 1650 Hz in
+	2.2 ms, held 1.1 ms, back to 500 Hz over 8.4 ms, repeating at 85 Hz: the wail's sweep, sped up).
+	The sweep rate is what you hear as the pitch (a buzz), the swept range as its colour. `rise` and
+	`hold` are shares of each sweep (the rest falls back); `riseCurve` / `fallCurve` shape each leg
+	(1 = even in pitch, over 1 = slow at first, under 1 = fast at first); `level` its volume next to the units (0 = off; with a sweep the units can be left out). The
+	oscillator restarts with each sweep, so the tone repeats exactly at the rate, rounded to whole
+	sweeps over the loop; it runs OVERSAMPLE x faster and is filtered back down (a raw square aliases).
 ]]
 CAR_HORN = CAR_HORN or {}
 local Synth = {}
@@ -53,6 +63,8 @@ local YIELD_EVERY = 4096   -- (the resonances made each sample dearer: keep a st
 local TWO_PI = math.pi * 2
 -- the bumper and grille: { delay (s), gain } of each reflection
 local GRILLE_TAPS = { { 0.0007, 0.45 }, { 0.0013, -0.3 }, { 0.0021, 0.25 }, { 0.0034, -0.15 }, { 0.0052, 0.1 } }
+-- the sweep's square wave: rendered this many times the sample rate, then low-passed back down
+local OVERSAMPLE = 8
 
 Synth.LOOP_SECONDS = LOOP_SECONDS
 
@@ -229,6 +241,35 @@ function Synth.Render(horn, config, yield, inside)
 		end
 	end
 
+	-- the electronic horn's swept square wave (see the top)
+	local sweep = horn.sweep
+	local sweepLevel = sweep and (sweep.level or 0) or 0
+	local sweepLow, sweepRatio, sweepRate, sweepRise, sweepHold, sweepRiseCurve, sweepFallCurve, sweepPhase, sweepFilterA, sweepFilterB
+	if sweepLevel > 0 and (sweep.low or 0) > 0 and (sweep.high or 0) > 0 and (sweep.rate or 0) > 0 then
+		sweepLow = sweep.low
+		sweepRatio = sweep.high / sweep.low
+		-- whole sweeps over the loop
+		sweepRate = max(1, round(sweep.rate * LOOP_SECONDS)) / LOOP_SECONDS
+		sweepRise = min(max(sweep.rise or 0.2, 0.01), 0.98)
+		sweepHold = min(max(sweep.hold or 0, 0), 0.99 - sweepRise)
+		sweepRiseCurve = max(sweep.riseCurve or 1, 0.1)
+		sweepFallCurve = max(sweep.fallCurve or 1, 0.1)
+		sweepPhase = 0
+		local fastRate = sampleRate * OVERSAMPLE
+		sweepFilterA = biquad("lp", sampleRate * NYQUIST_SHARE, 0.54, 0, fastRate)
+		sweepFilterB = biquad("lp", sampleRate * NYQUIST_SHARE, 1.31, 0, fastRate)
+	else
+		sweepLevel = 0
+	end
+	local function sweepShare(position)
+		-- 0 at `low`, 1 at `high`, over one sweep (position 0..1)
+		if position < sweepRise then return (position / sweepRise) ^ sweepRiseCurve end
+		if position < sweepRise + sweepHold then return 1 end
+
+		return 1 - ((position - sweepRise - sweepHold) / (1 - sweepRise - sweepHold)) ^ sweepFallCurve
+	end
+	local sweepLastPosition = 1
+
 	local rasp = max(horn.rasp or 0, 0)
 	local air = max(horn.air or 0, 0)
 	local noise = (rasp > 0 or air > 0) and randomTable(loopCount, 12345)
@@ -306,6 +347,19 @@ function Synth.Render(horn, config, yield, inside)
 			if voice.cycleGains then value = value * (1 + shimmer * voice.cycleGains[voice.cycle]) end
 			if growl > 0 then value = value * (voice.cycle % 2 == 0 and 1 + growl or 1 - growl) end
 			sample = sample + voice.level * value
+		end
+		if sweepLevel > 0 then
+			local square = 0
+			for step = 1, OVERSAMPLE do
+				local position = ((loopIndex + (step - 1) / OVERSAMPLE) * sweepRate / sampleRate) % 1
+				-- a new sweep: the oscillator starts again
+				if position < sweepLastPosition then sweepPhase = 0 end
+				sweepLastPosition = position
+				local frequency = sweepLow * sweepRatio ^ sweepShare(position) * pitchFactor
+				sweepPhase = (sweepPhase + frequency / (sampleRate * OVERSAMPLE)) % 1
+				square = runBiquad(sweepFilterB, runBiquad(sweepFilterA, sweepPhase < 0.5 and 1 or -1))
+			end
+			sample = sample + sweepLevel * square
 		end
 		sample = sample * envelope
 		if air > 0 then sample = sample + airFactor * noise[(loopIndex + AIR_NOISE_SHIFT) % loopCount] end

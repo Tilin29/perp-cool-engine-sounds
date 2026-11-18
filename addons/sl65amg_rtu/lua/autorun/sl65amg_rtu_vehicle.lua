@@ -40,7 +40,10 @@ local function register()
 		registered = true
 	end
 	local hornConfig = CAR_HORN and CAR_HORN.CONFIG
-	if hornConfig and istable(hornConfig.models) and hornConfig.models[MODEL] == nil then hornConfig.models[MODEL] = "trumpet" end
+	-- the police electronic horn (car_horn's sh_horn_config.lua), else the Mercedes' trumpet
+	if hornConfig and istable(hornConfig.models) and hornConfig.models[MODEL] == nil then
+		hornConfig.models[MODEL] = istable(hornConfig.horns) and hornConfig.horns.police and "police" or "trumpet"
+	end
 end
 register()
 hook.Add("Initialize", "sl65amg_rtu", register)

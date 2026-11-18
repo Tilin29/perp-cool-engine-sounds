@@ -183,12 +183,14 @@ function status(t, cls) { $('status').textContent = t; $('status').className = c
 // ---------------------------------------------------------------------------------------------
 const tilted = (count, power) => Array.from({ length: count }, (_, i) => +Math.pow(i + 1, -power).toFixed(2))
 const HORN_SHAPE = {
-  name: 'Horn', level: 1, units: [{ f: 415, level: 1 }, { f: 520, level: 0.85 }],
+  name: 'Horn', level: 1, unlimited: false, units: [{ f: 415, level: 1 }, { f: 520, level: 0.85 }],
   harmonics: tilted(24, 0.35), strike: 1,
   rasp: 0.35, air: 0, jitter: { rate: 3, depth: 3 }, shimmer: 0.15, grille: 0.6, roughness: 6, growl: 0, flutter: { rate: 0, depth: 0 },
   direct: 0.25, resonances: [{ f: 2350, q: 6, level: 1 }, { f: 3500, q: 8, level: 0.55 }, { f: 1100, q: 2, level: 0.35 }],
   attack: { time: 0.012, pitch: 0.97, curve: 0.5 }, release: { time: 0.03, pitch: 1 },
   speaker: { highpass: 300, lowpass: 7000, drive: 3.5, asymmetry: 0.2, resonance: 2500, resonanceQ: 1.2, resonanceGain: 0 },
+  // the electronic horn's swept square wave: level 0 = off (every diaphragm horn)
+  sweep: { low: 540, high: 1200, rate: 68.5, rise: 0.36, hold: 0.12, riseCurve: 2, fallCurve: 1, level: 0 },
 }
 // a horn saved before the body resonances: the new fields at the values that leave its sound as it was
 const OLD_MODEL = { strike: 0, direct: 1, resonances: [] }
@@ -215,15 +217,27 @@ function normalize(c) {
   })].filter((id, i, a) => c.horns[id] && a.indexOf(id) === i)
   c.horns = Object.fromEntries(order.map((id) => [id, c.horns[id]]))
   if (!c.horns[c.default]) c.default = Object.keys(c.horns)[0]
-  if (!c.models || typeof c.models !== 'object' || Array.isArray(c.models)) c.models = {}
-  for (const [m, id] of Object.entries(c.models)) if (!c.horns[id]) delete c.models[m]
+  // horns and script entries added to the file since these edits were saved join them
+  for (const [id, h] of Object.entries(d.horns || {})) if (!c.horns[id]) c.horns[id] = clone(h)
+  // an electronic (sweep) horn of the file saved here before the studio knew sweeps: the file's
+  for (const [id, h] of Object.entries(d.horns || {})) {
+    if (h.sweep && h.sweep.level > 0 && c.horns[id] && !c.horns[id].sweep) c.horns[id] = clone(h)
+    // saved before the studio knew `unlimited`: the file's
+    if (h.unlimited && c.horns[id] && c.horns[id].unlimited === undefined) c.horns[id].unlimited = true
+  }
+  if (!c.scripts || typeof c.scripts !== 'object' || Array.isArray(c.scripts)) c.scripts = {}
+  for (const [k, id] of Object.entries(d.scripts || {})) if (!(k in c.scripts)) c.scripts[k] = id
+  for (const key of ['models', 'scripts']) {
+    if (!c[key] || typeof c[key] !== 'object' || Array.isArray(c[key])) c[key] = {}
+    for (const [m, id] of Object.entries(c[key])) if (!c.horns[id]) delete c[key][m]
+  }
   for (const h of Object.values(c.horns)) {
     if (h.resonances === undefined || h.resonances === null) {
       fill(h, OLD_MODEL)
       if (h.speaker && h.speaker.asymmetry === undefined) h.speaker.asymmetry = 0
     }
     fill(h, HORN_SHAPE)
-    if (!h.units.length) h.units = clone(HORN_SHAPE.units)
+    if (!h.units.length && !(h.sweep.level > 0)) h.units = clone(HORN_SHAPE.units)
     for (const u of h.units) { u.f = u.f || 400; if (u.level === undefined) u.level = 1 }
   }
   return c
@@ -259,7 +273,7 @@ let inside = false
 // the release is played, not rendered: it isn't part of the key
 function renderKey(id) {
   const h = Object.assign({}, CFG.horns[id])
-  delete h.release; delete h.level; delete h.name
+  delete h.release; delete h.level; delete h.name; delete h.unlimited
   return JSON.stringify([h, CFG.sampleRate, inside && CFG.cabin.muffle])
 }
 function requestRender(id) {
@@ -332,7 +346,8 @@ function levelOf(id) { const h = CFG.horns[id]; return CFG.volume * (h ? h.level
 const charge = { charge: null, at: 0, honking: false, exhausted: false, croakUntil: null }
 let muted = false   // this press is silent: run dry, or pressed while exhausted
 const nowSeconds = () => performance.now() / 1000
-const limiting = () => $('limitOn').checked
+// the overuse limit, as in game: not for a horn that never runs out (unlimited, the police PA horn)
+const limiting = (id = SEL) => $('limitOn').checked && !(CFG && CFG.horns[id] && CFG.horns[id].unlimited)
 function advanceCharge(now) {
   const limit = CFG.limit
   if (charge.charge === null) charge.charge = limit.charge
@@ -376,7 +391,7 @@ function relaxFactor(heldFor) {
 }
 // the voice's level and pitch now: weakened by the charge, eased down on a long hold
 function voiceTargets(v) {
-  if (!limiting()) return [levelOf(v.id), 1]
+  if (!limiting(v.id)) return [levelOf(v.id), 1]
   const [weakVolume, weakPitch] = weakFactors(chargeStrength())
   return [levelOf(v.id) * weakVolume * relaxFactor(ctx.currentTime - v.startedAt), weakPitch]
 }
@@ -608,6 +623,7 @@ $('delHorn').onclick = () => {
   const id = SEL
   delete CFG.horns[id]
   for (const [m, h] of Object.entries(CFG.models)) if (h === id) delete CFG.models[m]
+  for (const [m, h] of Object.entries(CFG.scripts)) if (h === id) delete CFG.scripts[m]
   if (CFG.default === id) CFG.default = Object.keys(CFG.horns)[0]
   if (voice && voice.id === id) letGo()
   save()
@@ -651,6 +667,7 @@ function buildGlobals() {
     el('h3', null, 'Which horn a car has'),
     el('div', { class: 'row' }, el('label', null, 'Default'), hornSelect(CFG.default, (v) => { CFG.default = v; buildHornList() })),
     buildModels(),
+    buildScripts(),
     el('h3', null, 'Inside the car (driver and passengers)'),
     field('Volume inside', CFG.cabin, 'volume', { min: 0, max: 1, step: 0.01, unit: '×', change: onGlobal }),
     field('Muffled above', CFG.cabin, 'muffle', { min: 300, max: 8000, step: 10, log: true, unit: 'Hz', change: onGlobalRender }),
@@ -664,30 +681,32 @@ function buildGlobals() {
   )
   showFalloff()
 }
-// the horn per car model (lower-case model path)
-function buildModels() {
+// the horn per car model (lower-case model path) or vehicle script (CFG.scripts, over the model's)
+function buildPathList(key, title, addLabel, stem, extension) {
   const box = el('div', { class: 'list' })
   const render = () => {
-    box.replaceChildren(el('div', { class: 'hint', style: 'margin:4px 0 0' }, 'Per car model (overrides the default):'))
-    for (const [model, id] of Object.entries(CFG.models)) {
-      const m = el('input', { type: 'text', value: model, style: 'flex:1;min-width:0', onchange: () => {
-        const v = m.value.trim().toLowerCase()
-        delete CFG.models[model]
-        if (v) CFG.models[v] = id
+    box.replaceChildren(el('div', { class: 'hint', style: 'margin:4px 0 0' }, title))
+    for (const [path, id] of Object.entries(CFG[key])) {
+      const m = el('input', { type: 'text', value: path, style: 'flex:1;min-width:0', onchange: () => {
+        const v = m.value.trim().toLowerCase().replace(/\\/g, '/')
+        delete CFG[key][path]
+        if (v) CFG[key][v] = id
         onGlobal(); render()
       } })
-      box.append(el('div', null, m, hornSelect(id, (v) => { CFG.models[model] = v }),
-        el('button', { class: 'small', textContent: '×', onclick: () => { delete CFG.models[model]; onGlobal(); render() } })))
+      box.append(el('div', null, m, hornSelect(id, (v) => { CFG[key][path] = v }),
+        el('button', { class: 'small', textContent: '×', onclick: () => { delete CFG[key][path]; onGlobal(); render() } })))
     }
-    box.append(el('div', null, el('button', { class: 'small', textContent: '+ Car model', onclick: () => {
-      let k = 'models/tdmcars/new.mdl', i = 2
-      while (CFG.models[k]) k = 'models/tdmcars/new' + i++ + '.mdl'
-      CFG.models[k] = SEL || CFG.default; onGlobal(); render()
+    box.append(el('div', null, el('button', { class: 'small', textContent: addLabel, onclick: () => {
+      let k = stem + extension, i = 2
+      while (CFG[key][k]) k = stem + i++ + extension
+      CFG[key][k] = SEL || CFG.default; onGlobal(); render()
     } })))
   }
   render()
   return box
 }
+const buildModels = () => buildPathList('models', 'Per car model (overrides the default):', '+ Car model', 'models/tdmcars/new', '.mdl')
+const buildScripts = () => buildPathList('scripts', 'Per vehicle script (overrides the model; police versions of civilian cars):', '+ Vehicle script', 'scripts/vehicles/tdmcars/new', '.txt')
 
 // ---------------------------------------------------------------------------------------------
 // right: the selected horn
@@ -763,6 +782,11 @@ function buildEditor() {
         field('Air', h, 'air', { min: 0, max: 0.5, step: 0.005, change: onHorn }),
         el('p', { class: 'hint' }, 'A rush of air under the tone, there from the moment it\'s pressed (an air horn).'),
         field('Horn level', h, 'level', { min: 0, max: 1, step: 0.01, change: onHornPlayed }),
+        (() => {
+          const box = el('input', { type: 'checkbox', checked: !!h.unlimited, onchange: () => { h.unlimited = box.checked; save(); updateExport() } })
+          return el('div', { class: 'row' }, el('label', null, 'Never runs out'), box)
+        })(),
+        el('p', { class: 'hint' }, 'The overuse limit skips this horn: no weakening, croak or easing down (the police PA horn).'),
       ),
       el('div', null,
         field('Flutter rate', h.flutter, 'rate', { min: 0, max: 30, step: 0.5, unit: 'Hz', change: onHorn }),
@@ -828,7 +852,31 @@ function buildEditor() {
     ),
     el('p', { class: 'hint' }, 'Drive = how hard the horn is pushed (0 = clean, more = harsher). Asymmetry = it clips one way sooner: the two units mix into the low snarl under a real pair. The resonance is a broad tone control on top (the body\'s resonances do the horn\'s own colour).'),
   )
-  ed.append(unitsSec, harmSec, bodySec, grit, pressSec, speakerSec)
+  const sw = h.sweep
+  const sweepSec = el('section', null,
+    el('h2', null, 'Electronic horn (sweep)', el('span', { class: 'bar' },
+      el('button', { class: 'small', textContent: 'Dacia Logan police', onclick: () => {
+        Object.assign(sw, { low: 540, high: 1200, rate: 68.5, rise: 0.36, hold: 0.12, riseCurve: 2, fallCurve: 1, level: 1 }); buildEditor(); onHorn() } }),
+      el('button', { class: 'small', textContent: 'Patent (Federal Signal)', onclick: () => {
+        Object.assign(sw, { low: 500, high: 1650, rate: 85, rise: 0.19, hold: 0.09, riseCurve: 0.5, fallCurve: 0.5, level: 1 }); buildEditor(); onHorn() } }),
+      el('button', { class: 'small', textContent: 'Off', onclick: () => { sw.level = 0; if (!h.units.length) h.units = clone(HORN_SHAPE.units); buildEditor(); onHorn() } }))),
+    el('div', { class: 'grid2' },
+      el('div', null,
+        field('Level', sw, 'level', { min: 0, max: 1, step: 0.01, change: onHorn }),
+        field('Rate', sw, 'rate', { min: 10, max: 400, step: 0.5, unit: 'Hz', change: onHorn }),
+        field('Low', sw, 'low', { min: 100, max: 4000, step: 5, log: true, unit: 'Hz', change: onHorn }),
+        field('High', sw, 'high', { min: 100, max: 5000, step: 5, log: true, unit: 'Hz', change: onHorn }),
+      ),
+      el('div', null,
+        field('Rise', sw, 'rise', { min: 0.01, max: 0.95, step: 0.01, unit: 'of a sweep', change: onHorn }),
+        field('Hold', sw, 'hold', { min: 0, max: 0.9, step: 0.01, unit: 'of a sweep', change: onHorn }),
+        field('Rise curve', sw, 'riseCurve', { min: 0.2, max: 4, step: 0.05, change: onHorn }),
+        field('Fall curve', sw, 'fallCurve', { min: 0.2, max: 4, step: 0.05, change: onHorn }),
+      ),
+    ),
+    el('p', { class: 'hint' }, 'A siren amplifier\'s "air horn" through its PA speaker: not a diaphragm but a square wave swept from Low up to High and back, Rate times a second. The rate is the buzz you hear (its pitch), the range its colour. Rise and Hold are shares of each sweep, the rest falls back; a curve over 1 starts that leg slowly. Federal Signal\'s patent (US4980837): 500 -> 1650 Hz in 2.2 ms, held 1.1 ms, back over 8.4 ms, 85 times a second. Measured on the Dacia Logan police recording: 68.5 a second, ~540 <-> 1200 Hz, rising slow then fast. With a sweep the units can all be removed. Shape it with the speaker below (a PA horn passes ~500-1500 Hz).'),
+  )
+  ed.append(unitsSec, sweepSec, harmSec, bodySec, grit, pressSec, speakerSec)
   buildUnits()
   buildResonances()
   drawWave()
@@ -873,7 +921,7 @@ function buildUnits() {
     return el('tr', null,
       el('td', null, String(i + 1)), el('td', null, f), el('td', { class: 'note' }, noteName(u.f)), el('td', null, ivIn),
       el('td', null, lv),
-      el('td', null, el('button', { class: 'small', textContent: '×', disabled: n < 2, onclick: () => { h.units.splice(i, 1); buildUnits(); onHorn() } })))
+      el('td', null, el('button', { class: 'small', textContent: '×', disabled: n < 2 && !(h.sweep.level > 0), onclick: () => { h.units.splice(i, 1); buildUnits(); onHorn() } })))
   })
   box.replaceChildren(el('table', null,
     el('tr', null, ...['#', 'Pitch (Hz)', 'Note', 'Interval from previous (st)', 'Level', ''].map((x) => el('th', null, x))),
@@ -953,10 +1001,10 @@ window.addEventListener('resize', () => drawWave())
 // ---------------------------------------------------------------------------------------------
 // export: the settings file, written the way the Lua file is
 // ---------------------------------------------------------------------------------------------
-const GLOBAL_ORDER = ['volume', 'soundLevel', 'sampleRate', 'doppler', 'distance', 'limit', 'cabin', 'keys', 'default', 'models', 'horns']
-const HORN_ORDER = ['name', 'level', 'units', 'harmonics', 'strike', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'direct', 'resonances', 'attack', 'release', 'speaker']
+const GLOBAL_ORDER = ['volume', 'soundLevel', 'sampleRate', 'doppler', 'distance', 'limit', 'cabin', 'keys', 'default', 'models', 'scripts', 'horns']
+const HORN_ORDER = ['name', 'level', 'unlimited', 'units', 'harmonics', 'strike', 'rasp', 'air', 'jitter', 'shimmer', 'grille', 'roughness', 'growl', 'flutter', 'direct', 'resonances', 'sweep', 'attack', 'release', 'speaker']
 const SUB_ORDER = {
-  units: ['f', 'level'], resonances: ['f', 'q', 'level'], flutter: ['rate', 'depth'], jitter: ['rate', 'depth'], attack: ['time', 'pitch', 'curve'], release: ['time', 'pitch'],
+  units: ['f', 'level'], resonances: ['f', 'q', 'level'], sweep: ['low', 'high', 'rate', 'rise', 'hold', 'riseCurve', 'fallCurve', 'level'], flutter: ['rate', 'depth'], jitter: ['rate', 'depth'], attack: ['time', 'pitch', 'curve'], release: ['time', 'pitch'],
   speaker: ['highpass', 'lowpass', 'drive', 'asymmetry', 'resonance', 'resonanceQ', 'resonanceGain'], keys: ['honk'], cabin: ['volume', 'muffle'], distance: ['full', 'at', 'volume', 'silent'],
   limit: ['charge', 'pressCost', 'refill', 'weakBelow', 'weakVolume', 'weakPitch', 'croak', 'resume', 'relaxAfter', 'relaxVolume', 'relaxTime'],
 }
@@ -982,6 +1030,7 @@ function exportLua() {
         out.push(tab(2) + luaKey(id) + ' = {')
         for (const hk of HORN_ORDER) {
           const hv = h[hk]
+          if (hk === 'unlimited' && !hv) continue
           if (hk === 'units' || hk === 'resonances') {
             if (!hv.length) { out.push(tab(3) + hk + ' = {},'); continue }
             out.push(tab(3) + hk + ' = {')
@@ -1000,11 +1049,11 @@ function exportLua() {
         out.push(tab(2) + '},')
       }
       out.push(tab(1) + '},')
-    } else if (k === 'models') {
-      const models = Object.keys(v).sort()
-      if (!models.length) { out.push(tab(1) + 'models = {},'); continue }
-      out.push(tab(1) + 'models = {')
-      for (const m of models) out.push(tab(2) + luaKey(m) + ' = ' + luaScalar(v[m]) + ',')
+    } else if (k === 'models' || k === 'scripts') {
+      const paths = Object.keys(v || {}).sort()
+      if (!paths.length) { out.push(tab(1) + k + ' = {},'); continue }
+      out.push(tab(1) + k + ' = {')
+      for (const m of paths) out.push(tab(2) + luaKey(m) + ' = ' + luaScalar(v[m]) + ',')
       out.push(tab(1) + '},')
     } else if (v && typeof v === 'object') {
       out.push(tab(1) + k + ' = ' + luaInline(v, SUB_ORDER[k]) + ',')

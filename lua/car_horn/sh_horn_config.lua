@@ -18,10 +18,13 @@
 	keys         default keys (honk: held down to sound the horn)
 	default      the horn of a car not listed in `models`
 	models       the horn per car model (lower-case model path)
+	scripts      the horn per vehicle script (lower-case path), over the model's: cars that share a model
+	             with others, like the police versions of civilian cars
 
 	horns[id]
 	  name       shown in the studio
 	  level      the horn's own volume, 0..1
+	  unlimited  true = never runs out of breath (the overuse limit skips it: the police PA horn)
 	  units      the horn units sounding together: f (Hz), level. A car's pair is usually a major
 	             third apart (a high and a low horn), a truck's air horn two or three trumpets
 	  harmonics  level of harmonic 1, 2, 3...: the diaphragm's buzz (all of them, slowly falling = brassy).
@@ -51,6 +54,11 @@
 	  speaker    highpass / lowpass (Hz), drive (0 = clean, more = a harsher driver), asymmetry 0..0.9
 	             (the drive clipping one way sooner: the pair's units mix, a low snarl under the note),
 	             resonance (Hz), resonanceQ, resonanceGain (dB): the horn trumpet's peak
+	  sweep      an electronic horn (a siren amplifier's "air horn" through its PA speaker) instead of, or
+	             with, the units: a square wave swept from `low` to `high` Hz and back `rate` times a second
+	             (the rate is the buzz you hear, the range its colour); `rise` and `hold` shares of each
+	             sweep (the rest falls back), `riseCurve` / `fallCurve` the shape of each leg (1 = even,
+	             over 1 = slow at first), `level` (0 = off)
 ]]
 CAR_HORN = CAR_HORN or {}
 
@@ -66,7 +74,8 @@ CAR_HORN.CONFIG = {
 	default = "dual",
 	models = {
 		["models/forest/f450_ambo.mdl"] = "american",
-		["models/perp2.5/swat_van.mdl"] = "airhorn",
+		["models/ezza/plpd_2016transit.mdl"] = "police",
+		["models/perp2.5/swat_van.mdl"] = "police",
 		["models/sickness/meatwagon.mdl"] = "american",
 		["models/sickness/stretchdr_tdmcars.mdl"] = "american",
 		["models/sickness/truckfire.mdl"] = "airhorn",
@@ -165,7 +174,7 @@ CAR_HORN.CONFIG = {
 		["models/tdmcars/morg_aeross.mdl"] = "trumpet",
 		["models/tdmcars/murcielago.mdl"] = "sport",
 		["models/tdmcars/noblem600.mdl"] = "sport",
-		["models/tdmcars/plpd_bearcat.mdl"] = "airhorn",
+		["models/tdmcars/plpd_bearcat.mdl"] = "police",
 		["models/tdmcars/pon_fierogt.mdl"] = "american",
 		["models/tdmcars/pon_firetransam.mdl"] = "american",
 		["models/tdmcars/por_918.mdl"] = "sport",
@@ -178,6 +187,21 @@ CAR_HORN.CONFIG = {
 		["models/tdmcars/vip_viper.mdl"] = "american",
 		["models/tdmcars/wrangler.mdl"] = "american",
 		["models/tdmcars/zondac12.mdl"] = "sport",
+	},
+	scripts = {
+		["scripts/vehicles/jarheads/bearcat.txt"] = "police",
+		["scripts/vehicles/jarheads/transit2016.txt"] = "police",
+		["scripts/vehicles/perp2/swatvan.txt"] = "police",
+		["scripts/vehicles/tdmcars/2016transit.txt"] = "police",
+		["scripts/vehicles/tdmcars/bmw_340i_police.txt"] = "police",
+		["scripts/vehicles/tdmcars/bmwm5e60_cop.txt"] = "police",
+		["scripts/vehicles/tdmcars/cayenne_cop.txt"] = "police",
+		["scripts/vehicles/tdmcars/charger2012_cop.txt"] = "police",
+		["scripts/vehicles/tdmcars/charger_cop.txt"] = "police",
+		["scripts/vehicles/tdmcars/crownvic_cop.txt"] = "police",
+		["scripts/vehicles/tdmcars/crownvic_unmarked.txt"] = "police",
+		["scripts/vehicles/tdmcars/landrover12_cop.txt"] = "police",
+		["scripts/vehicles/tdmcars/sl65amg_cop.txt"] = "police",
 	},
 	horns = {
 		dual = {
@@ -310,6 +334,30 @@ CAR_HORN.CONFIG = {
 			attack = { time = 0.12, pitch = 0.95, curve = 0.5 },
 			release = { time = 0.18, pitch = 0.93 },
 			speaker = { highpass = 120, lowpass = 6000, drive = 3, asymmetry = 0, resonance = 700, resonanceQ = 0.7, resonanceGain = 5 },
+		},
+		police = {
+			name = "Police electronic",
+			level = 1,
+			unlimited = true,
+			units = {},
+			harmonics = { 1 },
+			strike = 0,
+			rasp = 0,
+			air = 0,
+			jitter = { rate = 0, depth = 0 },
+			shimmer = 0,
+			grille = 0.2,
+			roughness = 0,
+			growl = 0,
+			flutter = { rate = 0, depth = 0 },
+			direct = 0.59,
+			resonances = {
+				{ f = 850, q = 1.1, level = 1.5 },
+			},
+			sweep = { low = 540, high = 1200, rate = 68.5, rise = 0.36, hold = 0.12, riseCurve = 2, fallCurve = 1, level = 1 },
+			attack = { time = 0.004, pitch = 1, curve = 1 },
+			release = { time = 0.02, pitch = 1 },
+			speaker = { highpass = 500, lowpass = 1500, drive = 1, asymmetry = 0, resonance = 800, resonanceQ = 1.2, resonanceGain = 3 },
 		},
 	},
 }

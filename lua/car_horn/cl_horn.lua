@@ -239,7 +239,7 @@ local function syncOwnCharge(player, serverNow)
 end
 
 local function ownPower()
-	if not CarHorn.Limited() or not ownCharge then return 1 end
+	if not CarHorn.Limited(ownCar) or not ownCharge then return 1 end
 
 	return CarHorn.ChargeStrength(ownCharge)
 end
@@ -295,7 +295,7 @@ local function update(vehicle, car, now)
 	else
 		if car.presses and networkPresses ~= car.presses then car.holdUntil = now + MIN_HONK end
 		held, presses = vehicle:GetNW2Bool(CarHorn.ON_NW, false) or now < (car.holdUntil or 0), networkPresses
-		power = CarHorn.Limited() and vehicle:GetNW2Float(CarHorn.POWER_NW, 1) or 1
+		power = CarHorn.Limited(vehicle) and vehicle:GetNW2Float(CarHorn.POWER_NW, 1) or 1
 	end
 	car.presses = networkPresses
 
@@ -325,7 +325,7 @@ local function update(vehicle, car, now)
 	end
 	-- overused: weaker (quieter, its pitch sagging); held long: easing down
 	local weakVolume, weakPitch = CarHorn.WeakFactors(power)
-	local relax = (honk and CarHorn.Limited()) and CarHorn.RelaxFactor(now - honk.startedAt) or 1
+	local relax = (honk and CarHorn.Limited(vehicle)) and CarHorn.RelaxFactor(now - honk.startedAt) or 1
 	local pitch = math.Clamp(math.Round(BASE_PITCH * car.dopplerRatio * weakPitch), PITCH_MIN, PITCH_MAX)
 	local volume = audible and honkVolume(car, inside, distanceGain) * weakVolume * relax or 0
 
@@ -433,7 +433,7 @@ local function pollKey(now)
 	local seat = player:GetVehicle()
 	local driving = CarHorn.HornOf(seat) ~= nil
 	ownCar = driving and seat or nil
-	local limited = CarHorn.Limited()
+	local limited = CarHorn.Limited(driving and seat or nil)
 	local serverNow = CurTime()
 	if limited then syncOwnCharge(player, serverNow) end
 	local down = driving and system.HasFocus() and not player:IsTyping() and not gui.IsGameUIVisible()

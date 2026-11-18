@@ -17,6 +17,42 @@ local POWER_STEP = 0.02
 
 util.AddNetworkString("car_horn")
 
+-- the car's vehicle script, lower case with forward slashes (a spawn-menu car that fell back to a
+-- stand-in script names the one it stands for in AudioPerpScript)
+local function scriptOf(vehicle)
+	local vehicleTable = vehicle.VehicleTable
+	local script = istable(vehicleTable) and vehicleTable.AudioPerpScript
+	if not isstring(script) or script == "" then
+		local keyValues = vehicle:GetKeyValues() or {}
+		script = keyValues.vehiclescript or keyValues.VehicleScript
+		if (not isstring(script) or script == "") and istable(vehicleTable) and istable(vehicleTable.KeyValues) then
+			script = vehicleTable.KeyValues.vehiclescript
+		end
+	end
+	if not isstring(script) or script == "" then return nil end
+
+	return (string.lower(script):gsub("\\", "/"))
+end
+
+-- CONFIG.scripts: the horn of a car whose script has its own (police versions of civilian cars)
+local function pickScriptHorn(vehicle)
+	if not IsValid(vehicle) or vehicle:GetClass() ~= "prop_vehicle_jeep" then return end
+	local scripts = CarHorn.CONFIG.scripts or {}
+	local script = scriptOf(vehicle)
+	local hornId = script and scripts[script]
+	if hornId and CarHorn.CONFIG.horns[hornId] and vehicle:GetNW2String(CarHorn.ID_NW, "") ~= hornId then
+		vehicle:SetNW2String(CarHorn.ID_NW, hornId)
+	end
+end
+
+hook.Add("OnEntityCreated", "car_horn_script", function(entity)
+	if entity:GetClass() ~= "prop_vehicle_jeep" then return end
+	timer.Simple(0, function() pickScriptHorn(entity) end)
+end)
+
+-- lua refresh: cars already out there
+for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do pickScriptHorn(vehicle) end
+
 local honking = {}   -- player -> true while their horn sounds (drained every tick)
 
 local function chargeOf(player)
@@ -70,7 +106,7 @@ net.Receive("car_horn", function(_, player)
 	-- a honk something else plays (car_horn/replace: the police siren's horn override) isn't charged.
 	-- horn_on is still set: that's how whatever replaces it hears the key
 	player.hornReplaced = hook.Run("car_horn/replace", vehicle) == true
-	if CarHorn.Limited() and not player.hornReplaced then
+	if CarHorn.Limited(vehicle) and not player.hornReplaced then
 		local state = chargeOf(player)
 		local sounds = CarHorn.PressCharge(state, now)
 		sendCharge(player)
@@ -92,7 +128,7 @@ hook.Add("Tick", "car_horn", function()
 		local vehicle = IsValid(player) and player.hornVehicle
 		if not IsValid(vehicle) or vehicle:GetDriver() ~= player then
 			if IsValid(player) then stopHonk(player) else honking[player] = nil end
-		elseif CarHorn.Limited() and not player.hornReplaced then
+		elseif CarHorn.Limited(vehicle) and not player.hornReplaced then
 			local state = chargeOf(player)
 			if CarHorn.HoldCharge(state, now) then
 				setPower(vehicle, CarHorn.ChargeStrength(state))
