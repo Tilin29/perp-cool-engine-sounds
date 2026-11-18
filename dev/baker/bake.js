@@ -7,6 +7,10 @@
     node bake.js --rate 22050          half the size
     node bake.js --jobs 4 --only 3     limit workers / bake just engine #3 (no manifest, for testing)
     node bake.js --list                print the engine numbers and exit
+    node bake.js --dry                 render everything, write nothing; print each engine's band
+                                       loudness (dB, rms above 250 Hz of the on-throttle loops)
+    node bake.js --out <dir> --only 3,7  write the WAVs and a manifest (<dir>/cl_baked.lua, just these
+                                       engines) somewhere else: listening tests, dev/drive_demo AE_SOUND
     node bake.js --electric            re-bake only the electric motors and the shared env bank;
                                        every other engine keeps its entry and folder from the
                                        current manifest (only after changes to EV-only code)
@@ -29,8 +33,11 @@ const { fork } = require('child_process')
 
 const ADDON = path.resolve(__dirname, '..', '..')
 const LUA = path.join(ADDON, 'lua', 'audio_engine')
-const SOUND_OUT = path.join(ADDON, 'sound', 'audio_engine')
-const MANIFEST = path.join(LUA, 'cl_baked.lua')
+const DRY = process.argv.includes('--dry')
+const OUT_DIR = process.argv.includes('--out')
+const SOUND_OUT = process.argv.includes('--out') ? path.resolve(process.argv[process.argv.indexOf('--out') + 1]) : path.join(ADDON, 'sound', 'audio_engine')
+const MANIFEST = process.argv.includes('--out') && !process.argv.includes('--worker')
+  ? path.join(path.resolve(process.argv[process.argv.indexOf('--out') + 1]), 'cl_baked.lua') : path.join(LUA, 'cl_baked.lua')
 const ADDON_FILES = ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'cl_synth.lua', 'cl_soundbank.lua']
 
 function arg(name, def) {
@@ -61,6 +68,7 @@ function synthVersion() {
 // 16-bit mono PCM; a loop gets a 'cue ' point where sound.Generate would start its loop
 function writeWav(file, rate, loopStart, data) {
   const n = data.length
+  if (DRY) return 44 + n * 2
   const pcm = Buffer.alloc(n * 2)
   for (let i = 0; i < n; i++) {
     let v = Math.round(Math.max(-1, Math.min(1, data[i])) * 32767)
@@ -132,7 +140,8 @@ async function worker() {
       const b0 = bytes()
       const bands = await call(`__result(BAKE.bake(${m.i}, ${RATE}))`)
       const entry = await call(`__result(BAKE.entry(${m.i}))`)
-      process.send({ i: m.i, entry, bands, secs: (Date.now() - t0) / 1000, bytes: bytes() - b0 })
+      const levels = await call(`__result(BAKE.levels(${m.i}))`)
+      process.send({ i: m.i, entry, bands, levels, secs: (Date.now() - t0) / 1000, bytes: bytes() - b0 })
     } catch (e) {
       process.send({ i: m.i, error: e.message })
     }
@@ -156,7 +165,7 @@ async function main() {
   console.log(`${n} stock engine families at ${RATE} Hz, synth version ${version}, ${JOBS} workers`)
   let todo = items
   const entries = new Array(n + 1)
-  if (ONLY) todo = items.filter((it) => it.i === parseInt(ONLY, 10))
+  if (ONLY) { const only = ONLY.split(',').map(Number); todo = items.filter((it) => only.includes(it.i)) }
   else if (ELECTRIC) {
     // everything else stays as baked: its manifest entry and its folder must both be there
     const old = oldEntries()
@@ -178,7 +187,7 @@ async function main() {
       if (!keep.has(d)) fs.rmSync(path.join(SOUND_OUT, d), { recursive: true, force: true })
     }
     console.log(`--electric: baking ${todo.length} electric engines and the env bank, keeping ${keep.size} others`)
-  } else if (fs.existsSync(SOUND_OUT)) {
+  } else if (!DRY && fs.existsSync(SOUND_OUT)) {
     // empty it rather than delete it (Windows refuses while anything has the folder open)
     for (const d of fs.readdirSync(SOUND_OUT)) fs.rmSync(path.join(SOUND_OUT, d), { recursive: true, force: true })
   }
@@ -188,10 +197,10 @@ async function main() {
   const t0 = Date.now()
   await new Promise((resolve) => {
     let live = 0
-    const workers = Math.min(JOBS, queue.length + (ONLY ? 0 : 1))
-    let envSent = !!ONLY
+    const workers = Math.min(JOBS, queue.length + (ONLY || DRY ? 0 : 1))
+    let envSent = !!(ONLY || DRY)
     for (let w = 0; w < workers; w++) {
-      const cp = fork(__filename, ['--worker', '--rate', String(RATE)], { env: { ...process.env, BAKE_VERSION: version } })
+      const cp = fork(__filename, ['--worker', '--rate', String(RATE), ...(DRY ? ['--dry'] : []), '--out', SOUND_OUT], { env: { ...process.env, BAKE_VERSION: version } })
       live++
       const next = () => {
         if (!envSent) { envSent = true; cp.send({ env: true }); return }
@@ -207,6 +216,7 @@ async function main() {
           const it = items[m.i - 1]
           console.log(`  [${done}/${todo.length}] ${it.engine} (${it.dir}, ${m.bands} bands) ${m.secs.toFixed(1)}s ` +
             `${(m.bytes / 1048576).toFixed(1)} MB: ${it.names}`)
+          if (DRY) console.log(`    levels ${it.dir}: ${m.levels}`)
         }
         next()
       })
@@ -215,10 +225,10 @@ async function main() {
   })
   console.log(`baked ${done} engines, ${(total / 1048576).toFixed(1)} MB, ${((Date.now() - t0) / 1000).toFixed(0)} s` +
     (failed ? `, ${failed} FAILED` : ''))
-  if (ONLY || failed) { console.log('manifest not written'); process.exit(failed ? 1 : 0) }
+  if ((ONLY && !OUT_DIR) || failed || DRY) { console.log('manifest not written'); process.exit(failed ? 1 : 0) }
   const header = await call(`__result(BAKE.header(${JSON.stringify(version)}))`)
   const families = await call('__result(BAKE.familyEntry())')
-  const body = [header + envEntry, families + 'E.BAKED = {', ...entries.slice(1), '}', ''].join('\n')
+  const body = [header + (envEntry || ''), families + 'E.BAKED = {', ...entries.slice(1).filter(Boolean), '}', ''].join('\n')
   fs.writeFileSync(MANIFEST, body)
   console.log('wrote', path.relative(ADDON, MANIFEST))
 }

@@ -96,6 +96,7 @@ function BAKE.bake(i, sr)
 	m.peak = {}
 	for name, pk in pairs(b.peak) do m.peak[stem(b, name)] = pk end
 	e.meta = m
+	e.levels = b.levelReport
 	Bank.list[e.cfg.id] = nil
 	return #b.layers
 end
@@ -138,6 +139,14 @@ local function ser(v, ind)
 		parts[#parts + 1] = pad .. key .. " = " .. ser(v[k], pad) .. ","
 	end
 	return "{\n" .. table.concat(parts, "\n") .. "\n" .. ind .. "}"
+end
+
+-- each band's on-throttle loudness as played (dB, before the peak limiter): bake.js --dry
+function BAKE.levels(i)
+	local report = BAKE.items[i].levels or {}
+	local parts = {}
+	for k, levelDb in ipairs(report) do parts[k] = string.format("%.1f", levelDb) end
+	return table.concat(parts, " ")
 end
 
 -- manifest pieces, so parallel workers can each hand theirs back

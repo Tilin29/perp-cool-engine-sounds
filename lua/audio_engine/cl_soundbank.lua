@@ -152,12 +152,19 @@ local function limitPeaks(buffer, sampleRate, ceiling, circular)
 end
 Bank.LimitPeaks = limitPeaks
 
--- every engine is matched to the same loudness (rms above 250 Hz of its on-throttle loops),
--- so a V8 isn't quieter than an inline-4. Electric motors keep their own levels from band to
--- band (the whine grows with speed): their top-speed on-throttle loop is set to TARGET_EV_DB
--- rms over the whole band, and in game they play at cl_engine's AudioEngine.EV_VOLUME. (At -32 dB
--- and 0.1 they were ~30 dB under the engines with the whine below 450 Hz: no one heard them.)
-local TARGET_DB, TARGET_EV_DB = -21, -22
+--[[
+	Engines keep their natural loudness: band to band (quieter at idle, louder where the firing
+	sits on a pipe resonance, as rendered) and engine to engine (a small three under a V10).
+	Every engine gets the same gain, NATURAL_GAIN_DB; a band whose on-throttle loop (rms above
+	250 Hz) would then be over CAP_DB is turned down to it, the others are left alone. CAP_DB is
+	the loudest any band played at when every engine was matched to -21 dB (each band evened out
+	to a 3 dB rise from idle to redline: every engine sounded alike). Natural levels measured
+	(bake.js --dry): loudest bands -21.7 (inline-3) to -10.1 dB, most bands -17 to -27. Electric motors keep their own levels from band to band (the whine
+	grows with speed): their top-speed on-throttle loop is set to TARGET_EV_DB rms over the whole
+	band, and in game they play at cl_engine's AudioEngine.EV_VOLUME. (At -32 dB and 0.1 they were
+	~30 dB under the engines with the whine below 450 Hz: no one heard them.)
+]]
+local NATURAL_GAIN_DB, CAP_DB, TARGET_EV_DB = 0, -18.4, -22
 
 local function build(bank)
 	local config, sampleRate = bank.config, bank.sampleRate
@@ -170,21 +177,17 @@ local function build(bank)
 
 	-- rpm bands
 	local bandCount = #config.bands
-	local referenceDb
-	local bandGains = {}
+	local bandGains, bandLevels = {}, {}
 	local popLeveller, popBandDistance = 1, math.huge
 	local loudest, loudestBroad = -200, -200
 	for i, bandRpm in ipairs(config.bands) do
 		local offLoop, _, offLeveller = Synth.RenderSteadyLoop(config, sampleRate, bandRpm, 0, yield)
 		local onLoop = Synth.RenderSteadyLoop(config, sampleRate, bandRpm, 1, yield)
-		-- loudness curve: on-throttle gets ~5 dB louder from the lowest to the highest band
+		-- each band as rendered, unless it would be over the cap (see NATURAL_GAIN_DB). An
+		-- electric motor keeps its levels: near silent at low speed, the whine growing with speed
 		local levelDb = 20 * math.log10(loudness(onLoop, sampleRate))
-		referenceDb = referenceDb or levelDb
-		local wantedFlare = referenceDb + 3 * (bandCount > 1 and (i - 1) / (bandCount - 1) or 0)
-		local gain = math.min(4, math.max(0.5, 10 ^ ((wantedFlare - levelDb) / 20)))
-		-- an electric motor keeps its natural levels: near silent at low speed, the whine
-		-- growing with speed (evening the bands out would blow the faint low end up)
-		if config.electric then gain = 1 end
+		bandLevels[i] = levelDb
+		local gain = config.electric and 1 or math.min(1, 10 ^ ((CAP_DB - NATURAL_GAIN_DB - levelDb) / 20))
 		bandGains[i] = gain
 		scale(offLoop, gain); scale(onLoop, gain)
 		loudest = math.max(loudest, levelDb + 20 * math.log10(gain))
@@ -282,16 +285,10 @@ local function build(bank)
 
 	-- (turbo whistle and blow-off valve are shared by every engine: see the shared bank below)
 
-	-- one gain for everything, so the relative levels stay as rendered: set by loudness, so
-	-- every engine plays equally loud. The loudest pulses of loops and one-shots are then
+	-- one gain for everything, so the relative levels stay as rendered: the same for every
+	-- engine, under the cap (NATURAL_GAIN_DB). The loudest pulses of loops and one-shots are then
 	-- limited to stay under full scale; pops & bangs are only turned down if they would clip.
-	local levelSum, levelCount = 0, 0
-	for i = (bandCount > 1 and 2 or 1), bandCount do
-		local onData
-		for _, job in ipairs(jobs) do if job.name == bank.layers[i].on then onData = job.data end end
-		if onData then levelSum = levelSum + 20 * math.log10(loudness(onData, sampleRate)); levelCount = levelCount + 1 end
-	end
-	local gain = levelCount > 0 and 10 ^ ((TARGET_DB - levelSum / levelCount) / 20) or 1
+	local gain = 10 ^ (NATURAL_GAIN_DB / 20)
 	if config.electric then
 		for _, job in ipairs(jobs) do
 			if job.name == bank.layers[bandCount].on then
@@ -302,6 +299,8 @@ local function build(bank)
 		end
 	end
 	gain = math.min(gain, 30)
+	bank.levelReport = {}
+	for i = 1, bandCount do bank.levelReport[i] = bandLevels[i] + 20 * math.log10(bandGains[i] * gain) end
 	bank.limitedDb = 0
 	for _, job in ipairs(jobs) do
 		if not job.own then
@@ -314,7 +313,7 @@ local function build(bank)
 	yield()
 
 	--[[
-		A sound's volume can't go over 1, and the loudness matching leaves many bands peaking far
+		A sound's volume can't go over 1, and the natural levels leave many bands peaking far
 		under full scale (the Furai's high revs at 0.23-0.5), so those could never swell on a
 		drive-by. Each band's loops are stored as hot as they go; layer.trim is the volume that
 		plays them at the level they had. b.peak stays the level at volume 1 before the trim.
@@ -381,8 +380,8 @@ local function buildSharedBank(bank)
 	end
 	-- name, buffer, level (rms), loop, level measured over the first n seconds
 	-- The turbo sounds are generated 6 dB hot and played at half volume by default, so their
-	-- volume sliders can go to 200%. Every engine is matched to the same loudness, so one
-	-- turbo and one blow-off level suit them all, and switching the turbo on or off (or its
+	-- volume sliders can go to 200%. Engines are all about as loud (natural levels under one
+	-- cap, see NATURAL_GAIN_DB), so one turbo and one blow-off level suit them all, and switching the turbo on or off (or its
 	-- volumes) never needs a new engine.
 	local jobs = {
 		{ "road", Synth.RenderRoadLoop(sampleRate, yield), 0.07, true },
@@ -395,7 +394,7 @@ local function buildSharedBank(bank)
 		{ "bov2", Synth.RenderBlowoff(sampleRate, 0xB10F + 2 * 4099, yield), 0.093, false, 0.15 },
 	}
 	-- superchargers: on boost and bypass open per variant and rpm band (sc_<variant>_<band>). The
-	-- on loop is set to about 0.38 of a loudness-matched engine's top band (full band rms), as in
+	-- on loop is set to about 0.38 of a typical engine's top band (full band rms), as in
 	-- the clips they were picked from; the bypass loop keeps the gain of its on loop (6th field),
 	-- so it stays quieter
 	for _, variant in ipairs(Synth.SC_ORDER) do

@@ -124,7 +124,8 @@ local live
 
 -- what NewGen / NewChain work out from a profile. The running engine takes these on and keeps
 -- everything else (firing phase, filter and resonator state), so a change lands without a restart
-local GEN_FIELDS = { "pitch", "tone", "cylinderCount", "firingIntervals", "firingStrengths", "firingBanks", "redline", "realism", "electric" }
+local GEN_FIELDS = { "pitch", "tone", "cylinderCount", "firingIntervals", "firingStrengths", "firingBanks", "redline", "realism", "electric",
+	"intakeAmount", "intakeHz", "valvetrainAmount", "valveHz", "whineAmount", "whineOrder" }
 local CHAIN_FIELDS = { "drive", "driveNorm", "tailWet", "reverbWet", "muffleScale", "electric" }
 local CHAIN_FILTERS = { "bodyPeak", "lowShelf", "topLowpass", "highShelf" }
 

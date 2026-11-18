@@ -535,7 +535,9 @@ local function updateSound(car, deltaTime)
 	if not engineState.on then targetLoopGain, loopGainRate = 0, 1 / 0.08 end
 	car.loopGain = approach(car.loopGain, targetLoopGain, loopGainRate * deltaTime)
 
-	car.smoothedThrottle = car.smoothedThrottle + (engineState.soundThrottle - car.smoothedThrottle) * min(1, deltaTime * 12)
+	-- (faster through an upshift's torque cut, or the glide smears it away)
+	local throttleFollow = (engineState.shiftTimer > 0 and engineState.shiftDirection == 1) and 30 or 12
+	car.smoothedThrottle = car.smoothedThrottle + (engineState.soundThrottle - car.smoothedThrottle) * min(1, deltaTime * throttleFollow)
 	-- the limiter loop only while the throttle is held against it: let go and the revs fall
 	-- straight away, so the loop must too (it used to stutter on for its hold time)
 	local limiterTarget = (engineState.on and engineState.phase == "run" and engineState.gear == 0 and engineState.limiterHoldTimer > 0
