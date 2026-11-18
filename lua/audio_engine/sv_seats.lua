@@ -1,12 +1,14 @@
 --[[
-	Passenger seats for the registered cars (AudioEngine.CAR_SEATS in sh_carlist.lua). The content
-	packs define none, so they're laid out from the car's own driver attachment: the front passenger
-	mirrors the driver across the centre line, the back row sits behind them.
+	Passenger seats for the registered cars: PERP's own (AudioEngine.PERP_SEATS in sh_carlist.lua,
+	copied from the gamemode's vehicle definitions: each pod's origin and angles in the car's space, and
+	the car's exit points), else an estimate (AudioEngine.CAR_SEATS) laid out from the car's driver
+	attachment: the front passenger mirrors the driver across the centre line, the back row behind them.
 	Use (E) on a car enters the free seat nearest to where you stand: at the driver's door that's the
 	driver's seat (Source's own entering, untouched), at any other door, or with a driver in, a
 	passenger seat. A seat is an invisible prisoner pod parented to the car, made only while someone
 	sits in it (40 cars x 4 standing pods would be 160 networked entities for nothing). Getting out
-	puts the passenger beside their door (else the other side, behind the car, on the roof).
+	puts the passenger at the nearest of PERP's exit points that's clear, else beside their door (else
+	the other side, behind the car, on the roof).
 ]]
 local AudioEngine = AUDIO_ENGINE
 
@@ -24,6 +26,7 @@ local FRONT_PASSENGER = { -1, 0, 0 }
 local USE_COOLDOWN = 0.75   -- s: holding E would otherwise get straight back in after getting out
 local EXIT_GAP = 22         -- units between the car's side and the player's centre on getting out
 local EXIT_DROP = 128       -- units searched below an exit point for the ground
+local EXIT_LIFT = 16        -- PERP's exit points sit at the car's origin (the ground): looked for this much higher
 local INCHES_PER_METRE = 1 / 0.0254
 local UP = Vector(0, 0, 1)
 
@@ -57,6 +60,19 @@ local function layout(vehicle, config)
 	local driverSign = driverLateral >= 0 and 1 or -1
 	local rearPitch = geometry.wheelbase * INCHES_PER_METRE * AudioEngine.SEAT_REAR_PITCH
 	local seats = { driver = driverPosition, forward = forward, right = right }
+	local perpSeats = config.perpSeats
+	if perpSeats and #perpSeats.seats > 0 then
+		-- PERP's: the pod itself (origin, angles) in the car's space
+		for _, seat in ipairs(perpSeats.seats) do
+			local origin = Vector(seat[1], seat[2], seat[3])
+			seats[#seats + 1] = { position = origin, angles = Angle(seat[4], seat[5], seat[6]), side = origin:Dot(right) >= 0 and 1 or -1 }
+		end
+		seats.exits = {}
+		for _, point in ipairs(perpSeats.exits) do seats.exits[#seats.exits + 1] = Vector(point[1], point[2], point[3] + EXIT_LIFT) end
+		layoutCache[model] = seats
+
+		return seats
+	end
 	for _, seat in ipairs(seatList(config)) do
 		local side, back, up, width = seat[1], seat[2], seat[3], seat[4]
 		local lateral = side * driverSign * (width or math.abs(driverLateral))
@@ -109,15 +125,17 @@ end
 local function createPod(vehicle, seats, index)
 	local pod = ents.Create("prop_vehicle_prisoner_pod")
 	if not IsValid(pod) then return end
-	local hips = vehicle:LocalToWorld(seats[index].position)
+	local seat = seats[index]
+	local position = vehicle:LocalToWorld(seat.position)
 	pod:SetModel(SEAT_MODEL)
 	pod:SetKeyValue("vehiclescript", SEAT_SCRIPT)
 	pod:SetKeyValue("limitview", "0")
-	pod:SetPos(hips)
-	pod:SetAngles(vehicle:LocalToWorldAngles(Angle(0, seats.forward:Angle().y - 90, 0)))
+	pod:SetPos(position)
+	pod:SetAngles(vehicle:LocalToWorldAngles(seat.angles or Angle(0, seats.forward:Angle().y - 90, 0)))
 	pod:Spawn()
 	pod:Activate()
-	pod:SetPos(hips - (pod:LocalToWorld(podOffset(pod)) - pod:GetPos()))
+	-- (an estimated seat's position is where the hips go: the pod moves so its own hip attachment is there)
+	if not seat.angles then pod:SetPos(position - (pod:LocalToWorld(podOffset(pod)) - pod:GetPos())) end
 	-- held still: its physics would otherwise fall against the car it's parented to
 	local physicsObject = pod:GetPhysicsObject()
 	if IsValid(physicsObject) then
@@ -233,6 +251,8 @@ local function extent(vehicle, direction)
 	return math.max(math.abs(mins:Dot(direction)), math.abs(maxs:Dot(direction)))
 end
 
+-- where a passenger may get out, in order: PERP's exit points nearest the seat first, then beside
+-- their door, the other side, behind the car, the roof
 local function exitPoints(vehicle, seats, seat)
 	local forward, right = seats.forward, seats.right
 	local position = seat.position
@@ -241,12 +261,20 @@ local function exitPoints(vehicle, seats, seat)
 	local behind = position:Dot(forward) + extent(vehicle, forward) + EXIT_GAP
 	local roofHeight = vehicle:OBBMaxs().z + 2
 
-	return {
-		position + right * (seat.side * besideDistance - lateral),
-		position + right * (-seat.side * besideDistance - lateral),
-		position - forward * behind - right * lateral,
-		Vector(position.x, position.y, roofHeight),
-	}
+	local points = {}
+	if seats.exits then
+		for _, point in ipairs(seats.exits) do points[#points + 1] = point end
+		local seatX, seatY = position.x, position.y
+		table.sort(points, function(first, second)
+			return (first.x - seatX) ^ 2 + (first.y - seatY) ^ 2 < (second.x - seatX) ^ 2 + (second.y - seatY) ^ 2
+		end)
+	end
+	points[#points + 1] = position + right * (seat.side * besideDistance - lateral)
+	points[#points + 1] = position + right * (-seat.side * besideDistance - lateral)
+	points[#points + 1] = position - forward * behind - right * lateral
+	points[#points + 1] = Vector(position.x, position.y, roofHeight)
+
+	return points
 end
 
 local function placeBeside(player, vehicle, seatIndex)
