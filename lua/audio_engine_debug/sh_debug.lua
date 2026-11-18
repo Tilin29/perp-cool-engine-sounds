@@ -11,7 +11,8 @@
 	  rev response    NW2 audio_dbg_rev on the car, or Global2 audio_dbg_rev for every car
 	                                                 -> AudioEngine.CAR_REV / sh_drivetrain.lua Drivetrain.REV
 	  handling script the car's params (server)      -> the vehicle script txt (copied out)
-	  assists/tables  server convars and AudioEngine.TRACTION / AudioEngine.ANTI_SPIN / AudioEngine.STABILITY_DEFAULTS values
+	  handling model  audio_engine_drivemodel and AudioEngine.HANDLING values (sh_handling.lua), on the server
+	                  and, through Global2 audio_dbg_handling, every client (their prediction runs the same model)
 ]]
 
 local AudioEngine = AUDIO_ENGINE
@@ -33,9 +34,7 @@ end
 ---------------------------------------------------------------------------
 EngineDebug.SERVER_CVARS = {
 	{ "audio_engine_editor", "bool", "Engine editor (Rev Bench menu, !engine)" },
-	{ "audio_engine_handling", "bool", "Anti-spin setup (brake bias, power cut cap, lower centre, lock at speed)" },
-	{ "audio_engine_traction", "bool", "Traction control (launch slip + slide power cut)" },
-	{ "audio_engine_stability", "bool", "Stability control (yaw, slip limit, straight-line hold, grip)" },
+	{ "audio_engine_drivemodel", "bool", "Handling model (rotation follows the steering, grip limit, handbrake drifts)" },
 	{ "audio_engine_cruise", "bool", "Speed limiter (middle mouse)" },
 	{ "audio_engine_autostart", "bool", "Engine starts by itself on entering" },
 	{ "audio_engine_keeprunning", "bool", "Engine keeps idling after getting out" },
@@ -50,35 +49,40 @@ EngineDebug.SERVER_CVAR_SET = {}
 for _, cvarEntry in ipairs(EngineDebug.SERVER_CVARS) do EngineDebug.SERVER_CVAR_SET[cvarEntry[1]] = cvarEntry end
 
 -- the convars that are the addon's handling changes: all 0 = PERP's own handling
-EngineDebug.HANDLING_CVARS = { "audio_engine_handling", "audio_engine_traction", "audio_engine_stability" }
+EngineDebug.HANDLING_CVARS = { "audio_engine_drivemodel" }
 
 --[[
 	Server tables tuned live: { table in E, key, min, max, decimals, label }. They reset to the
 	file's values on a map change / restart: copy the changed lines out with the menu's button.
 ]]
 EngineDebug.TUNABLES = {
-	{ "TRACTION", "slideFloor", 0, 1, 2, "Slide: least power left while sliding" },
-	{ "TRACTION", "slideCut", 0, 10, 1, "Slide: how fast the power goes (per s)" },
-	{ "TRACTION", "slideMaxTime", 0, 5, 1, "Slide: longest power cut (s)" },
-	{ "TRACTION", "slideTurnFloor", 0, 1, 2, "Slide: least power in a corner (not spinning)" },
-	{ "STABILITY_DEFAULTS", "slideFrom", 0, 30, 0, "Slide counts from (degrees tail out)" },
-	{ "STABILITY_DEFAULTS", "holdGrace", 0, 3, 1, "Straight-line hold: longest settle out of a turn (s)" },
-	{ "STABILITY_DEFAULTS", "holdSettled", 0, 10, 1, "Straight-line hold: settled under (deg/s)" },
-	{ "TRACTION", "floor", 0, 1, 2, "Launch: least power at a standstill" },
-	{ "TRACTION", "floorFast", 0, 1, 2, "Launch: least power from ~36 mph" },
-	{ "TRACTION", "slip", 0.05, 1, 2, "Wheel slip that counts as spinning" },
-	{ "STABILITY_DEFAULTS", "straightHold", 0, 10, 1, "Straight-line hold: turn back per degree off" },
-	{ "STABILITY_DEFAULTS", "straightDamp", 0, 40, 0, "Straight-line hold: how firmly" },
-	{ "STABILITY_DEFAULTS", "gripAssist", 0, 3, 2, "Extra side grip (g)" },
-	{ "STABILITY_DEFAULTS", "slipMax", 1, 20, 0, "Slip limit (degrees tail out)" },
-	{ "STABILITY_DEFAULTS", "turnShare", 0, 1, 2, "Turn-in help share" },
-	{ "ANTI_SPIN", "throttleReduceFast", 0, 1, 2, "Most power cut while steering at speed" },
-	{ "ANTI_SPIN", "steerFast", 1, 2.5, 2, "Steering lock at speed x" },
-	{ "ANTI_SPIN", "frontBrake", 0.4, 0.8, 2, "Least front brake share" },
-	{ "HIGH_SPEED_STEER", "scale", 0.5, 1.2, 2, "Lock tightens to x this by 90 mph" },
-	{ "STEER_GRIP", "g", 0.5, 4, 2, "Lock cap: turn it allows (g)" },
-	{ "STEER_GRIP", "slip", 0, 20, 1, "Lock cap: tyre slip angle on top (deg)" },
+	{ "HANDLING", "grip", 0.5, 2.5, 2, "Tyre grip (g): the tightest turn, and how slides stop" },
+	{ "HANDLING", "yawFollow", 1, 20, 1, "How firmly the rotation follows the steering (per s)" },
+	{ "HANDLING", "steerRate", 1, 15, 1, "Steering: towards the key (per s)" },
+	{ "HANDLING", "steerReturn", 1, 15, 1, "Steering: back to the centre (per s)" },
+	{ "HANDLING", "lockSlow", 10, 50, 0, "Lock at parking speeds (deg)" },
+	{ "HANDLING", "lockFast", 1, 20, 1, "Lock at speed (deg)" },
+	{ "HANDLING", "lockFadeSpeed", 5, 60, 0, "Lock reaches the fast one at (m/s)" },
+	{ "HANDLING", "handbrakeGrip", 0, 1, 2, "Handbrake: grip x" },
+	{ "HANDLING", "handbrakeYaw", 1, 3, 2, "Handbrake: rotation x" },
+	{ "HANDLING", "driftGrip", 0, 1, 2, "Drift: grip x" },
+	{ "HANDLING", "driftHold", 2, 30, 0, "Drift lasts while sideways more than (deg)" },
+	{ "HANDLING", "spinAngle", 30, 120, 0, "A drift past this is a spin, caught (deg)" },
+	{ "HANDLING", "impactHold", 0, 2, 2, "After a crash: model off for (s)" },
+	{ "HANDLING", "impactEase", 0, 2, 2, "After a crash: easing back over (s)" },
 }
+
+-- AudioEngine.HANDLING values tuned live, as text for Global2 audio_dbg_handling ("key=value,key=value")
+function EngineDebug.EncodeHandling(fileValues)
+	local parts = {}
+	for _, tunable in ipairs(EngineDebug.TUNABLES) do
+		local key = tunable[2]
+		if tunable[1] == "HANDLING" and AudioEngine.HANDLING[key] ~= fileValues[key] then
+			parts[#parts + 1] = key .. "=" .. tostring(AudioEngine.HANDLING[key])
+		end
+	end
+	return table.concat(parts, ",")
+end
 
 ---------------------------------------------------------------------------
 -- gearing by shift speeds (sh_presets.lua AudioEngine.ApplyGearing), as text for the network
@@ -195,6 +199,21 @@ local function followGlobalRev()
 	Drivetrain.REV.rise, Drivetrain.REV.fall = rise or EngineDebug.REV_DEFAULT.rise, fall or EngineDebug.REV_DEFAULT.fall
 end
 
+-- the handling model's values tuned live (Global2 audio_dbg_handling) onto AudioEngine.HANDLING,
+-- on the clients too: their prediction runs the same model as the server
+EngineDebug.HANDLING_DEFAULT = EngineDebug.HANDLING_DEFAULT or table.Copy(AudioEngine.HANDLING or {})
+local lastGlobalHandling
+function EngineDebug.FollowGlobalHandling()
+	local globalHandling = GetGlobal2String("audio_dbg_handling", "")
+	if globalHandling == lastGlobalHandling then return end
+	lastGlobalHandling = globalHandling
+	if not AudioEngine.HANDLING then return end
+	for key, value in pairs(EngineDebug.HANDLING_DEFAULT) do AudioEngine.HANDLING[key] = value end
+	for key, value in string.gmatch(globalHandling, "([%w_]+)=([^,]+)") do
+		if EngineDebug.HANDLING_DEFAULT[key] ~= nil and tonumber(value) then AudioEngine.HANDLING[key] = tonumber(value) end
+	end
+end
+
 local overrideCache = setmetatable({}, { __mode = "k" })
 
 function EngineDebug.Install()
@@ -206,6 +225,7 @@ function EngineDebug.Install()
 		local config = base(ent)
 		if not config then return config end
 		followGlobalRev()
+		EngineDebug.FollowGlobalHandling()
 		local gearingString, revString = ent:GetNW2String("audio_dbg_gear", ""), ent:GetNW2String("audio_dbg_rev", "")
 		if gearingString == "" and revString == "" then return config end
 		local cached = overrideCache[ent]

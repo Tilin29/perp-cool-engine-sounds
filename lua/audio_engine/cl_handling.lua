@@ -1,0 +1,620 @@
+--[[
+	Audio Engine - driving prediction (client)
+
+	The server is the only authority on where cars are (sv_handling.lua), so a key you press
+	reaches your car ~half a ping later and its effect comes back the other half later, then waits
+	in the interpolation buffer: at 150 ms ping ~0.25 s. This file hides that for the car you drive,
+	the way Source predicts your own walking:
+
+	  1. The server sends your car's state every other tick with the number of the last user
+	     command it ran (net audio_engine_drive).
+	  2. Each frame the client starts from that state and replays every command it sent since
+	     through the handling model (sh_handling.lua): the same steering, rotation and grip the
+	     server runs, plus how this car accelerates per key and speed, learned from those states.
+	     That's where the car will be when the server runs your newest key.
+	  3. The car (with its seats, lightbar, driver and passengers) is drawn there, and the camera
+	     moves with it. A new state from the server moves the prediction a little; the jump goes
+	     into an offset that dies away in ~0.1 s, so the car never snaps.
+	  4. A wall the prediction would drive through stops it at the wall (a trace from the server's
+	     car to the predicted one): crashes look right, and the server's crash takes over.
+	  5. Other moving cars are drawn where they are now too (their speed and rotation carried on
+	     over the same lead), not ~0.25 s behind: without it you'd see your car drive into one you
+	     are only following.
+
+	Nothing here moves a physics object: collisions, crashes and pushes between players are the
+	server's alone, so everyone agrees on them. Only what's drawn (and your camera) runs ahead.
+	Off in single player and for a listen server's host (no delay to hide).
+
+	Client convars: audio_engine_predict (1), audio_engine_predict_others (1),
+	audio_engine_predict_debug (0: boxes for the server's car, Source's and the predicted one).
+	audio_engine_predict_stats prints how it's doing.
+]]
+local AudioEngine = AUDIO_ENGINE
+local Handling = AudioEngine.Handling
+
+local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, false,
+	"1 = the car you drive is shown where it will be when the server runs your keys (no input delay); 0 = as Source shows it")
+local othersConVar = CreateClientConVar("audio_engine_predict_others", "1", true, false,
+	"1 = while you drive with prediction, other moving cars are shown where they are now too, so close driving and crashes line up")
+local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false, false,
+	"1 = draw the server's car (red), Source's (yellow) and the predicted one (green)")
+
+AudioEngine.PREDICTION = {
+	maxCommands = 32,         -- never replays more (~0.5 s at 66 tick: a longer gap shows that late)
+	smoothTime = 0.1,         -- s: a correction dies away to 1/e in this...
+	impactSmoothTime = 0.04,  -- ...while a crash plays out on the server (its outcome shows quickly)
+	snapDistance = 250,       -- inches: a jump bigger than this (teleport, respawn) is shown at once
+	easeTime = 0.35,          -- s: the other cars' lead eases in / out over this
+	othersDistance = 5000,    -- inches: other cars further away are left where Source shows them
+	othersMax = 16,           -- the nearest this many moving cars
+	othersMinSpeed = 40,      -- inches/s: slower ones aren't moved...
+	othersFullSpeed = 120,    -- ...fully from here
+	othersSmooth = 0.08,      -- s: their speed / rotation estimate
+	maxLead = 0.5,            -- s
+	leadSmooth = 1.5,         -- s: the lead estimate follows the connection this slowly
+	traceHeight = 20,         -- inches above the car's origin the obstacle trace runs at
+	traceHalfHeight = 8,
+}
+local PREDICTION = AudioEngine.PREDICTION
+
+local HISTORY = 512
+local MATCH_EVERY = 0.25    -- s between lead measurements
+local RECEIVED = 48         -- own states kept for the lead measurement
+
+local EntityMeta = FindMetaTable("Entity")
+local setRenderAngles = EntityMeta.SetRenderAngles   -- (Player:SetRenderAngles is something else)
+
+local function clamp(value, low, high) return value < low and low or (value > high and high or value) end
+
+---------------------------------------------------------------------------
+-- your keys, per command (StartCommand runs once per command as client prediction starts it,
+-- and again on the server when it runs it: the same numbers)
+---------------------------------------------------------------------------
+local historyNumbers, historyButtons = {}, {}
+local newestCommand, newestCommandAt = 0, 0
+
+local function commandKeyDown(command, key) return command:KeyDown(key) end
+
+hook.Add("StartCommand", "audio_engine_predict", function(player, command)
+	if player ~= LocalPlayer() then return end
+	local number = command:CommandNumber()
+	if number == 0 then return end
+	local slot = number % HISTORY
+	historyNumbers[slot], historyButtons[slot] = number, Handling.ButtonsFrom(commandKeyDown, command)
+	if number > newestCommand then newestCommand, newestCommandAt = number, RealTime() end
+end)
+
+local function buttonsOf(number)
+	local slot = number % HISTORY
+	if historyNumbers[slot] == number then return historyButtons[slot] end
+end
+
+---------------------------------------------------------------------------
+-- your car
+---------------------------------------------------------------------------
+local own = {
+	smoother = Handling.NewSmoother(), commands = {}, earlierCommands = {},
+	predicted = {}, earlier = {}, display = {}, start = {}, state = {}, earlierState = {},
+	received = {}, lead = nil, nextMatch = 0, stats = { states = 0, matched = 0, fallback = 0, corrections = 0, correctionSum = 0, largest = 0, clamped = 0 },
+}
+local learners = setmetatable({}, { __mode = "k" })
+
+local function drivenCar()
+	local player = LocalPlayer()
+	if not IsValid(player) then return nil end
+	local vehicle = player:GetVehicle()
+	if not IsValid(vehicle) or vehicle:GetClass() ~= "prop_vehicle_jeep" or not AudioEngine.GetCarConfig(vehicle) then return nil end
+	return vehicle
+end
+
+local function predictionAllowed()
+	if not predictConVar:GetBool() or game.SinglePlayer() then return false end
+	local player = LocalPlayer()
+	return IsValid(player) and not (player.IsListenServerHost and player:IsListenServerHost())
+end
+
+-- the model's numbers per car model (its shape doesn't change)
+local specCache = {}
+local function specOf(vehicle)
+	local model = vehicle:GetModel() or ""
+	local spec = specCache[model]
+	if not spec then spec = Handling.SpecFor(vehicle); specCache[model] = spec end
+	return spec
+end
+
+local function resetOwn(vehicle)
+	own.vehicle, own.base, own.previousBase, own.fresh, own.shown = vehicle, nil, nil, false, false
+	own.spec = IsValid(vehicle) and specOf(vehicle) or nil
+	if IsValid(vehicle) and not learners[vehicle] then
+		learners[vehicle] = Handling.NewLearner(vehicle:GetNW2Float("audio_pwr", 120), vehicle:GetNW2Float("audio_vmax", 180) / 3.6)
+	end
+	own.learner = IsValid(vehicle) and learners[vehicle] or nil
+	own.smoother = Handling.NewSmoother()
+	own.received = {}
+end
+
+-- what the server's states show of how the car accelerates along its nose
+local function learnFrom(previous, current)
+	if not previous or not own.learner then return end
+	local deltaTime = current.time - previous.time
+	if deltaTime <= 0 or deltaTime > 0.15 or current.impact or previous.impact then return end
+	if current.groundShare < 1 or previous.groundShare < 1 then return end
+	local before, after = Handling.ForwardSpeed(previous, own.spec), Handling.ForwardSpeed(current, own.spec)
+	local acceleration = (after - before) / deltaTime - Handling.SlopeAcceleration(current, own.spec)
+	local mode = Handling.DriveMode(current.buttons, after, current.driving, current.limiter)
+	Handling.Learn(own.learner, mode, (before + after) * 0.5, acceleration)
+end
+
+net.Receive("audio_engine_drive", function()
+	local index = net.ReadUInt(13)
+	local state = { command = net.ReadUInt(32), time = net.ReadDouble() }
+	state.px, state.py, state.pz = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
+	local pitch, yaw, roll = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
+	Handling.SetAxes(state, Angle(pitch, yaw, roll))
+	state.vx, state.vy, state.vz = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
+	state.yawRate = net.ReadFloat()
+	state.steer = net.ReadInt(8) / 127
+	state.drift, state.driving, state.impact = net.ReadBool(), net.ReadBool(), net.ReadBool()
+	state.groundShare, state.controlShare = net.ReadUInt(7) / 100, net.ReadUInt(7) / 100
+	state.buttons, state.limiter = net.ReadUInt(5), net.ReadUInt(2)
+
+	local vehicle = drivenCar()
+	if not vehicle or vehicle:EntIndex() ~= index then return end
+	if own.vehicle ~= vehicle then resetOwn(vehicle) end
+	local base = own.base
+	-- (unreliable: an older one can arrive after a newer one)
+	if base and state.time <= base.time then return end
+	learnFrom(base, state)
+	own.previousBase, own.base, own.fresh = base, state, true
+	own.stats.states = own.stats.states + 1
+	local received = own.received
+	received[#received + 1] = { time = state.time, x = state.px, y = state.py, z = state.pz }
+	if #received > RECEIVED then table.remove(received, 1) end
+end)
+
+-- the commands the server hasn't run after `number`, into list; count, and how far into the next one the frame is
+local function commandsAfter(number, list)
+	local count = 0
+	if number ~= 0 and newestCommand > number and buttonsOf(number + 1) then
+		local last = own.base and own.base.buttons or 0
+		for commandNumber = number + 1, math.min(newestCommand, number + PREDICTION.maxCommands) do
+			count = count + 1
+			last = buttonsOf(commandNumber) or last
+			list[count] = last
+		end
+		return count, clamp((RealTime() - newestCommandAt) / engine.TickInterval(), 0, 1), true
+	end
+	-- no command numbers to match (shouldn't happen in multiplayer): one ping of the keys held now
+	local player = LocalPlayer()
+	local buttons = Handling.ButtonsFrom(function(target, key) return target:KeyDown(key) end, player)
+	count = clamp(math.Round(player:Ping() / 1000 / engine.TickInterval()), 0, PREDICTION.maxCommands)
+	for i = 1, count do list[i] = buttons end
+	return count, 0, false
+end
+
+local function bodyFromEntity(entity, out)
+	local position = entity:GetPos()
+	out.px, out.py, out.pz = position.x, position.y, position.z
+	Handling.SetAxes(out, entity:GetAngles())
+	return out
+end
+
+---------------------------------------------------------------------------
+-- obstacles: the prediction stops at a wall instead of driving through it
+---------------------------------------------------------------------------
+local traceMins, traceMaxs = Vector(), Vector()
+local traceData = { mins = traceMins, maxs = traceMaxs, mask = MASK_SOLID_BRUSHONLY }
+local traceResult = {}
+traceData.output = traceResult
+
+local function notCar(entity)
+	if entity:IsVehicle() or entity:IsPlayer() then return false end
+	local parent = entity:GetParent()
+	return not (IsValid(parent) and parent:IsVehicle())
+end
+traceData.filter = notCar
+
+-- how far (0..1) the car can go from `fromPosition` towards `toPosition` before its leading end
+-- (along `direction`, a unit vector) hits something. halfLength/halfWidth in inches, up = its up
+local function clearShare(fromPosition, toPosition, direction, up, halfLength, halfWidth)
+	local travel = toPosition - fromPosition
+	local distance = travel:Length()
+	if distance < 6 then return 1 end
+	local lead = direction * (travel:Dot(direction) >= 0 and (halfLength - halfWidth) or -(halfLength - halfWidth)) + up * PREDICTION.traceHeight
+	traceMins.x, traceMins.y, traceMins.z = -halfWidth, -halfWidth, -PREDICTION.traceHalfHeight
+	traceMaxs.x, traceMaxs.y, traceMaxs.z = halfWidth, halfWidth, PREDICTION.traceHalfHeight
+	traceData.start, traceData.endpos = fromPosition + lead, toPosition + lead
+	util.TraceHull(traceData)
+	if traceResult.Hit and not traceResult.StartSolid then return math.max(0, traceResult.Fraction - 2 / distance) end
+	return 1
+end
+
+-- the car's half length along its nose and half width (inches), per model
+local sizeCache = {}
+local function sizeOf(vehicle, spec)
+	local model = vehicle:GetModel()
+	local size = sizeCache[model]
+	if size then return size end
+	local mins, maxs = vehicle:OBBMins(), vehicle:OBBMaxs()
+	local alongY = math.abs(spec.noseY) > math.abs(spec.noseX)
+	local length = alongY and (maxs.y - mins.y) or (maxs.x - mins.x)
+	local width = alongY and (maxs.x - mins.x) or (maxs.y - mins.y)
+	size = { halfLength = length * 0.5, halfWidth = clamp(width * 0.4, 8, 36) }
+	sizeCache[model] = size
+	return size
+end
+
+---------------------------------------------------------------------------
+-- drawing cars where they're shown: render origin / angles on the car and what's parented to it
+---------------------------------------------------------------------------
+local displaced = {}      -- car -> { fromPosition, fromAngles, toPosition, toAngles } (this frame)
+local overridden = {}     -- entity -> frame it was last placed in
+local childrenCache = {}  -- car -> { list, at }
+local updatedFrame = -1
+
+local originalBounds = {}  -- entity -> { mins, maxs, pad } while moved
+
+-- the game culls an entity by where Source has it: drawn up to a few metres ahead (with your
+-- camera), its bounds are widened by that much, or your own car could vanish from in front of you
+local function widenBounds(entity, pad)
+	local bounds = originalBounds[entity]
+	if not bounds then
+		local mins, maxs = entity:GetRenderBounds()
+		bounds = { mins = mins, maxs = maxs, pad = 0 }
+		originalBounds[entity] = bounds
+	end
+	if math.abs(pad - bounds.pad) < 24 and pad <= bounds.pad then return end
+	bounds.pad = pad + 24
+	local padding = Vector(bounds.pad, bounds.pad, bounds.pad)
+	entity:SetRenderBounds(bounds.mins - padding, bounds.maxs + padding)
+end
+
+local function place(entity, position, angles, frame, pad)
+	entity:SetRenderOrigin(position)
+	setRenderAngles(entity, angles)
+	entity:InvalidateBoneCache()
+	widenBounds(entity, pad)
+	overridden[entity] = frame
+end
+
+local function childrenOf(vehicle, now)
+	local cached = childrenCache[vehicle]
+	if cached and now - cached.at < 0.5 then return cached.list end
+	local list = {}
+	for _, child in ipairs(vehicle:GetChildren()) do
+		if IsValid(child) and not child:IsPlayer() then
+			list[#list + 1] = child
+			for _, grandchild in ipairs(child:GetChildren()) do
+				if IsValid(grandchild) and not grandchild:IsPlayer() then list[#list + 1] = grandchild end
+			end
+		end
+	end
+	childrenCache[vehicle] = { list = list, at = now }
+	return list
+end
+
+-- a pose in Source's frame of the car -> the same pose on the car as shown
+local function mapPose(entry, position, angles)
+	local localPosition, localAngles = WorldToLocal(position, angles, entry.fromPosition, entry.fromAngles)
+	return LocalToWorld(localPosition, localAngles, entry.toPosition, entry.toAngles)
+end
+
+local function displace(vehicle, toPosition, toAngles, frame, now)
+	local entry = { fromPosition = vehicle:GetPos(), fromAngles = vehicle:GetAngles(), toPosition = toPosition, toAngles = toAngles }
+	displaced[vehicle] = entry
+	local pad = toPosition:Distance(entry.fromPosition)
+	place(vehicle, toPosition, toAngles, frame, pad)
+	vehicle:MarkShadowAsDirty()
+	for _, child in ipairs(childrenOf(vehicle, now)) do
+		if IsValid(child) and not child:IsDormant() then
+			local position, angles = mapPose(entry, child:GetPos(), child:GetAngles())
+			place(child, position, angles, frame, pad)
+		end
+	end
+end
+
+local function clearStale(frame)
+	for entity, placedFrame in pairs(overridden) do
+		if placedFrame ~= frame then
+			if IsValid(entity) then
+				entity:SetRenderOrigin(nil)
+				setRenderAngles(entity, nil)
+				entity:InvalidateBoneCache()
+				local bounds = originalBounds[entity]
+				if bounds then entity:SetRenderBounds(bounds.mins, bounds.maxs) end
+			end
+			overridden[entity], originalBounds[entity] = nil, nil
+		end
+	end
+end
+
+-- where an entity is drawn (other code drawing at a car: cl_police's lights). Its own pose when
+-- it isn't moved
+function AudioEngine.DisplayPose(entity)
+	local root = entity
+	local parent = entity:GetParent()
+	while IsValid(parent) do root, parent = parent, parent:GetParent() end
+	local entry = displaced[root]
+	if not entry then return entity:GetPos(), entity:GetAngles() end
+	return mapPose(entry, entity:GetPos(), entity:GetAngles())
+end
+
+---------------------------------------------------------------------------
+-- the lead: how far ahead of what Source shows your car is drawn (s). Measured by finding where
+-- Source's interpolated car sits among the states the server sent (the server time it shows),
+-- against the server time the prediction is for. Until then: one ping + the interpolation delay
+---------------------------------------------------------------------------
+local interpConVar, interpRatioConVar, updateRateConVar = GetConVar("cl_interp"), GetConVar("cl_interp_ratio"), GetConVar("cl_updaterate")
+local function interpolationDelay()
+	local interp = interpConVar and interpConVar:GetFloat() or 0.1
+	local ratio, rate = interpRatioConVar and interpRatioConVar:GetFloat() or 2, updateRateConVar and updateRateConVar:GetFloat() or 30
+	return math.max(interp, ratio / math.max(rate, 1))
+end
+
+local function shownServerTime(vehicle)
+	local received = own.received
+	if #received < 4 then return nil end
+	local position = vehicle:GetPos()
+	local bestDistance, bestTime
+	for i = 1, #received - 1 do
+		local first, second = received[i], received[i + 1]
+		local segmentX, segmentY, segmentZ = second.x - first.x, second.y - first.y, second.z - first.z
+		local lengthSqr = segmentX * segmentX + segmentY * segmentY + segmentZ * segmentZ
+		if lengthSqr > 1 then
+			local share = clamp(((position.x - first.x) * segmentX + (position.y - first.y) * segmentY + (position.z - first.z) * segmentZ) / lengthSqr, 0, 1)
+			local offX, offY, offZ = first.x + segmentX * share - position.x, first.y + segmentY * share - position.y, first.z + segmentZ * share - position.z
+			local distance = offX * offX + offY * offY + offZ * offZ
+			if not bestDistance or distance < bestDistance then bestDistance, bestTime = distance, first.time + (second.time - first.time) * share end
+		end
+	end
+	if bestDistance and bestDistance < 100 * 100 then return bestTime end
+end
+
+local function updateLead(vehicle, predictedTime, realNow, frameTime)
+	if not own.lead then own.lead = clamp(LocalPlayer():Ping() / 1000 + interpolationDelay(), 0, PREDICTION.maxLead) end
+	if realNow < own.nextMatch then return end
+	own.nextMatch = realNow + MATCH_EVERY
+	local base = own.base
+	if not base or base.vx * base.vx + base.vy * base.vy < 200 * 200 then return end   -- (needs a moving car)
+	local shownTime = shownServerTime(vehicle)
+	if not shownTime then return end
+	local measured = clamp(predictedTime - shownTime, 0, PREDICTION.maxLead)
+	own.lead = own.lead + (measured - own.lead) * math.min(1, MATCH_EVERY / PREDICTION.leadSmooth)
+end
+
+---------------------------------------------------------------------------
+-- other cars, carried on over the same lead
+---------------------------------------------------------------------------
+local motions = setmetatable({}, { __mode = "k" })
+local carList, nextCarList = {}, 0
+local othersShare = 0
+local nearby = {}
+
+local function motionOf(vehicle, realNow)
+	local position, angles = vehicle:GetPos(), vehicle:GetAngles()
+	local motion = motions[vehicle]
+	if not motion or realNow - motion.at > 0.3 then
+		motion = { position = position, yaw = angles.y, at = realNow, velocity = Vector(0, 0, 0), yawRate = 0, samples = 0 }
+		motions[vehicle] = motion
+		return motion
+	end
+	local deltaTime = realNow - motion.at
+	if deltaTime < 0.02 then return motion end
+	local keep = math.exp(-deltaTime / PREDICTION.othersSmooth)
+	local velocity = (position - motion.position) / deltaTime
+	-- (a teleport or respawn is not a speed)
+	if velocity:LengthSqr() > 4000 * 4000 then velocity = Vector(0, 0, 0) end
+	motion.velocity = motion.velocity * keep + velocity * (1 - keep)
+	motion.yawRate = motion.yawRate * keep + math.NormalizeAngle(angles.y - motion.yaw) / deltaTime * (1 - keep)
+	motion.position, motion.yaw, motion.at, motion.samples = position, angles.y, realNow, motion.samples + 1
+	return motion
+end
+
+local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
+	if realNow >= nextCarList then
+		nextCarList = realNow + 0.5
+		carList = ents.FindByClass("prop_vehicle_jeep")
+	end
+	table.Empty(nearby)
+	local maxDistanceSqr = PREDICTION.othersDistance * PREDICTION.othersDistance
+	for _, vehicle in ipairs(carList) do
+		if IsValid(vehicle) and vehicle ~= ownVehicle and not vehicle:IsDormant() then
+			local distanceSqr = vehicle:GetPos():DistToSqr(eyePosition)
+			if distanceSqr < maxDistanceSqr then nearby[#nearby + 1] = { vehicle = vehicle, distanceSqr = distanceSqr } end
+		end
+	end
+	table.sort(nearby, function(first, second) return first.distanceSqr < second.distanceSqr end)
+	for i = 1, math.min(#nearby, PREDICTION.othersMax) do
+		local vehicle = nearby[i].vehicle
+		local motion = motionOf(vehicle, realNow)
+		local speed = motion.velocity:Length()
+		local share = clamp((speed - PREDICTION.othersMinSpeed) / (PREDICTION.othersFullSpeed - PREDICTION.othersMinSpeed), 0, 1) * othersShare
+		if share > 0 and motion.samples >= 3 then
+			local carLead = lead * share
+			local turn = motion.yawRate * carLead
+			local travel = motion.velocity * carLead
+			travel:Rotate(Angle(0, turn * 0.5, 0))           -- along the arc it's turning on
+			local position, angles = vehicle:GetPos(), vehicle:GetAngles()
+			local toPosition = position + travel
+			local spec = specOf(vehicle)
+			local size = sizeOf(vehicle, spec)
+			local nose = vehicle:LocalToWorld(Vector(spec.noseX, spec.noseY, spec.noseZ)) - position
+			local clear = clearShare(position, toPosition, nose, vehicle:GetUp(), size.halfLength, size.halfWidth)
+			if clear < 1 then toPosition = position + travel * clear end
+			displace(vehicle, toPosition, Angle(angles.p, angles.y + turn * clear, angles.r), frame, realNow)
+		end
+	end
+end
+
+---------------------------------------------------------------------------
+-- each frame (from CalcView, before anything is drawn)
+---------------------------------------------------------------------------
+local lastRealTime = RealTime()
+
+local function updateFrame()
+	local frame = FrameNumber()
+	if updatedFrame == frame then return end
+	updatedFrame = frame
+	local realNow = RealTime()
+	local frameTime = clamp(realNow - lastRealTime, 0, 0.1)
+	lastRealTime = realNow
+	table.Empty(displaced)
+
+	local vehicle = predictionAllowed() and drivenCar() or nil
+	if vehicle and own.vehicle ~= vehicle then resetOwn(vehicle) end
+	local base = vehicle and own.base
+	local running = base ~= nil and own.spec ~= nil
+	othersShare = clamp(othersShare + ((running and othersConVar:GetBool()) and 1 or -1) * frameTime / PREDICTION.easeTime, 0, 1)
+
+	if running then
+		local spec, learner, deltaTime = own.spec, own.learner, engine.TickInterval()
+		local count, fraction, matched = commandsAfter(base.command, own.commands)
+		local stats = own.stats
+		if matched then stats.matched = stats.matched + 1 else stats.fallback = stats.fallback + 1 end
+		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state)
+		own.count, own.fraction = count, fraction
+
+		if own.fresh then
+			own.fresh = false
+			if own.shown and own.previousBase then
+				-- where the earlier state put the car for this same moment: the difference is the correction
+				local earlierCount, earlierFraction = commandsAfter(own.previousBase.command, own.earlierCommands)
+				local earlier = Handling.Predict(own.previousBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime, own.earlier, own.earlierState)
+				local before = Handling.SmootherSize(own.smoother)
+				Handling.SmootherAbsorb(own.smoother, earlier, predicted)
+				local jump = math.abs(Handling.SmootherSize(own.smoother) - before)
+				stats.corrections, stats.correctionSum, stats.largest = stats.corrections + 1, stats.correctionSum + jump, math.max(stats.largest, jump)
+			elseif not own.shown then
+				-- starting: from where Source shows it
+				Handling.SmootherAbsorb(own.smoother, bodyFromEntity(vehicle, own.start), predicted)
+			end
+		end
+		own.shown = true
+		Handling.SmootherDecay(own.smoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.smoothTime, PREDICTION.snapDistance)
+		local display = Handling.SmootherApply(own.smoother, predicted, own.display)
+
+		-- not through walls: stop where the leading end would hit something
+		local basePosition = Vector(base.px, base.py, base.pz)
+		local toPosition = Vector(display.px, display.py, display.pz)
+		local noseX, noseY, noseZ = Handling.NoseOf(display, spec)
+		local size = sizeOf(vehicle, spec)
+		local clear = clearShare(basePosition, toPosition, Vector(noseX, noseY, noseZ), Vector(display.cx, display.cy, display.cz), size.halfLength, size.halfWidth)
+		if clear < 1 then
+			toPosition = basePosition + (toPosition - basePosition) * clear
+			stats.clamped = stats.clamped + 1
+		end
+		own.displayPosition, own.displayAngles = toPosition, Handling.AnglesOf(display)
+		displace(vehicle, toPosition, own.displayAngles, frame, realNow)
+		updateLead(vehicle, base.time + (count + fraction) * deltaTime, realNow, frameTime)
+	else
+		own.shown = false
+		if not vehicle then own.vehicle = nil end
+	end
+
+	if othersShare > 0 and own.lead then
+		local player = LocalPlayer()
+		updateOthers(vehicle, own.lead, frame, realNow, IsValid(player) and player:EyePos() or vector_origin)
+	end
+	clearStale(frame)
+end
+
+---------------------------------------------------------------------------
+-- the camera moves with your car as drawn. hook.Call is wrapped for CalcView only, so whatever
+-- camera the gamemode or another addon makes (first person, third person) is moved after it
+---------------------------------------------------------------------------
+local ourCalls = setmetatable({}, { __mode = "k" })
+local cameraFrame = -1
+
+local function calcView(originalCall, gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
+	updateFrame()
+	local view = originalCall("CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
+	local entry = own.vehicle and displaced[own.vehicle]
+	if not entry then return view end
+	-- a copy: some cameras hand back the same table each frame
+	local moved = {}
+	if type(view) == "table" then for key, value in pairs(view) do moved[key] = value end end
+	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
+	moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
+	cameraFrame = FrameNumber()
+	return moved
+end
+
+local function wrapHookCall()
+	if ourCalls[hook.Call] then return end
+	local originalCall = hook.Call
+	local function call(name, gamemodeTable, ...)
+		if name ~= "CalcView" then return originalCall(name, gamemodeTable, ...) end
+		return calcView(originalCall, gamemodeTable, ...)
+	end
+	ourCalls[call] = true
+	hook.Call = call
+end
+wrapHookCall()
+-- (a hook library loaded later may replace hook.Call: wrap it again)
+timer.Create("audio_engine_predict_wrap", 2, 0, wrapHookCall)
+
+-- before anything is drawn: if the camera didn't run through us this frame, nothing may be moved
+-- (the car would leave the camera behind)
+hook.Add("PreDrawOpaqueRenderables", "audio_engine_predict", function()
+	local frame = FrameNumber()
+	if updatedFrame ~= frame then
+		updatedFrame = frame
+		table.Empty(displaced)
+		clearStale(frame)
+	elseif own.vehicle and displaced[own.vehicle] and cameraFrame ~= frame then
+		table.Empty(displaced)
+		clearStale(frame + 1)
+	end
+end)
+
+---------------------------------------------------------------------------
+-- drivers and passengers sit in the car as drawn
+---------------------------------------------------------------------------
+local movedPlayers = {}
+hook.Add("PrePlayerDraw", "audio_engine_predict", function(player)
+	local car = AudioEngine.RiddenCar(player)
+	local entry = car and displaced[car]
+	if not entry then return end
+	local position = mapPose(entry, player:GetPos(), player:GetAngles())
+	player:SetRenderOrigin(position)
+	player:InvalidateBoneCache()
+	movedPlayers[player] = true
+end)
+
+hook.Add("PostPlayerDraw", "audio_engine_predict", function(player)
+	if not movedPlayers[player] then return end
+	movedPlayers[player] = nil
+	player:SetRenderOrigin(nil)
+	player:InvalidateBoneCache()
+end)
+
+hook.Add("EntityRemoved", "audio_engine_predict", function(entity)
+	displaced[entity], overridden[entity], childrenCache[entity], originalBounds[entity] = nil, nil, nil, nil
+	if own.vehicle == entity then own.vehicle, own.base = nil, nil end
+end)
+
+---------------------------------------------------------------------------
+-- checking it
+---------------------------------------------------------------------------
+local RED, YELLOW, GREEN = Color(255, 60, 60), Color(255, 220, 40), Color(60, 255, 90)
+hook.Add("PostDrawTranslucentRenderables", "audio_engine_predict_debug", function(drawingDepth, drawingSkybox)
+	if drawingDepth or drawingSkybox or not debugConVar:GetBool() then return end
+	local vehicle, base = own.vehicle, own.base
+	if not IsValid(vehicle) or not base then return end
+	local mins, maxs = vehicle:OBBMins(), vehicle:OBBMaxs()
+	render.DrawWireframeBox(Vector(base.px, base.py, base.pz), Handling.AnglesOf(base), mins, maxs, RED, false)
+	render.DrawWireframeBox(vehicle:GetPos(), vehicle:GetAngles(), mins, maxs, YELLOW, false)
+	if own.displayPosition then render.DrawWireframeBox(own.displayPosition, own.displayAngles, mins, maxs, GREEN, false) end
+end)
+
+concommand.Add("audio_engine_predict_stats", function()
+	local stats = own.stats
+	local learner = own.learner
+	print(string.format("[Audio Engine] prediction %s, car %s | states %d | frames matched %d, fallback %d | replaying %d commands + %.2f",
+		predictionAllowed() and "on" or "off", IsValid(own.vehicle) and tostring(AudioEngine.GetCarConfig(own.vehicle) and AudioEngine.GetCarConfig(own.vehicle).name) or "-",
+		stats.states, stats.matched, stats.fallback, own.count or 0, own.fraction or 0))
+	print(string.format("  corrections %d, mean %.1f in, largest %.1f in | wall stops %d | lead %.0f ms (ping %d, interp %.0f ms) | others %s | learned samples %d",
+		stats.corrections, stats.corrections > 0 and stats.correctionSum / stats.corrections or 0, stats.largest, stats.clamped,
+		(own.lead or 0) * 1000, LocalPlayer():Ping(), interpolationDelay() * 1000, othersConVar:GetBool() and "on" or "off", learner and learner.samples or 0))
+	own.stats = { states = 0, matched = 0, fallback = 0, corrections = 0, correctionSum = 0, largest = 0, clamped = 0 }
+end, nil, "Print how the driving prediction is doing (and start counting again)")

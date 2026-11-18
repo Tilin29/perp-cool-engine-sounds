@@ -1,8 +1,11 @@
 /*
   Offline checks of sv_handling.lua with a fake vehicle (no Garry's Mod needed):
-    - a PERP car spawned on the generic test script gets its PERP base-script physics
-    - the anti-spin setup (front brake bias, throttle cut, lower centre, grip, handbrake slide)
-    - a spiked/ tier car is left alone; PERP cars get the stability assist with their own steering
+    - a PERP car spawned on the generic test script gets its PERP base-script physics, and no
+      other change to its script's handling (on its own script and spiked: none at all)
+    - the handling model (sh_handling.lua): steering turns the car, the turn never asks more than the
+      tyres' grip, sideways speed goes at the grip limit, the speed along the nose is never touched,
+      the handbrake lets the rear go, the model off (controlShare 0) does nothing; grip per kind of car
+  The prediction itself: test_prediction.js.
 
     node test_handling.js
   The fake keeps speeds in inches/s and takes mph in SetVehicleParams, like sv_engine assumes.
@@ -44,8 +47,11 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     V.__tostring = function(a) return string.format("%g %g %g", a.x, a.y, a.z) end
     function V:LengthSqr() return self.x * self.x + self.y * self.y + self.z * self.z end
     function isvector(x) return getmetatable(x) == V end
+    util = util or {}
+    util.AddNetworkString = function() end
+    IN_FORWARD, IN_BACK, IN_MOVELEFT, IN_MOVERIGHT, IN_JUMP = 8, 16, 512, 1024, 2
     AUDIO_ENGINE = {}`)
-  for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'sv_perp_physics.lua', 'sv_handling.lua'])
+  for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_handling.lua', 'sh_carlist.lua', 'sv_perp_physics.lua', 'sv_handling.lua'])
     await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
 
   // a vehicle whose params start as a given script's values (speeds in inches/s)
@@ -71,6 +77,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
         },
       }
       function veh:GetModel() return model end
+      function veh:AddCallback(name, callback) self.callbacks = self.callbacks or {}; self.callbacks[name] = callback end
       function veh:GetKeyValues() return self.kv end
       function veh:GetVehicleParams() return table.Copy(self.params) end
       function veh:SetVehicleParams(p)
@@ -99,7 +106,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
         p.engine.horsepower, p.engine.maxSpeed / 17.6, table.concat(p.engine.gearRatio, ","), veh.mass,
         f.brakeFactor, r.brakeFactor, p.steering.turnThrottleReduceFast, p.body.addGravity,
         p.body.massCenterOverride.z, p.steering.powerSlideAccel, p.steering.degreesSlow,
-        tostring(veh.audioPerpPhysics or false), tostring(veh.audioAntiSpin or false), tostring(veh.audioSpiked or false),
+        tostring(veh.audioPerpPhysics or false), tostring(veh.callbacks and veh.callbacks.PhysicsCollide ~= nil), tostring(veh.audioSpiked or false),
         p.steering.degreesFast)
     end
     -- E.GetCarConfig reads the model
@@ -117,58 +124,91 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   }
   const near = (a, b, tol = 0.01) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b))
 
-  // 0. by default the anti-spin setup is off: the car keeps its script's handling
+  // 1. SL65 on the test script: PERP's numbers, nothing else
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", E.TEST_SCRIPT, TESTCAR))`)
   let c = parse(res)
-  check(c.anti === 'false', 'anti-spin setup off by default (audio_engine_handling 0)')
-  // the rest checks the setup itself
-  await L.doString(`CV["audio_engine_handling"].v = "1"`)
-
-  // 1. SL65 on the test script: PERP numbers + anti-spin
-  await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", E.TEST_SCRIPT, TESTCAR))`)
-  c = parse(res)
   console.log('SL65 on the test script:', c)
-  check(c.perp === 'true' && c.anti === 'true', 'expected PERP physics and anti-spin on the test script')
+  check(c.perp === 'true', 'expected PERP physics on the test script')
+  check(c.anti === 'true', 'expected the impact callback (PhysicsCollide)')
   check(near(c.hp, 260) && near(c.mph, 94), 'expected 260 hp / 94 mph from sl65amg.txt')
   check(c.gears === '5.5,4.2,3.7,2.2,1', 'expected the SL65 gears')
   check(near(c.mass, 2050), 'expected 2050 kg')
-  check(near(c.bf, 0.6) && near(c.br, 0.4), 'expected 60/40 front brake bias (PERP 50/50)')
-  check(near(c.trf, 0.2), 'turnThrottleReduceFast: PERP 0.75 capped at 0.2 (fast turns keep their revs)')
-  check(near(c.cz, -1 - 0.25 * 15), 'centre: PERP -1, lowered by a quarter wheel radius')
+  check(near(c.bf, 0.5) && near(c.br, 0.5), 'brakes as PERP has them (50/50)')
+  check(near(c.trf, 0.75), 'turnThrottleReduceFast as PERP has it')
+  check(near(c.cz, -1), 'centre of mass as PERP has it')
   check(near(c.psa, 150), 'handbrake slide as the PERP script has it')
-  check(near(c.deg, 38.5), 'steering lock from the PERP script')
-  check(near(c.dfast, 11 * 1.5), 'steering at speed: PERP 11 degrees x1.5')
+  check(near(c.deg, 38.5) && near(c.dfast, 11), 'steering lock from the PERP script')
 
-  // 2. SL65 on its own PERP script (the server): anti-spin only
+  // 2. SL65 on its own PERP script (the server): untouched
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/sl65amg.txt", SL65))`)
   c = parse(res)
   console.log('SL65 on its PERP script:  ', c)
-  check(c.perp === 'false' && c.anti === 'true', 'on its own script: anti-spin only')
-  check(near(c.hp, 260) && near(c.mph, 94), 'PERP engine untouched')
-  check(near(c.bf, 0.6) && near(c.br, 0.4), 'front brake bias on the PERP script too')
+  check(c.perp === 'false', 'on its own script: no PERP physics put on')
+  check(near(c.hp, 260) && near(c.mph, 94) && near(c.bf, 0.5) && near(c.trf, 0.75), 'its script untouched')
 
   // 3. spiked: nothing
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/spiked/sl65amg.txt", SL65))`)
   c = parse(res)
   console.log('SL65 on spiked tyres:     ', c)
-  check(c.spiked === 'true' && c.anti === 'false' && c.perp === 'false', 'spiked: left alone')
-  check(near(c.bf, 0.5) && near(c.br, 0.5), 'spiked: brakes untouched')
+  check(c.spiked === 'true' && c.perp === 'false', 'spiked: left alone')
 
-  // 4. stability for PERP cars, with their steering angles
+  // 4. the handling model on a body going along +y (the TDM nose) at `speed` m/s, `side` m/s sideways
   await L.doString(`
-    local on, off, n = 0, 0, 0
-    for _, car in pairs(E.Cars) do
-      if car.perp then
-        n = n + 1
-        if type(car.stability) == "table" and car.stability.steerSlow then on = on + 1 else off = off + 1 end
-      end
+    H = E.Handling
+    SPEC = { settings = H.SettingsFor("test"), wheelbase = 2.7, noseX = 0, noseY = 1, noseZ = 0 }
+    function Body(speed, side, yawRate, share)
+      return { px = 0, py = 0, pz = 0, vx = (side or 0) / H.INCH, vy = speed / H.INCH, vz = 0, ax = 1, ay = 0, az = 0, bx = 0, by = 1, bz = 0,
+        cx = 0, cy = 0, cz = 1, yawRate = yawRate or 0, groundShare = 1, controlShare = share or 1 }
     end
-    local sl = E.Cars["models/tdmcars/sl65amg.mdl"].stability
-    __result(n .. "|" .. on .. "|" .. off .. "|" .. tostring(sl and sl.steerSlow) .. "|" .. tostring(sl and sl.steerFast))`)
-  const [n, on, off, ss, sf] = res.split('|')
-  console.log(`stability assist: ${on} of ${n} PERP cars (SL65 steering ${ss} / ${sf} degrees)`)
-  check(+on === +n, 'every PERP car should get the stability assist')
-  check(+ss === 38.5 && +sf === 11, 'SL65 steering angles from its script')
+    -- run the model n ticks with the keys held, applying it; returns the yaw rate, sideways and forward speed (m/s)
+    function Run(body, buttons, ticks, steer)
+      local state = { steer = steer or 0, drift = false }
+      local asked = 0
+      for _ = 1, ticks do
+        local yawChange, sideChange
+        yawChange, sideChange, asked = H.Control(body, state, buttons, SPEC, 1 / 66)
+        H.ApplyControl(body, SPEC, yawChange, sideChange)
+      end
+      local nx, ny, nz, rx, ry, rz = H.NoseOf(body, SPEC)
+      return body.yawRate, (body.vx * rx + body.vy * ry) * H.INCH, (body.vx * nx + body.vy * ny) * H.INCH, asked, state
+    end
+    local L, R, J = H.KEY_LEFT, H.KEY_RIGHT, H.KEY_HANDBRAKE
+    local out = {}
+    local yaw = Run(Body(10), L, 40)
+    out[#out + 1] = yaw                                     -- 1 left at 10 m/s: turns left (+)
+    yaw = Run(Body(10), R, 40)
+    out[#out + 1] = yaw                                     -- 2 right: (-)
+    local yaw30, _, _, asked30 = Run(Body(30), L, 120)
+    out[#out + 1] = yaw30                                   -- 3 at 30 m/s, held
+    out[#out + 1] = math.deg(SPEC.settings.grip * 9.81 / 30) -- 4 the grip limit there
+    local _, side, forward = Run(Body(20, 5), 0, 1)
+    out[#out + 1] = side                                    -- 5 sideways after one tick (from 5 m/s)
+    out[#out + 1] = forward                                 -- 6 forward after it (20 m/s)
+    local _, sideHandbrake = Run(Body(20, 5), J, 1)
+    out[#out + 1] = sideHandbrake                           -- 7 with the handbrake: less taken away
+    local yawOff, sideOff = Run(Body(20, 5, 15, 0), L, 30)
+    out[#out + 1] = yawOff                                  -- 8 model off: the yaw rate stays 15
+    out[#out + 1] = sideOff                                 -- 9 ... and the slide 5 m/s
+    local yawBack = Run(Body(-5), L, 60)
+    out[#out + 1] = yawBack                                 -- 10 reversing, steering left: turns the other way
+    local yawParked = Run(Body(0.5, 0, 7), L, 30)
+    out[#out + 1] = yawParked                               -- 11 under minSpeed: Source alone (7 stays)
+    out[#out + 1] = H.SettingsFor("Bugatti Veyron 16.4").grip  -- 12
+    out[#out + 1] = H.SettingsFor("Chevrolet Spark").grip      -- 13
+    out[#out + 1] = H.SettingsFor("Ford Crown Victoria").grip  -- 14
+    __result(table.concat(out, "|"))`)
+  const v = res.split('|').map(Number)
+  console.log('model:', v.map((x) => +x.toFixed(3)).join(' | '))
+  check(v[0] > 5, 'steering left turns the car left')
+  check(v[1] < -5, 'steering right turns it right')
+  check(v[2] > v[3] * 0.9 && v[2] <= v[3] * 1.001, `at 30 m/s the turn sits at the grip limit (${v[2].toFixed(1)} of ${v[3].toFixed(1)} deg/s)`)
+  check(near(v[4], 5 - 1.15 * 9.81 / 66, 0.01), 'a slide loses grip x g of sideways speed a second')
+  check(near(v[5], 20, 0.001), 'the speed along the nose is untouched')
+  check(v[6] > v[4] && v[6] < 5, 'the handbrake lets the rear go (less sideways grip)')
+  check(near(v[7], 15, 0.001) && near(v[8], 5, 0.001), 'with the model off nothing changes')
+  check(v[9] < -1, 'reversing, the steering turns the car the other way')
+  check(near(v[10], 7, 0.001), 'parking speeds are left to Source')
+  check(near(v[11], 1.3) && near(v[12], 1.05) && near(v[13], 1.15), 'grip: high-powered 1.3, economy 1.05, others 1.15')
 
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
   process.exit(fail ? 1 : 0)

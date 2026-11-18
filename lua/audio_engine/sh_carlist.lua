@@ -873,3 +873,13 @@ for name, modelEntry in pairs(AudioEngine.CAR_MODELS) do
 	if not AudioEngine.PERP_STABILITY then extra.stability = false end
 	AudioEngine.RegisterCarNamed(modelEntry[1], name, extra)
 end
+
+-- the handling model's tyre grip by kind of car (sh_handling.lua AudioEngine.CAR_HANDLING): the
+-- high-powered cars (CAR_EMOTION) hold more, economy cars a little less. A car's own entry wins
+AudioEngine.CAR_HANDLING = AudioEngine.CAR_HANDLING or {}
+for carName in pairs(AudioEngine.CAR_EMOTION) do
+	AudioEngine.CAR_HANDLING[carName] = AudioEngine.CAR_HANDLING[carName] or { grip = 1.3 }
+end
+for carName in pairs(AudioEngine.ECONOMY) do
+	AudioEngine.CAR_HANDLING[carName] = AudioEngine.CAR_HANDLING[carName] or { grip = 1.05 }
+end

@@ -131,13 +131,18 @@ local function turned(forward, right, up, direction)
 	return forward * direction.x - right * direction.y + up * direction.z
 end
 
+-- where the bar is drawn (the car may be drawn ahead of Source's copy: cl_handling.lua)
+local function lightbarPose(lightbar)
+	if AudioEngine.DisplayPose then return AudioEngine.DisplayPose(lightbar) end
+	return lightbar:GetPos(), lightbar:GetAngles()
+end
+
 local function drawBar(entry, mode, phaseTime, eyePosition)
-	local lightbar = entry.lightbar
-	local angles = lightbar:GetAngles()
+	local barPosition, angles = lightbarPose(entry.lightbar)
 	local forward, right, up = angles:Forward(), angles:Right(), angles:Up()
 	for _, lamp in ipairs(AudioEngine.LIGHTBAR_MODULES) do
 		if isLit(lamp, mode, phaseTime) then
-			drawLens(lightbar:LocalToWorld(lamp.position), turned(forward, right, up, lamp.normal), lamp.width, LENS_HEIGHT, entry.sides[lamp.side], eyePosition)
+			drawLens(LocalToWorld(lamp.position, angle_zero, barPosition, angles), turned(forward, right, up, lamp.normal), lamp.width, LENS_HEIGHT, entry.sides[lamp.side], eyePosition)
 		end
 	end
 end
@@ -185,7 +190,10 @@ end
 
 -- where a side's light comes from: beside the bar, or the middle of that side's built-in lamps
 local function sideLightPosition(entry, side)
-	if not entry.lamps then return entry.lightbar:LocalToWorld(SIDE_LIGHT_OFFSETS[side]) end
+	if not entry.lamps then
+		local barPosition, angles = lightbarPose(entry.lightbar)
+		return (LocalToWorld(SIDE_LIGHT_OFFSETS[side], angle_zero, barPosition, angles))
+	end
 	entry.sidePositions = entry.sidePositions or {}
 	local localPosition = entry.sidePositions[side]
 	if not localPosition then
