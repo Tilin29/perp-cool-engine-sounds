@@ -63,6 +63,8 @@ EngineDebug.TUNABLES = {
 	{ "HANDLING", "cornerGripFrom", 0, 40, 0, "Corner grip: all of it up to (m/s)" },
 	{ "HANDLING", "cornerGripTo", 5, 80, 0, "Corner grip: none from (m/s)" },
 	{ "HANDLING", "sideHold", 1, 2, 2, "Sideways hold over the turn (x grip)" },
+	{ "HANDLING", "blockedYaw", 5, 60, 0, "Obstructed: turned this much (deg/s) under what was set" },
+	{ "HANDLING", "blockedTime", 0, 1, 2, "Obstructed: gentle follow for (s)" },
 	{ "HANDLING", "turnFloor", 0, 120, 0, "Turn floor: full lock at least (deg/s at the floor speed; cars without their own)" },
 	{ "HANDLING", "turnFloorSpeed", 10, 80, 0, "Turn floor: at (m/s)" },
 	{ "HANDLING", "turnFloorPower", 0, 1.5, 2, "Turn floor: eases off as (speed ratio)^this" },

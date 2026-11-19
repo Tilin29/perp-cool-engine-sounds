@@ -222,7 +222,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   check(v[1] < -5, 'steering right turns it right')
   check(v[2] > v[3] * 0.9 && v[2] <= v[3] * 1.001, `at 30 m/s the turn sits at the grip limit (${v[2].toFixed(1)} of ${v[3].toFixed(1)} deg/s)`)
   check(near(v[4], 5 - v[18] * 9.81 / 66, 0.01), 'a slide loses grip x sideHold x g of sideways speed a second')
-  check(near(Math.hypot(v[5], v[4]), Math.hypot(20, 5), 0.001), 'the speed is kept: the sideways change only turns the velocity')
+  check(near(v[5], 20, 0.001), 'taking a slide out costs its speed (the speed along the nose untouched, never raised)')
   check(v[6] > v[4] && v[6] < 5, 'the handbrake lets the rear go (less sideways grip)')
   check(near(v[7], 15, 0.001) && near(v[8], 5, 0.001), 'with the model off nothing changes')
   check(v[9] < -1, 'reversing, the steering turns the car the other way')
@@ -252,6 +252,25 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     E.CAR_HANDLING["Mercedes McLaren SLR"].testValue = nil
     __result(before .. "|" .. tostring(seen))`)
   check(res === '53|42', `a car's settings follow CAR_HANDLING live (turn floor ${res.split('|')[0]}, added value ${res.split('|')[1]})`)
+
+  // 4e. obstructed: the rotation stopped every tick (a wall at the front corner): after the first tick
+  // the model only follows gently instead of setting the full turn again
+  await L.doString(`
+    local body = Body(15)
+    local state = { steer = 1, drift = false }
+    local changes = {}
+    for tick = 1, 10 do
+      local yawChange = H.Control(body, state, H.KEY_LEFT, SPEC, 1 / 66)
+      changes[tick] = yawChange
+      body.yawRate = 0      -- the wall: no rotation got through
+    end
+    -- free: the same without the wall, tick 10
+    local free, freeState = Body(15), { steer = 1, drift = false }
+    local freeChange = 0
+    for tick = 1, 10 do freeChange = H.Control(free, freeState, H.KEY_LEFT, SPEC, 1 / 66); H.ApplyControl(free, SPEC, freeChange, 0, 0) end
+    __result(string.format("%.2f|%.2f|%.2f", changes[2], changes[10], free.yawRate))`)
+  const blocked = res.split('|').map(Number)
+  check(blocked[1] < blocked[2] * 0.2, `against a wall the turn is no longer forced every tick (tick 10: ${blocked[1]} deg/s set, free car turning ${blocked[2]})`)
 
   // 5. Source's front wheels over FastCarSpeed matched to the model's turn (sv_handling
   // MatchedSteering / SourceSteerAngle; the params' speeds are mph): PERP's line 38 deg at a
