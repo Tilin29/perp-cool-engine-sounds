@@ -185,7 +185,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     out[#out + 1] = yaw                                     -- 2 right: (-)
     local yaw30, _, _, asked30 = Run(Body(30), L, 120)
     out[#out + 1] = yaw30                                   -- 3 at 30 m/s, held
-    out[#out + 1] = math.deg(H.GripAt(SPEC.settings, 30) * 9.81 / 30) -- 4 the grip limit there
+    out[#out + 1] = H.TurnLimit(SPEC.settings, 30)            -- 4 the turn limit there (grip or the turn floor)
     local _, side, forward = Run(Body(20, 5), 0, 1)
     out[#out + 1] = side                                    -- 5 sideways after one tick (from 5 m/s)
     out[#out + 1] = forward                                 -- 6 forward after it (20 m/s)
@@ -213,14 +213,14 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     out[#out + 1] = H.GripAt(SPEC.settings, 20) * SPEC.settings.sideHold  -- 19 the sideways hold at 20 m/s
     -- the keys' turn at full lock, 20 / 25 / 30 / 40 / 50 / 60 mph (deg/s): progressive, no cliff
     for _, mph in ipairs({ 20, 25, 30, 40, 50, 60 }) do
-      out[#out + 1] = math.deg(math.min(mph * 0.44704 * math.tan(math.rad(H.Lock(SPEC.settings, mph * 0.44704))) / 2.7, H.GripAt(SPEC.settings, mph * 0.44704) * 9.81 / (mph * 0.44704)))
+      out[#out + 1] = math.deg(math.min(mph * 0.44704 * math.tan(math.rad(H.Lock(SPEC.settings, mph * 0.44704))) / 2.7, math.rad(H.TurnLimit(SPEC.settings, mph * 0.44704))))
     end
     __result(table.concat(out, "|"))`)
   const v = res.split('|').map(Number)
   console.log('model:', v.map((x) => +x.toFixed(3)).join(' | '))
   check(v[0] > 5, 'steering left turns the car left')
   check(v[1] < -5, 'steering right turns it right')
-  check(v[2] > v[3] * 0.9 && v[2] <= v[3] * 1.001, `at 30 m/s the turn sits at the grip limit (${v[2].toFixed(1)} of ${v[3].toFixed(1)} deg/s)`)
+  check(v[2] > v[3] * 0.9 && v[2] <= v[3] * 1.001, `at 30 m/s the turn sits at the turn limit (${v[2].toFixed(1)} of ${v[3].toFixed(1)} deg/s)`)
   check(near(v[4], 5 - v[18] * 9.81 / 66, 0.01), 'a slide loses grip x sideHold x g of sideways speed a second')
   check(near(v[5], 20, 0.001), 'taking a slide out costs its speed (the speed along the nose untouched, never raised)')
   check(v[6] > v[4] && v[6] < 5, 'the handbrake lets the rear go (less sideways grip)')
@@ -272,6 +272,43 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   const blocked = res.split('|').map(Number)
   check(blocked[1] < blocked[2] * 0.2, `against a wall the turn is no longer forced every tick (tick 10: ${blocked[1]} deg/s set, free car turning ${blocked[2]})`)
 
+  // 4f. the prediction over rough ground: on its wheels a bump's kick up isn't carried on (it drew the
+  // car bobbing); in the air it flies
+  await L.doString(`
+    local function lift(ground, slope)
+      local body = Body(10)
+      local c, s = math.cos(math.rad(slope)), math.sin(math.rad(slope))
+      -- pitched nose up about x: the nose (y) tilts up, up tilts back
+      body.bx, body.by, body.bz = 0, c, s
+      body.cx, body.cy, body.cz = 0, -s, c
+      body.vx, body.vy, body.vz = 0, c * 10 / H.INCH, s * 10 / H.INCH
+      body.vx, body.vy, body.vz = body.vx + body.cx * 40, body.vy + body.cy * 40, body.vz + body.cz * 40   -- a bump's kick, 40 in/s
+      body.groundShare = ground
+      local z0 = body.pz
+      for _ = 1, 15 do H.Integrate(body, SPEC, 0, 1 / 66) end   -- ~0.23 s, a lead
+      local alongUp = (body.px * body.cx + body.py * body.cy + (body.pz - z0) * body.cz)
+      return alongUp, body.py * s + (body.pz - z0) * c
+    end
+    __result(string.format("%.2f|%.2f", lift(1, 0), lift(0, 0)))`)
+  const bump = res.split('|').map(Number)
+  const t = 15 / 66, flight = 40 * t - 0.5 * 386.1 * t * t
+  check(Math.abs(bump[0]) < 0.5 && Math.abs(bump[1] - flight) < 1, `a bump's kick: on the wheels not carried on (${bump[0]} in up over a lead), in the air a ballistic arc (${bump[1]} in, ${flight.toFixed(2)} expected)`)
+
+  // 4g. a Lua refresh on a running server: values left from an older file (the turn floor off, a
+  // per-car copy) give way to the file's, and cars keep reading the same table
+  g.set('__shHandling', fs.readFileSync(path.join(LUA, 'sh_handling.lua'), 'utf8'))
+  g.set('__shCarlist', fs.readFileSync(path.join(LUA, 'sh_carlist.lua'), 'utf8'))
+  await L.doString(`
+    local handling = E.HANDLING
+    handling.turnFloor = 0
+    E.HANDLING_DEFAULTS = { turnFloor = 53 }
+    E.CAR_HANDLING["Dodge Charger SRT-8"].turnFloor = 0
+    local settings = H.SettingsFor("Dodge Charger SRT-8")
+    load(__shHandling)()
+    load(__shCarlist)()
+    __result(string.format("%s|%s|%s", tostring(E.HANDLING == handling), tostring(E.HANDLING.turnFloor), tostring(H.SettingsFor("Dodge Charger SRT-8").turnFloor)))`)
+  check(res === 'true|53|53', `a refresh brings the file's values (same table, turn floor, SRT-8's): ${res}`)
+
   // 5. Source's front wheels over FastCarSpeed matched to the model's turn (sv_handling
   // MatchedSteering / SourceSteerAngle; the params' speeds are mph): PERP's line 38 deg at a
   // standstill to the fitted 8 at 35 mph, then held
@@ -298,8 +335,8 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     `downforce: at 50 m/s a high-powered car turns ${v[17].toFixed(1)} deg/s (grip alone ${(1.3 * 9.81 / 50 * 180 / Math.PI).toFixed(1)})`)
   const turns = v.slice(19, 25)
   console.log('full-lock turn at 20/25/30/40/50/60 mph:', turns.map((x) => x.toFixed(1)).join(' | '))
-  check(turns[1] > turns[0] * 0.9 && turns.slice(1).every((x, i) => x < turns[i + 1 - 1] * 1.15 && (i === 0 || x < turns[i])) && turns[2] > turns[1] * 0.8,
-    'the turn eases off with speed, no cliff after the lock (20 -> 30 mph keeps over 80% a step)')
+  check(turns.slice(1).every((x, i) => x > turns[i] * 0.8 && x < turns[i] * 1.15) && turns[5] < turns[2],
+    'the turn eases off with speed, no cliff: each step (20/25/30/40/50/60 mph) keeps over 80% of the one before')
 
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
   process.exit(fail ? 1 : 0)

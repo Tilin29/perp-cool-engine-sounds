@@ -94,11 +94,12 @@ local HANDLING_DEFAULTS = {
 	blockedYaw = 15,
 	blockedShare = 0.5,
 	blockedTime = 0.3,
-	-- turn floor (arcade, per car: CAR_HANDLING): the keys' full-lock turn never under turnFloor deg/s
-	-- at turnFloorSpeed, x (turnFloorSpeed / speed) ^ turnFloorPower elsewhere (still the lock's at
-	-- most). The tyres' grip alone gave the SLR ~26 deg/s at 80 mph (a 180 in 7 s); the user wanted a
-	-- tight 180 at 80 mph. 0 = off
-	turnFloor = 0,
+	-- turn floor (arcade): the keys' full-lock turn never under turnFloor deg/s at turnFloorSpeed,
+	-- x (turnFloorSpeed / speed) ^ turnFloorPower elsewhere (still the lock's at most). The tyres' grip
+	-- alone gave the SLR ~26 deg/s at 80 mph (a 180 in 7 s); the user wanted a tight 180 at 80 mph.
+	-- Every car the same (it was the high-powered ones': the user, lower tiers turned badly at 50 mph,
+	-- the turn shouldn't follow a car's class). 0 = off
+	turnFloor = 53,
 	turnFloorSpeed = 36,    -- m/s (80 mph)
 	turnFloorPower = 0.7,   -- (0.5 left 50-60 mph short, the user)
 	yawFollow = 8,          -- per second: how firmly the rotation follows the steering
@@ -120,12 +121,14 @@ local HANDLING_DEFAULTS = {
 	impactHold = 0.35,      -- s fully off
 	impactEase = 0.5,       -- s back to full
 }
--- kept over a Lua refresh (values tuned live stay), but a key added since is filled in: without
--- it a new setting was nil on a running server and Control errored every tick (the model off)
+-- the same table over a Lua refresh (cars hold it through Handling.SettingsFor), set to this file's
+-- values on every load; values tuned live in the debug menu are put back on top by it
+-- (EngineDebug.FollowGlobalHandling: it follows AudioEngine.HANDLING_DEFAULTS). Keeping the old
+-- values over a refresh, a new key was nil (Control errored every tick) and a changed default
+-- never reached a running server (the turn floor stayed off)
 AudioEngine.HANDLING = AudioEngine.HANDLING or {}
-for key, value in pairs(HANDLING_DEFAULTS) do
-	if AudioEngine.HANDLING[key] == nil then AudioEngine.HANDLING[key] = value end
-end
+for key, value in pairs(HANDLING_DEFAULTS) do AudioEngine.HANDLING[key] = value end
+AudioEngine.HANDLING_DEFAULTS = HANDLING_DEFAULTS
 
 -- per car overrides by car name (sh_carlist.lua names): { grip = 1.3, ... }
 AudioEngine.CAR_HANDLING = AudioEngine.CAR_HANDLING or {}
@@ -368,6 +371,14 @@ function Handling.Integrate(body, spec, acceleration, deltaTime, stopping)
 		if forwardAfter * forwardBefore < 0 then
 			body.vx, body.vy, body.vz = body.vx - nx * forwardAfter, body.vy - ny * forwardAfter, body.vz - nz * forwardAfter
 		end
+	end
+	-- on its wheels, no speed along the car's up is carried on (the ground decides that: a bump's
+	-- kick or the suspension's bounce, carried over the lead, drew the car floating up and pulled
+	-- back down by the next state, a bobble over rough ground; the user). Along the ground (slopes
+	-- too) it moves as before; in the air it flies
+	local upSpeed = (body.vx * body.cx + body.vy * body.cy + body.vz * body.cz) * ground
+	if upSpeed ~= 0 then
+		body.vx, body.vy, body.vz = body.vx - body.cx * upSpeed, body.vy - body.cy * upSpeed, body.vz - body.cz * upSpeed
 	end
 	body.px, body.py, body.pz = body.px + body.vx * deltaTime, body.py + body.vy * deltaTime, body.pz + body.vz * deltaTime
 	local turn = body.yawRate * RAD * deltaTime
