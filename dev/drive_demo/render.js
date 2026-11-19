@@ -47,6 +47,7 @@ function writeWav(f, x) {
 const LUA_DRIVE = `
 local E, DT = AUDIO_ENGINE, AUDIO_ENGINE.Drivetrain
 local name = CAR_NAME
+local SPAM = DRIVE_SPAM
 local m = E.CAR_MODELS[name]; local car = m and E.Cars[m[1]]
 if not car then __result("ERR no car " .. name) return end
 local p = PHYS[m[2]]
@@ -63,7 +64,14 @@ local vmax = cfg.topSpeed / 3.6
 local stage, stageT, pullT = "start", 0, 0
 while t < 60 do
 	local inp = { speed = v }
-	if stage == "start" then if st.phase == "run" then stageT = stageT + dt end if stageT > 1.2 then stage, stageT = "pull", 0 end
+	if stage == "start" then if st.phase == "run" then stageT = stageT + dt end if stageT > 1.2 then stage, stageT = SPAM and "spam" or "pull", 0 end
+	elseif stage == "spam" then
+		-- DRIVE=spam: W and Space mashed at a standstill for 6 s, each toggled every SPAM_W / SPAM_SPACE
+		-- seconds (env; 0 = held; defaults 0.12 / 0.2)
+		stageT = stageT + dt
+		inp.forward = SPAM_W <= 0 or math.floor(stageT / SPAM_W) % 2 == 0
+		inp.handbrake = SPAM_SPACE <= 0 or math.floor(stageT / SPAM_SPACE) % 2 == 0
+		if stageT > 6 then stage, stageT = "idle", 0 end
 	elseif stage == "pull" then inp.forward = true; pullT = pullT + dt
 		if v > vmax * 0.93 or pullT > 26 then stage, stageT = "coast", 0 end
 	elseif stage == "coast" then stageT = stageT + dt; if stageT > 3 then stage, stageT = "brake", 0 end
@@ -71,7 +79,8 @@ while t < 60 do
 	elseif stage == "idle" then stageT = stageT + dt; if stageT > 2 then break end end
 	DT.Step(st, cfg, dt, inp)
 	local drive = st.phase == "run" and st.on
-	if inp.forward and drive then v = v + E.GearAccel(v, vmax, cfg.powerKg) * dt * (st.shiftTimer > 0 and 0.3 or 1)
+	if inp.handbrake then v = math.max(0, v - 6 * dt)
+	elseif inp.forward and drive then v = v + E.GearAccel(v, vmax, cfg.powerKg) * dt * (st.shiftTimer > 0 and 0.3 or 1)
 	elseif inp.backward then v = math.max(0, v - 7 * dt)
 	else v = math.max(0, v - (0.4 + 0.0006 * v * v) * dt) end
 	local limTarget = (drive and st.gear == 0 and st.limiterHoldTimer > 0 and st.lastPedal and st.rpm > cfg.redline * 0.9) and 1 or 0
@@ -106,7 +115,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
   const env = path.join(ADDON, 'sound/audio_engine', (fs.readdirSync(path.join(ADDON, 'sound/audio_engine')).find(d => d.startsWith('env_'))))
   const cache = {}; const W = f => cache[f] || (cache[f] = readWav(f))
   for (const name of process.argv.slice(2)) {
-    L.global.set('CAR_NAME', name); res = ''
+    L.global.set('CAR_NAME', name); L.global.set('DRIVE_SPAM', process.env.DRIVE === 'spam'); L.global.set('SPAM_W', +(process.env.SPAM_W || 0.12)); L.global.set('SPAM_SPACE', +(process.env.SPAM_SPACE || 0.2)); res = ''
     await L.doString(LUA_DRIVE)
     if (res.startsWith('ERR')) { console.log(name, res); continue }
     const f = res.split('|')
@@ -219,7 +228,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       for (const [stem, track] of Object.entries(stems)) writeWav(file.replace(/\.wav$/, `_${stem}.wav`), track.subarray(0, endS))
       fs.writeFileSync(file.replace(/\.wav$/, '_speed.json'), JSON.stringify(frames.map((r) => r[3])))
     }
-    if (process.env.TRACE) for (let fi = 0; fi < frames.length; fi += 30) console.log((fi / FPS).toFixed(1), frames[fi].slice(0, 4).map(x => x.toFixed(2)).join(" "))
+    if (process.env.TRACE) for (let fi = 0; fi < frames.length; fi += (process.env.TRACE === "all" ? 1 : 30)) console.log((fi / FPS).toFixed(1), frames[fi].slice(0, process.env.TRACE === "all" ? 10 : 4).map(x => x.toFixed(2)).join(" "))
     const gearsUsed = new Set(frames.map(r => r[2]).filter(x => x > 0))
     console.log(`${name}: ${engine}, top ${top} km/h, gears end at ${ends} km/h, used ${Math.max(...gearsUsed)}; ${(endS / SR).toFixed(1)} s -> ${path.relative(ADDON, file)}`)
   }

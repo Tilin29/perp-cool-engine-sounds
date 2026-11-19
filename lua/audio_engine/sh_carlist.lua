@@ -1549,11 +1549,17 @@ for name, modelEntry in pairs(AudioEngine.CAR_MODELS) do
 end
 
 -- the handling model's tyre grip by kind of car (sh_handling.lua AudioEngine.CAR_HANDLING): the
--- high-powered cars (CAR_EMOTION) hold more, economy cars a little less. A car's own entry wins
+-- high-powered cars (CAR_EMOTION) hold more, and with downforce more again at speed (1.5x at
+-- 112 mph: they turned no tighter than any car there), economy cars a little less. A car's own entry wins
+-- (a value already there is kept; a key missing, e.g. after a Lua refresh, is filled in)
 AudioEngine.CAR_HANDLING = AudioEngine.CAR_HANDLING or {}
-for carName in pairs(AudioEngine.CAR_EMOTION) do
-	AudioEngine.CAR_HANDLING[carName] = AudioEngine.CAR_HANDLING[carName] or { grip = 1.3 }
+local function handlingDefaults(carName, defaults)
+	local own = AudioEngine.CAR_HANDLING[carName] or {}
+	for key, value in pairs(defaults) do
+		if own[key] == nil then own[key] = value end
+	end
+	AudioEngine.CAR_HANDLING[carName] = own
 end
-for carName in pairs(AudioEngine.ECONOMY) do
-	AudioEngine.CAR_HANDLING[carName] = AudioEngine.CAR_HANDLING[carName] or { grip = 1.05 }
-end
+-- (turnFloor: a full-lock turn of at least 53 deg/s at 80 mph, a 180 in ~3.5 s, easing off with speed)
+for carName in pairs(AudioEngine.CAR_EMOTION) do handlingDefaults(carName, { grip = 1.3, downforce = 0.5, turnFloor = 53 }) end
+for carName in pairs(AudioEngine.ECONOMY) do handlingDefaults(carName, { grip = 1.05 }) end

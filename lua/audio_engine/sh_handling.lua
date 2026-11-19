@@ -62,7 +62,7 @@ Handling.driveModelConVar = Handling.driveModelConVar or CreateConVar("audio_eng
 ---------------------------------------------------------------------------
 -- settings (per car: AudioEngine.CAR_HANDLING[name] over these; tuned live by the debug menu)
 ---------------------------------------------------------------------------
-AudioEngine.HANDLING = AudioEngine.HANDLING or {
+local HANDLING_DEFAULTS = {
 	-- steering: A/D are on/off keys, the wheel angle ramps to them
 	steerRate = 4.5,        -- per second towards the pressed key (centre to full lock in 0.22 s)
 	steerReturn = 6,        -- per second back to the centre with no key
@@ -74,6 +74,27 @@ AudioEngine.HANDLING = AudioEngine.HANDLING or {
 	-- the tyres: the most sideways acceleration they hold (g). Turns are capped at it (the yaw
 	-- rate asked never needs more), and a slide loses its sideways speed at it
 	grip = 1.15,
+	-- downforce: extra grip that grows with speed squared, all of it from downforceSpeed (x grip:
+	-- 0.5 = 1.5x the grip there). Nothing at town speeds, so only fast cars turn tighter at speed
+	downforce = 0,
+	downforceSpeed = 50,    -- m/s (112 mph)
+	-- corner grip: extra grip on the keys' turn (not slides: handbrake, drift) at town speeds, all of
+	-- it up to cornerGripFrom and none from cornerGripTo (smoothstep). With the tyres' 1.15 g alone the
+	-- turn went from the lock's to the grip's at ~20 mph and the turning circle doubled by 30 (the
+	-- user: "instantly stiff at 25 mph", it should get stiffer progressively)
+	cornerGrip = 0.5,       -- x grip
+	cornerGripFrom = 11,    -- m/s (25 mph)
+	cornerGripTo = 36,      -- m/s (80 mph)
+	-- the tyres hold sideways this much more than the turn asks (x grip), so a held turn tracks
+	-- instead of drifting wide at the limit (the turn is held on its target every tick)
+	sideHold = 1.15,
+	-- turn floor (arcade, per car: CAR_HANDLING): the keys' full-lock turn never under turnFloor deg/s
+	-- at turnFloorSpeed, x (turnFloorSpeed / speed) ^ turnFloorPower elsewhere (still the lock's at
+	-- most). The tyres' grip alone gave the SLR ~26 deg/s at 80 mph (a 180 in 7 s); the user wanted a
+	-- tight 180 at 80 mph. 0 = off
+	turnFloor = 0,
+	turnFloorSpeed = 36,    -- m/s (80 mph)
+	turnFloorPower = 0.7,   -- (0.5 left 50-60 mph short, the user)
 	yawFollow = 8,          -- per second: how firmly the rotation follows the steering
 	minSpeed = 1.5,         -- m/s: under this Source alone (parking, standing)...
 	fadeSpeed = 3,          -- ...fully on minSpeed + this
@@ -93,22 +114,55 @@ AudioEngine.HANDLING = AudioEngine.HANDLING or {
 	impactHold = 0.35,      -- s fully off
 	impactEase = 0.5,       -- s back to full
 }
+-- kept over a Lua refresh (values tuned live stay), but a key added since is filled in: without
+-- it a new setting was nil on a running server and Control errored every tick (the model off)
+AudioEngine.HANDLING = AudioEngine.HANDLING or {}
+for key, value in pairs(HANDLING_DEFAULTS) do
+	if AudioEngine.HANDLING[key] == nil then AudioEngine.HANDLING[key] = value end
+end
 
 -- per car overrides by car name (sh_carlist.lua names): { grip = 1.3, ... }
 AudioEngine.CAR_HANDLING = AudioEngine.CAR_HANDLING or {}
 
--- the settings of one car: its own values over AudioEngine.HANDLING (read through, so a value
--- tuned live reaches every car at once)
+-- the settings of one car: its own values (AudioEngine.CAR_HANDLING[name]) over AudioEngine.HANDLING,
+-- both read live, so a value tuned or added later reaches cars already driving. (Its own values were
+-- copied once: a car spawned before a Lua refresh kept the old ones, the SLR never got its turn floor)
 local settingsCache = {}
 function Handling.SettingsFor(carName)
 	carName = carName or ""
 	local cached = settingsCache[carName]
 	if cached then return cached end
-	local own = {}
-	for key, value in pairs(AudioEngine.CAR_HANDLING[carName] or {}) do own[key] = value end
-	cached = setmetatable(own, { __index = function(_, key) return AudioEngine.HANDLING[key] end })
+	cached = setmetatable({}, { __index = function(_, key)
+		local own = AudioEngine.CAR_HANDLING[carName]
+		local value = own and own[key]
+		if value ~= nil then return value end
+		return AudioEngine.HANDLING[key]
+	end })
 	settingsCache[carName] = cached
 	return cached
+end
+
+-- the tyres' grip (g) in a slide at `speed` (m/s): downforce included
+function Handling.SlideGripAt(settings, speed)
+	local share = min(1, speed / settings.downforceSpeed)
+	return settings.grip * (1 + settings.downforce * share * share)
+end
+
+-- the tyres' grip (g) on the keys' turn at `speed` (m/s): the slide's + corner grip
+function Handling.GripAt(settings, speed)
+	local fade = clamp((speed - settings.cornerGripFrom) / max(settings.cornerGripTo - settings.cornerGripFrom, 0.1), 0, 1)
+	local corner = settings.cornerGrip * (1 - fade * fade * (3 - 2 * fade))
+	return Handling.SlideGripAt(settings, speed) * (1 + corner)
+end
+
+-- the most the keys' turn may rotate the car at `speed` (m/s), deg/s: the tyres' grip, or the
+-- car's turn floor where that's more
+function Handling.TurnLimit(settings, speed)
+	local limit = DEG * Handling.GripAt(settings, speed) * GRAVITY / max(speed, 1)
+	if settings.turnFloor > 0 then
+		limit = max(limit, settings.turnFloor * (settings.turnFloorSpeed / max(speed, 1)) ^ settings.turnFloorPower)
+	end
+	return limit
 end
 
 function Handling.Lock(settings, speed)
@@ -120,7 +174,7 @@ end
 -- where the tyres' grip caps the rotation (the bicycle model's angle for the yaw rate Control asks)
 function Handling.TurnAngle(settings, wheelbase, speed)
 	local lock = Handling.Lock(settings, speed)
-	local gripAngle = DEG * math.atan(settings.grip * GRAVITY * wheelbase / max(speed * speed, 1))
+	local gripAngle = DEG * math.atan(Handling.TurnLimit(settings, speed) * RAD * wheelbase / max(speed, 1))
 	return min(lock, gripAngle)
 end
 
@@ -155,9 +209,9 @@ Handling.NoseOf = noseOf
 
 --[[
 	One tick of the model: moves the steering (state.steer) and the drift flag, and returns the
-	change to the yaw rate (deg/s, about the car's up) and to the sideways speed (inches/s along
-	the car's right) that the car should get. It never touches the speed along the nose: a car
-	can't be launched by it, and corners don't scrub speed. The caller applies them (server:
+	change to the yaw rate (deg/s, about the car's up), to the sideways speed (inches/s along the
+	car's right) and to the speed along the nose that keeps the car's speed as it was: it only
+	turns the velocity, so a car can't be launched by it and corners don't scrub speed. The caller applies them (server:
 	the physics object; client: its predicted body). Also returns the yaw rate asked (logs).
 ]]
 function Handling.Control(body, state, buttons, spec, deltaTime)
@@ -176,7 +230,8 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	local fade = clamp((speed - settings.minSpeed) / settings.fadeSpeed, 0, 1)
 	if share <= 0 or fade <= 0 then
 		if fade <= 0 then state.drift = false end
-		return 0, 0, 0
+		state.yawTarget = nil
+		return 0, 0, 0, 0
 	end
 	share = share * fade
 
@@ -196,32 +251,62 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	-- too), never more than the tyres can hold
 	local lock = Handling.Lock(settings, speed)
 	local kinematic = DEG * forwardSpeed * INCH * tan(lock * RAD) / spec.wheelbase * steer
-	local gripLimit = DEG * settings.grip * GRAVITY / max(speed, 1)
-	local asked = clamp(kinematic, -gripLimit, gripLimit)
-	local target, follow, grip = asked, settings.yawFollow, settings.grip
+	local turnLimit = Handling.TurnLimit(settings, speed)
+	local asked = clamp(kinematic, -turnLimit, turnLimit)
+	-- (the sideways grip covers the turn: over the tyres' own where the turn floor asks more)
+	local grip = max(Handling.GripAt(settings, speed), abs(asked) * RAD * speed / GRAVITY)
+	local target, follow = asked, settings.yawFollow
 	if slipAngle > settings.spinAngle then
 		-- spinning: caught, whatever the keys
 		state.drift = false
 	elseif handbrake then
-		target, follow, grip = asked * settings.handbrakeYaw, settings.handbrakeFollow, grip * settings.handbrakeGrip
+		target, follow = asked * settings.handbrakeYaw, settings.handbrakeFollow
+		grip = Handling.SlideGripAt(settings, speed) * settings.handbrakeGrip
 	elseif state.drift then
-		follow, grip = settings.driftFollow, grip * settings.driftGrip
+		follow, grip = settings.driftFollow, Handling.SlideGripAt(settings, speed) * settings.driftGrip
+	else
+		grip = grip * settings.sideHold
 	end
 
-	local yawChange = (target - body.yawRate) * min(1, follow * deltaTime) * share
+	local yawChange
+	if handbrake or state.drift then
+		-- a slide: the rotation only drawn towards the target, the car's own momentum does the rest
+		state.yawTarget = nil
+		yawChange = (target - body.yawRate) * min(1, follow * deltaTime) * share
+	else
+		-- on grip: the target eases in at yawFollow and the car is put on it every tick. Source's own
+		-- tyres resist the rotation between ticks: closing a share of the gap a tick (as this did:
+		-- 12%), the car settled well short of the turn asked (the user: fast cars "barely turn" at
+		-- 40-70 mph once Source's front wheels no longer pulled it round)
+		local eased = state.yawTarget or body.yawRate
+		eased = eased + (target - eased) * min(1, follow * deltaTime)
+		state.yawTarget = eased
+		yawChange = (eased - body.yawRate) * share
+	end
 	-- (a handbrake slide or a drift lets the rear go: there the sideways speed goes towards 0)
 	local wantedSide = (handbrake or state.drift) and 0 or -0.5 * spec.wheelbase / INCH * (body.yawRate + yawChange) * RAD
 	local sideError = sideSpeed - wantedSide
 	local removed = min(abs(sideError), grip * GRAVITY_INCHES * deltaTime) * share
-	return yawChange, -sign(sideError) * removed, asked
+	local sideChange = -sign(sideError) * removed
+	-- the speed kept: the sideways change only turns the velocity. Pushed along the car's right
+	-- alone, a held turn gained speed (the car travels a little into the turn of its nose, so each
+	-- tick's turn moved some of that into forward speed: the SLR circling from 20 mph was at 60
+	-- after 10 s, offline, with no throttle)
+	local newSide = sideSpeed + sideChange
+	local squared = forwardSpeed * forwardSpeed + sideSpeed * sideSpeed - newSide * newSide
+	local forwardChange = squared > 0 and sign(forwardSpeed) * sqrt(squared) - forwardSpeed or 0
+	return yawChange, sideChange, asked, forwardChange
 end
 
--- the yaw and sideways changes onto a body (prediction; the server puts them on the physics object)
-function Handling.ApplyControl(body, spec, yawChange, sideChange)
+-- the yaw, sideways and forward changes onto a body (prediction; the server puts them on the physics object)
+function Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 	body.yawRate = body.yawRate + yawChange
-	if sideChange ~= 0 then
-		local _, _, _, rx, ry, rz = noseOf(body, spec)
-		body.vx, body.vy, body.vz = body.vx + rx * sideChange, body.vy + ry * sideChange, body.vz + rz * sideChange
+	forwardChange = forwardChange or 0
+	if sideChange ~= 0 or forwardChange ~= 0 then
+		local nx, ny, nz, rx, ry, rz = noseOf(body, spec)
+		body.vx = body.vx + rx * sideChange + nx * forwardChange
+		body.vy = body.vy + ry * sideChange + ny * forwardChange
+		body.vz = body.vz + rz * sideChange + nz * forwardChange
 	end
 end
 
@@ -392,8 +477,8 @@ local function step(body, state, buttons, spec, learner, base, deltaTime)
 	local forwardSpeed = forwardSpeedOf(body, spec)
 	local mode = Handling.DriveMode(buttons, forwardSpeed, base.driving, base.limiter)
 	Handling.Integrate(body, spec, Handling.LearnedAcceleration(learner, mode, forwardSpeed), deltaTime, STOPPING[mode])
-	local yawChange, sideChange = Handling.Control(body, state, buttons, spec, deltaTime)
-	Handling.ApplyControl(body, spec, yawChange, sideChange)
+	local yawChange, sideChange, _, forwardChange = Handling.Control(body, state, buttons, spec, deltaTime)
+	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 end
 
 --[[
@@ -405,13 +490,13 @@ end
 function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState)
 	local body = Handling.CopyBody(base, out)
 	local state = outState or {}
-	state.steer, state.drift = base.steer, base.drift
+	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
 	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime) end
 	if fraction > 0 then
 		local buttons = count > 0 and commands[count] or base.buttons or 0
-		local savedSteer, savedDrift = state.steer, state.drift
+		local savedSteer, savedDrift, savedTarget = state.steer, state.drift, state.yawTarget
 		step(body, state, buttons, spec, learner, base, deltaTime * fraction)
-		state.steer, state.drift = savedSteer, savedDrift
+		state.steer, state.drift, state.yawTarget = savedSteer, savedDrift, savedTarget
 	end
 	return body, state
 end

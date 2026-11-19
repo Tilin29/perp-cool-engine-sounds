@@ -33,6 +33,8 @@ Drivetrain.UPSHIFT_CUT, Drivetrain.UPSHIFT_TAKE_UP = 0.09, 0.12
 -- how fast the revs fall to the new gear's on an upshift (follow rate, 1/s): 7 glided down over ~0.32 s,
 -- 14 (~0.15 s) dropped so fast the pitch sweep sounded robotic (the user); 8 is ~0.28 s
 Drivetrain.UPSHIFT_REV_RATE = 8
+-- seconds Space must be held at a standstill before the box drops into neutral (Drivetrain.Step)
+Drivetrain.NEUTRAL_HOLD = 0.35
 
 -- Arcade gearbox shift points, as fractions of redline (cars can override with config.shift)
 Drivetrain.SHIFT = {
@@ -198,7 +200,15 @@ function Drivetrain.Step(engineState, config, deltaTime, controls)
 
 	-- which way the driver wants to go, and which pedal is the "throttle"
 	local mode, pedal
+	-- (Space has to be held NEUTRAL_HOLD before it drops into neutral: tapped with W held, each tap
+	-- flew the revs to the limiter and the next one yanked them back to stall speed, a 3000 <-> 7000
+	-- rpm siren twice a second, the user's "weird alien noise")
 	if controls.handbrake and absoluteSpeed < 1.0 then
+		engineState.handbrakeHeldFor = (engineState.handbrakeHeldFor or 0) + deltaTime
+	else
+		engineState.handbrakeHeldFor = 0
+	end
+	if controls.handbrake and absoluteSpeed < 1.0 and (engineState.gear == 0 or engineState.handbrakeHeldFor >= Drivetrain.NEUTRAL_HOLD) then
 		mode, pedal = "N", controls.forward         -- handbrake at a standstill: rev it in neutral
 	elseif engineState.gear == 0 and absoluteSpeed < 1.0 and not controls.forward and not controls.backward then
 		mode, pedal = "N", false           -- stays in neutral until W (or S) is pressed

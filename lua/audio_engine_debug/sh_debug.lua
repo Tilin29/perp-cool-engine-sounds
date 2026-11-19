@@ -57,6 +57,15 @@ EngineDebug.HANDLING_CVARS = { "audio_engine_drivemodel" }
 ]]
 EngineDebug.TUNABLES = {
 	{ "HANDLING", "grip", 0.5, 2.5, 2, "Tyre grip (g): the tightest turn, and how slides stop" },
+	{ "HANDLING", "downforce", 0, 2, 2, "Downforce: extra grip at speed (x grip, cars without their own)" },
+	{ "HANDLING", "downforceSpeed", 10, 100, 0, "Downforce: all of it from (m/s)" },
+	{ "HANDLING", "cornerGrip", 0, 2, 2, "Corner grip: extra grip on the turn at town speeds (x grip)" },
+	{ "HANDLING", "cornerGripFrom", 0, 40, 0, "Corner grip: all of it up to (m/s)" },
+	{ "HANDLING", "cornerGripTo", 5, 80, 0, "Corner grip: none from (m/s)" },
+	{ "HANDLING", "sideHold", 1, 2, 2, "Sideways hold over the turn (x grip)" },
+	{ "HANDLING", "turnFloor", 0, 120, 0, "Turn floor: full lock at least (deg/s at the floor speed; cars without their own)" },
+	{ "HANDLING", "turnFloorSpeed", 10, 80, 0, "Turn floor: at (m/s)" },
+	{ "HANDLING", "turnFloorPower", 0, 1.5, 2, "Turn floor: eases off as (speed ratio)^this" },
 	{ "HANDLING", "yawFollow", 1, 20, 1, "How firmly the rotation follows the steering (per s)" },
 	{ "HANDLING", "steerRate", 1, 15, 1, "Steering: towards the key (per s)" },
 	{ "HANDLING", "steerReturn", 1, 15, 1, "Steering: back to the centre (per s)" },
