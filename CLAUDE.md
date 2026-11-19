@@ -12,7 +12,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 - `sh_config.lua`: `RegisterCar(model, cfg)`, `GetCarConfig` (keeps each model path's lower case: called per car per tick/frame). `audio_engine_editor`
   (shared, default 0, `AudioEngine.EditorEnabled()`): the Rev Bench menu (cl_menu: command, `!engine`, context menu; sv_engine rejects `audio_engine_set`) only when 1.
   cl_menu has no gear card any more (its ratio editor never reached the car; it forces `fit = 1`).
-- `sh_presets.lua`: layouts, gearbox presets, 38 engine presets, profile Sanitize/Encode/Decode
+- `sh_presets.lua`: layouts, gearbox presets, 39 engine presets, profile Sanitize/Encode/Decode
   (21 pipe-separated fields, ending `...|popTone|turboVol|bovVol`), `ResolveProfile`, `CarStockProfile`.
   `config.soundKey` = what forces a new sound bank (layout, pitch, tone, idle, redline, realism, gurgle, popTone).
   Turbo, BOV, volumes and pop frequency are runtime-only.
@@ -487,6 +487,9 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   `sound/audio_engine/` + `lua/audio_engine/cl_baked.lua`. Re-bake after changing cl_synth, cl_soundbank, sh_presets or the car list.
   `node bake.js --electric` re-bakes only the electric motors + env bank (~15 s) and keeps every other entry and folder:
   only for changes that can't touch other engines (it fails if any other engine's sound key is missing from the manifest).
+  `node bake.js --changed` bakes only engines whose sound key isn't in the manifest (a new or retuned preset/car) and keeps every
+  other entry, folder and the env bank (a sh_presets edit changes the synth version hash, so a full bake would rename every folder:
+  a full re-download for players). Not after cl_synth / cl_soundbank changes.
   `node bake.js --dry` renders everything and writes nothing, printing each engine's band levels as played (`bank.levelReport`);
   `--out <dir> --only 3,7` writes those engines' WAVs and a manifest for just them to <dir> (dev/drive_demo plays them with
   `AE_SOUND=<dir>`, `AE_OUT` for its output: compare against recordings without touching the shipped bake).
@@ -517,6 +520,9 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   Preset-scope voice: a preset's own `character` (used when the car has none) and `muffle` (the car's silencer, over the economy one).
   Presets that used their layout's voice now have their own (v12na, v12t, v10l, v8x, v8s, v8xt, v8h, v6t, i6, i6t, i4s, i4t, i4h,
   boxer, f4air, r2t; not heard by the user yet); sl65, f12, w16, v10, v8flat, v6, v6odd, f6, f4, i3, i5t, r2, r3 keep the layout's.
+  V12 voices (the user's, Tone Studio, 2026-11): v12na "raw bellow" (modern Ferraris, Diablo, Murcielagos, Reventon, McLaren F1), v12r "deep rumble"
+  (silencer 0.6, tone 0.15, redline 6500, V8-strength low orders o1 0.18 / o05 0.26: Astons DBS/Rapide/V12 Vantage, Miura, Zonda C12, Ferrari 250 GT/GTO). Lower
+  resonances alone didn't help: the user still heard a scream, which is the firing rate and the filter opening up the revs.
   V8 voices: v8x heavy duty (trucks, work vehicles), v8m old muscle, v8p modern performance, v8r refined sedan. I4: i4/i4st sporty, i4w warm hatch (regular cars), i4q quiet hum (cheaper cars). `economyTuned` presets were tuned on an
   economy car, so economy cars keep their tone and gurgle (no x0.5, no gurgle 0).
   Engine ideas panel: `dev/tone_studio/candidates.json` lists sounds to audition before they reach sh_carlist (each is an ordinary edit of its

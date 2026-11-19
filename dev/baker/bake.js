@@ -14,6 +14,10 @@
     node bake.js --electric            re-bake only the electric motors and the shared env bank;
                                        every other engine keeps its entry and folder from the
                                        current manifest (only after changes to EV-only code)
+    node bake.js --changed             bake only the engines whose sound key is not in the current
+                                       manifest (a new or retuned preset / car); every other engine
+                                       and the env bank keep their entries and folders. Only when
+                                       the change can't touch the others (no cl_synth / cl_soundbank edit)
 
   Output (inside the addon):
     sound/audio_engine/<dir>/*.wav      one folder per engine (+ env_<hash>/ for road, wind, turbo)
@@ -48,6 +52,7 @@ const RATE = parseInt(arg('rate', '44100'), 10)
 const JOBS = parseInt(arg('jobs', String(Math.max(1, os.cpus().length - 1))), 10)
 const ONLY = arg('only', null)
 const ELECTRIC = process.argv.includes('--electric')
+const CHANGED = process.argv.includes('--changed')
 
 // the current manifest's engine entries by sound key (for --electric)
 function oldEntries() {
@@ -163,7 +168,7 @@ async function main() {
     return
   }
   console.log(`${n} stock engine families at ${RATE} Hz, synth version ${version}, ${JOBS} workers`)
-  let todo = items
+  let todo = items, keptEnv = null
   const entries = new Array(n + 1)
   if (ONLY) { const only = ONLY.split(',').map(Number); todo = items.filter((it) => only.includes(it.i)) }
   else if (ELECTRIC) {
@@ -187,6 +192,29 @@ async function main() {
       if (!keep.has(d)) fs.rmSync(path.join(SOUND_OUT, d), { recursive: true, force: true })
     }
     console.log(`--electric: baking ${todo.length} electric engines and the env bank, keeping ${keep.size} others`)
+  } else if (CHANGED) {
+    // engines already in the manifest (same sound key, folder there) stay as baked, the env bank too
+    const old = oldEntries()
+    const keep = new Set()
+    const env = fs.readFileSync(MANIFEST, 'utf8').match(/^E\.BAKED_ENV = \{$[\s\S]*?^\}$/m)
+    const envDir = env && (env[0].match(/^\tdir = "([^"]+)",$/m) || [])[1]
+    if (!envDir || !fs.existsSync(path.join(SOUND_OUT, envDir))) {
+      console.error('the env bank is not in the current bake: run a full bake')
+      process.exit(1)
+    }
+    keptEnv = env[0]
+    keep.add(envDir)
+    todo = []
+    for (const it of items) {
+      const text = old.get(it.key)
+      const dir = text && (text.match(/^		dir = "([^"]+)",$/m) || [])[1]
+      if (dir && fs.existsSync(path.join(SOUND_OUT, dir))) { entries[it.i] = text; keep.add(dir) } else todo.push(it)
+    }
+    // folders no engine uses any more go
+    if (!DRY) for (const d of fs.readdirSync(SOUND_OUT)) {
+      if (!keep.has(d)) fs.rmSync(path.join(SOUND_OUT, d), { recursive: true, force: true })
+    }
+    console.log(`--changed: baking ${todo.length} engines (${todo.map((it) => it.engine).join(', ')}), keeping ${keep.size - 1} others and the env bank`)
   } else if (!DRY && fs.existsSync(SOUND_OUT)) {
     // empty it rather than delete it (Windows refuses while anything has the folder open)
     for (const d of fs.readdirSync(SOUND_OUT)) fs.rmSync(path.join(SOUND_OUT, d), { recursive: true, force: true })
@@ -197,8 +225,9 @@ async function main() {
   const t0 = Date.now()
   await new Promise((resolve) => {
     let live = 0
-    const workers = Math.min(JOBS, queue.length + (ONLY || DRY ? 0 : 1))
-    let envSent = !!(ONLY || DRY)
+    const workers = Math.min(JOBS, queue.length + (ONLY || DRY || CHANGED ? 0 : 1))
+    let envSent = !!(ONLY || DRY || CHANGED)
+    if (workers === 0) return resolve()   // nothing to bake (--changed after a car only moved to a baked engine)
     for (let w = 0; w < workers; w++) {
       const cp = fork(__filename, ['--worker', '--rate', String(RATE), ...(DRY ? ['--dry'] : []), '--out', SOUND_OUT], { env: { ...process.env, BAKE_VERSION: version } })
       live++
@@ -228,7 +257,7 @@ async function main() {
   if ((ONLY && !OUT_DIR) || failed || DRY) { console.log('manifest not written'); process.exit(failed ? 1 : 0) }
   const header = await call(`__result(BAKE.header(${JSON.stringify(version)}))`)
   const families = await call('__result(BAKE.familyEntry())')
-  const body = [header + (envEntry || ''), families + 'E.BAKED = {', ...entries.slice(1).filter(Boolean), '}', ''].join('\n')
+  const body = [header + (envEntry || keptEnv || ''), families + 'E.BAKED = {', ...entries.slice(1).filter(Boolean), '}', ''].join('\n')
   fs.writeFileSync(MANIFEST, body)
   console.log('wrote', path.relative(ADDON, MANIFEST))
 }
