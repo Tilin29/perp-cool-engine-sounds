@@ -284,7 +284,14 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     (throttle cut up to 90%, front tyres scrubbing across the path). `audioScriptParams` stays the script's own; adds the
     PhysicsCollide callback (`audioImpactAt` on a velocity change over `impactSpeed` 120 in/s, not floor/ceiling normals: the model is off
     `impactHold` 0.35 s, eases back over `impactEase` 0.5). Tick: on driven cars, reads the physics, ground share from `GetWheelContactPoint`
-    (trace fallback), runs Control and applies it (`AddAngleVelocity` local z, `AddVelocity` along the right); controlShare 0 on spiked cars,
+    (trace fallback), runs Control and applies it (`AddAngleVelocity` local z, `AddVelocity` along the right; tried and reverted for the Furai
+    climbing walls: a wall check leaving pushes into walls out (scraping a wall should still slow the car) and the push laid flat (it
+    didn't help, and measured along the car's right but pushed flat, on cambered roads it never converged and dragged the car, a Mini
+    struggled up a forest hill).
+    Control's `forwardChange` only takes speed off (a held turn gains none), never adds it: keeping the speed both ways turned a slide's
+    (a wall's) velocity back along the nose at full speed, and scraping a wall the car kept its speed and climbed it. Obstructed
+    (`blockedYaw` 15 + `blockedShare` 0.5 x the turn under what was set last tick, `state.yawSet`): `blockedTime` 0.3 s of the gentle
+    yawFollow pull instead of the every-tick hold; controlShare 0 on spiked cars,
     `carConfig.stability == false`, or with the convar off. Every ~30 ms (every other tick at 66) an unreliable net `audio_engine_drive` to the
     driver: entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
     velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state (~60 bytes). No vehicle params set while

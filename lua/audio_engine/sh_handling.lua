@@ -88,6 +88,12 @@ local HANDLING_DEFAULTS = {
 	-- the tyres hold sideways this much more than the turn asks (x grip), so a held turn tracks
 	-- instead of drifting wide at the limit (the turn is held on its target every tick)
 	sideHold = 1.15,
+	-- obstructed: when the car turned less than it was set to last tick by over blockedYaw deg/s
+	-- (+ blockedShare of it), something solid holds it (a wall, a car): for blockedTime s the turn
+	-- only follows at yawFollow, as before the every-tick hold, instead of forcing it again
+	blockedYaw = 15,
+	blockedShare = 0.5,
+	blockedTime = 0.3,
 	-- turn floor (arcade, per car: CAR_HANDLING): the keys' full-lock turn never under turnFloor deg/s
 	-- at turnFloorSpeed, x (turnFloorSpeed / speed) ^ turnFloorPower elsewhere (still the lock's at
 	-- most). The tyres' grip alone gave the SLR ~26 deg/s at 80 mph (a 180 in 7 s); the user wanted a
@@ -230,7 +236,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	local fade = clamp((speed - settings.minSpeed) / settings.fadeSpeed, 0, 1)
 	if share <= 0 or fade <= 0 then
 		if fade <= 0 then state.drift = false end
-		state.yawTarget = nil
+		state.yawTarget, state.yawSet, state.blockedFor = nil, nil, nil
 		return 0, 0, 0, 0
 	end
 	share = share * fade
@@ -281,20 +287,37 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 		local eased = state.yawTarget or body.yawRate
 		eased = eased + (target - eased) * min(1, follow * deltaTime)
 		state.yawTarget = eased
-		yawChange = (eased - body.yawRate) * share
+		-- held against something (a wall: the front corner stopped every tick, slammed round again by
+		-- the next and the car climbed the wall, the user, on the Furai): back to following gently
+		local set = state.yawSet
+		if set and abs(body.yawRate - set) > settings.blockedYaw + settings.blockedShare * abs(set) then
+			state.blockedFor = settings.blockedTime
+		end
+		if (state.blockedFor or 0) > 0 then
+			state.blockedFor = state.blockedFor - deltaTime
+			state.yawTarget = body.yawRate + (eased - body.yawRate) * min(1, follow * deltaTime)
+			yawChange = (eased - body.yawRate) * min(1, follow * deltaTime) * share
+		else
+			yawChange = (eased - body.yawRate) * share
+		end
 	end
+	state.yawSet = (not (handbrake or state.drift)) and body.yawRate + yawChange or nil
 	-- (a handbrake slide or a drift lets the rear go: there the sideways speed goes towards 0)
 	local wantedSide = (handbrake or state.drift) and 0 or -0.5 * spec.wheelbase / INCH * (body.yawRate + yawChange) * RAD
 	local sideError = sideSpeed - wantedSide
 	local removed = min(abs(sideError), grip * GRAVITY_INCHES * deltaTime) * share
 	local sideChange = -sign(sideError) * removed
-	-- the speed kept: the sideways change only turns the velocity. Pushed along the car's right
-	-- alone, a held turn gained speed (the car travels a little into the turn of its nose, so each
-	-- tick's turn moved some of that into forward speed: the SLR circling from 20 mph was at 60
-	-- after 10 s, offline, with no throttle)
+	-- no speed gained: where the sideways change adds speed, as much comes off the nose's. Pushed
+	-- along the car's right alone, a held turn gained speed (the car travels a little into the turn
+	-- of its nose, so each tick's turn moved some of that into forward speed: the SLR circling from
+	-- 20 mph was at 60 after 10 s, offline, with no throttle). Never the other way: taking a slide
+	-- out costs its speed, as tyres scrub. (Keeping the speed both ways turned a slide's velocity
+	-- back along the nose at full speed: scraping a wall, the car was thrown back into it every
+	-- tick, kept its speed and climbed it, the user, on the Furai)
 	local newSide = sideSpeed + sideChange
 	local squared = forwardSpeed * forwardSpeed + sideSpeed * sideSpeed - newSide * newSide
 	local forwardChange = squared > 0 and sign(forwardSpeed) * sqrt(squared) - forwardSpeed or 0
+	if forwardChange * sign(forwardSpeed) > 0 then forwardChange = 0 end
 	return yawChange, sideChange, asked, forwardChange
 end
 
@@ -491,12 +514,14 @@ function Handling.Predict(base, commands, count, fraction, spec, learner, deltaT
 	local body = Handling.CopyBody(base, out)
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
+	-- (no walls in the prediction: never obstructed; the server's state carries the result)
+	state.yawSet, state.blockedFor = nil, nil
 	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime) end
 	if fraction > 0 then
 		local buttons = count > 0 and commands[count] or base.buttons or 0
-		local savedSteer, savedDrift, savedTarget = state.steer, state.drift, state.yawTarget
+		local savedSteer, savedDrift, savedTarget, savedSet, savedBlocked = state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor
 		step(body, state, buttons, spec, learner, base, deltaTime * fraction)
-		state.steer, state.drift, state.yawTarget = savedSteer, savedDrift, savedTarget
+		state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor = savedSteer, savedDrift, savedTarget, savedSet, savedBlocked
 	end
 	return body, state
 end
