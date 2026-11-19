@@ -65,7 +65,7 @@ EngineDebug.TUNABLES = {
 	{ "HANDLING", "sideHold", 1, 2, 2, "Sideways hold over the turn (x grip)" },
 	{ "HANDLING", "blockedYaw", 5, 60, 0, "Obstructed: turned this much (deg/s) under what was set" },
 	{ "HANDLING", "blockedTime", 0, 1, 2, "Obstructed: gentle follow for (s)" },
-	{ "HANDLING", "turnFloor", 0, 120, 0, "Turn floor: full lock at least (deg/s at the floor speed; cars without their own)" },
+	{ "HANDLING", "turnFloor", 0, 120, 0, "Turn floor: full lock at least (deg/s at the floor speed, every car)" },
 	{ "HANDLING", "turnFloorSpeed", 10, 80, 0, "Turn floor: at (m/s)" },
 	{ "HANDLING", "turnFloorPower", 0, 1.5, 2, "Turn floor: eases off as (speed ratio)^this" },
 	{ "HANDLING", "yawFollow", 1, 20, 1, "How firmly the rotation follows the steering (per s)" },
@@ -212,12 +212,18 @@ end
 
 -- the handling model's values tuned live (Global2 audio_dbg_handling) onto AudioEngine.HANDLING,
 -- on the clients too: their prediction runs the same model as the server
-EngineDebug.HANDLING_DEFAULT = EngineDebug.HANDLING_DEFAULT or table.Copy(AudioEngine.HANDLING or {})
-local lastGlobalHandling
+-- (the file's values: sh_handling.lua's own, renewed on every load of it. This was a copy taken when
+-- the debug module first loaded, kept over refreshes: each refresh put every value back to it, and a
+-- changed default (the turn floor) never reached a running server)
+EngineDebug.HANDLING_DEFAULT = AudioEngine.HANDLING_DEFAULTS or {}
+local lastGlobalHandling, lastDefaults
 function EngineDebug.FollowGlobalHandling()
 	local globalHandling = GetGlobal2String("audio_dbg_handling", "")
-	if globalHandling == lastGlobalHandling then return end
-	lastGlobalHandling = globalHandling
+	local defaults = AudioEngine.HANDLING_DEFAULTS or EngineDebug.HANDLING_DEFAULT
+	-- (again after sh_handling.lua reloaded: it set the file's values, the tuned ones go back on)
+	if globalHandling == lastGlobalHandling and defaults == lastDefaults then return end
+	lastGlobalHandling, lastDefaults = globalHandling, defaults
+	EngineDebug.HANDLING_DEFAULT = defaults
 	if not AudioEngine.HANDLING then return end
 	for key, value in pairs(EngineDebug.HANDLING_DEFAULT) do AudioEngine.HANDLING[key] = value end
 	for key, value in string.gmatch(globalHandling, "([%w_]+)=([^,]+)") do

@@ -256,7 +256,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `grip` g towards a rolling car's (the rear axle along its wheels: the middle moves into the turn at wheelbase/2 x yaw rate; slip
     angles are the rear axle's): held at 0 it set the rear tyres across their path, Source's tyres fought the model and W-held turns bled
     speed, as the old sv_stability's turn-in help / side grip did (both were off there for it); 0 in a handbrake slide or drift.
-    The car's speed is never changed (no launching): the sideways change comes with the forward one that keeps it. Handbrake (Space, forward): grip x0.35, rotation x1.6,
+    The car's speed is never raised (no launching). Handbrake (Space, forward): grip x0.35, rotation x1.6,
     follow 2/s; over `driftMinSpeed` 7 m/s starts a drift that lasts while the slip angle > `driftHold` 10 (grip x0.6, follow 2.5);
     past `spinAngle` 70 it's caught. Under `minSpeed` 1.5 m/s (+ `fadeSpeed` 3) Source alone. `AudioEngine.HANDLING` (debug-tunable, also
     sent to clients: Global2 `audio_dbg_handling`), per car `AudioEngine.CAR_HANDLING[name]` (sh_carlist: CAR_EMOTION grip 1.3, ECONOMY 1.05,
@@ -266,12 +266,17 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     by 30 (the user: "instantly stiff at 25 mph"); full lock now 85 deg/s at 25 mph easing to 51 at 40, 28 at 60, unchanged from 80. `sideHold`
     1.15: sideways held that much over the turn (it's held on its target every tick, so at the limit it drifted wide). Source's DegreesFast
     is now fitted to the model's turn at FastCarSpeed x1.1 + 0.5 (at most DegreesSlow; was at most the script's DegreesFast).
-    `turnFloor` (per car, CAR_EMOTION 53; `Handling.TurnLimit`): the full-lock turn at least turnFloor deg/s at `turnFloorSpeed` 36 m/s,
+    `turnFloor` (every car 53, AudioEngine.HANDLING: per car it left lower tiers turning badly at 50 mph, the user: the turn shouldn't follow
+    a car's class; `Handling.TurnLimit`): the full-lock turn at least turnFloor deg/s at `turnFloorSpeed` 36 m/s,
     x (that / speed)^`turnFloorPower` 0.7 elsewhere (0.5 left 50-60 mph short) (the user: the SLR should do a tight 180 at 80 mph; tyres alone gave 26 deg/s, a 180 in 7 s;
     now 3.9 s, 2.8 at 40 mph), the sideways grip raised to cover it. Control also returns `forwardChange` (4th): the sideways change only
     turns the velocity, the speed is kept (pushed along the right alone, a held turn gained speed: offline the SLR circling from 20 mph
-    reached 60 in 10 s), read through `Handling.SettingsFor` (a live proxy: the car's CAR_HANDLING entry, then HANDLING, read on every access; it copied the
-    entry once, so cars spawned before a Lua refresh kept old values: the SLR's turn floor never arrived). Also: `Integrate` (prediction: gravity along the ground,
+    reached 60 in 10 s), read through `Handling.SettingsFor` (HANDLING is the same table over a Lua refresh, set to the file's values on every load, the debug
+    module putting tuned values back on top: it follows `AudioEngine.HANDLING_DEFAULTS`; it kept its own copy from its first load and put every
+    value back to it on each refresh, so a changed default never reached a running server, the SRT-8's turn floor; CAR_HANDLING is built anew
+    on every load; a live proxy: the car's CAR_HANDLING entry, then HANDLING, read on every access; it copied the
+    entry once, so cars spawned before a Lua refresh kept old values: the SLR's turn floor never arrived). Also: `Integrate` (prediction: gravity along the ground, on its wheels no speed along the car's up carried on (a bump's kick drew the car
+    bobbing over rough ground; other cars' lead too, cl_handling),
     learned acceleration along the nose, rotation about up; velocity not turned), the learner (`NewLearner`/`Learn`/`LearnedAcceleration`:
     per `DriveMode` (coast, throttle, brake, reverse, handbrake, limited, idle) x 2.5 m/s bins, starts from power to weight `audio_pwr` and
     `audio_vmax`), `Predict` (replay: integrate then control, the server's order), the smoother (`SmootherAbsorb`: a correction kept as

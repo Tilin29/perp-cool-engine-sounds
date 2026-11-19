@@ -482,6 +482,9 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 			local travel = motion.velocity * carLead
 			travel:Rotate(Angle(0, turn * 0.5, 0))           -- along the arc it's turning on
 			local position, angles = vehicle:GetPos(), vehicle:GetAngles()
+			-- (along the ground only: its bumps carried over the lead made it bob, as your own did)
+			local up = vehicle:GetUp()
+			travel = travel - up * travel:Dot(up)
 			local toPosition = position + travel
 			local spec = specOf(vehicle)
 			local size = sizeOf(vehicle, spec)
