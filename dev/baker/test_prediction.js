@@ -93,8 +93,8 @@ const PING = Number(process.argv[2] || 150)
       local mode = H.DriveMode(buttons, forward, true, 0)
       H.Integrate(body, spec, sourceAcceleration(buttons, forward), DT, H.STOPPING[mode])
       -- then the handling model, as sv_handling.lua runs it
-      local yawChange, sideChange = H.Control(body, server.state, buttons, spec, DT)
-      H.ApplyControl(body, spec, yawChange, sideChange)
+      local yawChange, sideChange, _, forwardChange = H.Control(body, server.state, buttons, spec, DT)
+      H.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
     end
 
     -- the network

@@ -29,11 +29,17 @@ local AudioEngine = AUDIO_ENGINE
 local HU_PER_MPH = 17.6   -- GetVehicleParams speeds are inches/s; SetVehicleParams takes mph
 local SPEED_KEYS = { "maxSpeed", "maxRevSpeed", "boostMaxSpeed" }
 AudioEngine.HU_PER_MPH = HU_PER_MPH
+local MPH_TO_METRES = 0.44704   -- m/s per mph
 
 -- p is a table as GetVehicleParams returns it (speeds in its units). Sets it on the car, giving
 -- SetVehicleParams the speeds it wants, and checks the unit took.
 function AudioEngine.SetParams(vehicle, params)
 	params = table.Copy(params)
+	-- Source's wheels over FastCarSpeed matched to the model (matchSteering, below)
+	local steerOverride = vehicle.audioSteerOverride
+	if steerOverride and istable(params.steering) then
+		params.steering.degreesFast, params.steering.speedFast = steerOverride.degreesFast, steerOverride.speedFast
+	end
 	for _, speedKey in ipairs(SPEED_KEYS) do
 		if params.engine and params.engine[speedKey] then params.engine[speedKey] = params.engine[speedKey] / HU_PER_MPH end
 	end
@@ -174,7 +180,7 @@ end
 	    so a car couldn't pull through a corner. Off: the throttle is the driver's.
 	  * Source turns the wheels to degreesFast (PERP: ~11) at speed, where the model's grip-capped turn
 	    is only a few degrees (25 m/s: ~3): the front tyres stood across the car's path and scrubbed
-	    it down like a brake. degreesFast becomes the model's angle at STEER_FIT_SPEED, FastCarSpeed
+	    it down like a brake. degreesFast becomes the model's angle at the script's FastCarSpeed
 	    (35 mph on nearly every PERP script), where Source's line from degreesSlow (at a standstill)
 	    reaches it and stays. Fitted at 25 m/s instead (~3 deg), Source held 3 deg from 35 mph on
 	    where the model asks ~7: its front tyres pushed the car straight, and with the throttle on
@@ -183,7 +189,9 @@ end
 	    degreesSlow (parking) is kept.
 	Changes `params` (GetVehicleParams layout) and returns true if the model runs on this car.
 ]]
-local STEER_FIT_SPEED = 35 * 0.44704   -- m/s: FastCarSpeed
+local STEER_FIT_MPH = 35   -- FastCarSpeed when a script has none (params: mph, as Source compares it)
+-- Source's wheels point this much past the model's turn (x share + degrees): never less than it
+local STEER_MATCH_SHARE, STEER_MATCH_EXTRA = 1.1, 0.5
 
 local function steerForModel(vehicle, params)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)
@@ -194,7 +202,12 @@ local function steerForModel(vehicle, params)
 	setValue(steering, "turnThrottleReduceFast", 0)
 	if steering.degreesFast then
 		local spec = Handling.SpecFor(vehicle)
-		steering.degreesFast = math.min(steering.degreesFast, Handling.TurnAngle(spec.settings, spec.wheelbase, STEER_FIT_SPEED))
+		-- (the model's turn there, a touch more as over it (matchSteering); at most the script's lock.
+		-- It was at most the script's DegreesFast: with corner grip the model asks more at 35 mph than
+		-- some scripts give, and Source's front tyres pushed those cars straight)
+		local fitMph = (steering.speedFast or 0) > 0 and steering.speedFast or STEER_FIT_MPH
+		local wanted = Handling.TurnAngle(spec.settings, spec.wheelbase, fitMph * MPH_TO_METRES) * STEER_MATCH_SHARE + STEER_MATCH_EXTRA
+		steering.degreesFast = math.min(steering.degreesSlow or wanted, wanted)
 	end
 	return true
 end
@@ -304,6 +317,7 @@ local function sendState(vehicle, driver, body, state, buttons, impact)
 	net.WriteFloat(angles.p) net.WriteFloat(angles.y) net.WriteFloat(angles.r)
 	net.WriteFloat(body.vx) net.WriteFloat(body.vy) net.WriteFloat(body.vz)
 	net.WriteFloat(body.yawRate)
+	net.WriteFloat(state.yawTarget or body.yawRate)   -- the eased turn the model holds the car on
 	net.WriteInt(math.Round(state.steer * 127), 8)
 	net.WriteBool(state.drift)
 	net.WriteBool(vehicle.audioDrivable == true)
@@ -314,6 +328,76 @@ local function sendState(vehicle, driver, body, state, buttons, impact)
 	net.WriteUInt(vehicle.audioLimiterState or 0, 2)
 	net.Send(driver)
 end
+
+--[[
+	Source's front wheels over FastCarSpeed, matched to the model's turn. Source steers them on a
+	straight line from DegreesSlow at SlowCarSpeed to DegreesFast at FastCarSpeed (both mph: Source
+	compares them with the car's speed in mph) and holds DegreesFast over it. DegreesFast is fitted to
+	the model at FastCarSpeed (steerForModel), but the model's grip-capped turn keeps shrinking with
+	speed (~1.2 deg at 112 mph): the front tyres stood ~7 deg across the car's path and braked fast
+	cars in a turn (the user, after downforce: "slows down too much when turning").
+	So over FastCarSpeed the car's params get DegreesFast = the model's angle at its speed
+	(x STEER_MATCH_SHARE + STEER_MATCH_EXTRA: never less than the model, as the fit; at most
+	DegreesSlow) and FastCarSpeed = that speed: Source's line then reaches that angle
+	there and holds it. DegreesSlow and everything under FastCarSpeed stay the script's own.
+	Re-sent (ApplyPerformance, the whole params: AudioEngine.SetParams puts vehicle.audioSteerOverride
+	on them) every STEER_MATCH_STEP_MPH / STEER_MATCH_STEP_DEGREES; back under FastCarSpeed (with
+	STEER_MATCH_HYSTERESIS_MPH), getting out or the model off: the plain params again.
+	(SetSteeringDegrees, tried first, sets DegreesSlow too: Source draws the wheels' turn as a share of
+	DegreesSlow, so they showed full lock at any speed, and read as in/s the line was wrong everywhere.)
+]]
+local STEER_MATCH_STEP_MPH, STEER_MATCH_STEP_DEGREES, STEER_MATCH_HYSTERESIS_MPH = 2, 0.2, 1
+
+-- the steering override for a car at `mph` ({ degreesFast, speedFast } or nil = its own line):
+-- `steering` = its base params' steering (fitted), `spec` = Handling.SpecFor
+function AudioEngine.MatchedSteering(steering, spec, mph)
+	local fastSpeed = steering.speedFast or 0
+	if fastSpeed <= 0 or not steering.degreesFast or mph <= fastSpeed then return nil end
+	local angle = Handling.TurnAngle(spec.settings, spec.wheelbase, mph * MPH_TO_METRES) * STEER_MATCH_SHARE + STEER_MATCH_EXTRA
+	return { degreesFast = math.min(steering.degreesSlow or angle, angle), speedFast = mph }
+end
+
+-- the wheel angle Source steers to at `mph` with full lock (its line: RemapValClamped)
+function AudioEngine.SourceSteerAngle(steering, mph)
+	local slow, fast = steering.degreesSlow or 0, steering.degreesFast or steering.degreesSlow or 0
+	local speedSlow, speedFast = steering.speedSlow or 0, steering.speedFast or 0
+	if speedFast <= speedSlow then return mph < speedSlow and slow or fast end
+	local share = math.max(0, math.min(1, (mph - speedSlow) / (speedFast - speedSlow)))
+	return slow + (fast - slow) * share
+end
+
+local function reapplyParams(vehicle)
+	if AudioEngine.ApplyPerformance then
+		AudioEngine.ApplyPerformance(vehicle, AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", "")))
+	elseif vehicle.audioBase then
+		AudioEngine.SetParams(vehicle, vehicle.audioBase)
+	end
+end
+
+local function clearSteering(vehicle)
+	if not vehicle.audioSteerOverride then return end
+	vehicle.audioSteerOverride = nil
+	reapplyParams(vehicle)
+end
+
+local function matchSteering(vehicle, spec, velocity, modelHere)
+	local steering = vehicle.audioBase and vehicle.audioBase.steering
+	if not modelHere or not istable(steering) then return clearSteering(vehicle) end
+	local mph = velocity:Length() / HU_PER_MPH
+	local current = vehicle.audioSteerOverride
+	-- (hysteresis: on over FastCarSpeed + 1 mph, off under it)
+	local wanted = AudioEngine.MatchedSteering(steering, spec, current and mph or mph - STEER_MATCH_HYSTERESIS_MPH)
+	if wanted and not current then wanted.speedFast = mph end
+	if not wanted then return clearSteering(vehicle) end
+	if current and math.abs(current.speedFast - wanted.speedFast) < STEER_MATCH_STEP_MPH
+		and math.abs(current.degreesFast - wanted.degreesFast) < STEER_MATCH_STEP_DEGREES then return end
+	vehicle.audioSteerOverride = wanted
+	reapplyParams(vehicle)
+end
+
+hook.Add("PlayerLeaveVehicle", "audio_engine_handling_steer", function(_, vehicle)
+	if IsValid(vehicle) then clearSteering(vehicle) end
+end)
 
 local tickCount = 0
 local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
@@ -346,15 +430,18 @@ local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
 	local modelHere = modelOn and modelAllowed(vehicle, carConfig)
 	body.controlShare = modelHere and impactShare or 0
 
+	matchSteering(vehicle, spec, velocity, modelHere)
 	local buttons = Handling.ButtonsFrom(keyDown, driver)
-	local yawChange, sideChange, asked = Handling.Control(body, state, buttons, spec, deltaTime)
+	local yawChange, sideChange, asked, forwardChange = Handling.Control(body, state, buttons, spec, deltaTime)
+	forwardChange = forwardChange or 0
 	if yawChange ~= 0 then physics:AddAngleVelocity(Vector(0, 0, yawChange)) end
-	if sideChange ~= 0 then
-		local _, _, _, rightX, rightY, rightZ = Handling.NoseOf(body, spec)
-		physics:AddVelocity(Vector(rightX * sideChange, rightY * sideChange, rightZ * sideChange))
+	if sideChange ~= 0 or forwardChange ~= 0 then
+		local noseX, noseY, noseZ, rightX, rightY, rightZ = Handling.NoseOf(body, spec)
+		physics:AddVelocity(Vector(rightX * sideChange + noseX * forwardChange, rightY * sideChange + noseY * forwardChange,
+			rightZ * sideChange + noseZ * forwardChange))
 	end
 	-- (the state sent is the one after this tick's model, as the client's replay expects)
-	Handling.ApplyControl(body, spec, yawChange, sideChange)
+	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 	vehicle.audioLogAsked = asked
 	if sendNow then sendState(vehicle, driver, body, state, buttons, impactShare < 1) end
 end

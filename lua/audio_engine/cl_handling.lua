@@ -153,6 +153,7 @@ net.Receive("audio_engine_drive", function()
 	Handling.SetAxes(state, Angle(pitch, yaw, roll))
 	state.vx, state.vy, state.vz = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
 	state.yawRate = net.ReadFloat()
+	state.yawTarget = net.ReadFloat()
 	state.steer = net.ReadInt(8) / 127
 	state.drift, state.driving, state.impact = net.ReadBool(), net.ReadBool(), net.ReadBool()
 	state.groundShare, state.controlShare = net.ReadUInt(7) / 100, net.ReadUInt(7) / 100

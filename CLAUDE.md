@@ -85,7 +85,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   arcade automatic driven by RPM thresholds (W/S/Space are on/off keys), torque converter, turbo boost and BOV event.
   Upshift point follows the car's acceleration (`upRpm` pulling hard .. `lazyUpRpm` creeping), so power-limited cars reach top gear.
   Past `upRpm` it changes up even inside the post-shift hold (close-geared hard pullers like the M5 E60 hit the in-gear limiter).
-  Neutral (Space+W rev) latches until W or S is pressed. The limiter loop (cl_engine) plays only while W is held near redline.
+  Neutral (Space+W rev) latches until W or S is pressed. Space drops into it only after `Drivetrain.NEUTRAL_HOLD` 0.35 s at a standstill
+  (tapping Space with W held swung the revs 3000 <-> 7000 twice a second: the user's "alien noise"; `DRIVE=spam` in dev/drive_demo, SPAM_W / SPAM_SPACE). The limiter loop (cl_engine) plays only while W is held near redline.
   Free-revving uses `Drivetrain.REV` { rise, fall } 500/500 (`Drivetrain.FreeSpinRate`; per car `config.revRise/revFall` from `AudioEngine.CAR_REV`), not
   `Drivetrain.TMAX` 320, which stays for the synth's baked limiter loops and start tails (changing TMAX needs a re-bake). 500 falls from 90% to near idle in ~2.5 s (320: ~3.8 s).
   A car's own gearing (`AudioEngine.CAR_GEARING[name]` -> `car.gearing`, sh_presets `AudioEngine.ApplyGearing`, only with `fit > 0`): per gear `{ mph, rpm }` where it
@@ -248,16 +249,29 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   - `sh_handling.lua` (`AudioEngine.Handling`): the model, plain Lua on numbers (no Vector/Angle: no allocations, and it runs offline).
     Bodies { px.. position, vx.. velocity (in/s), ax.. model x axis, bx.. y (left), cx.. z (up), yawRate (deg/s, left +), groundShare,
     controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 4.5 / `steerReturn` 6 / `steerReverse` 9 per s), the yaw rate
-    follows (`yawFollow` 8/s) a bicycle-model target (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 30 m/s, wheelbase from the
+    follows a bicycle-model target (on grip: the target eased at `yawFollow` 8/s and the car put on it every tick, `state.yawTarget`, sent to the
+    driver; closing 12% of the gap a tick, Source's tyres held it well short: "barely turns" at 40-70 mph; not yet run in game; handbrake/drift:
+    drawn at their follow rates) (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 30 m/s, wheelbase from the
     attachments, `AudioEngine.CarGeometry`, moved here from sv_stability) capped at `grip` x g / speed, and sideways speed goes at up to
     `grip` g towards a rolling car's (the rear axle along its wheels: the middle moves into the turn at wheelbase/2 x yaw rate; slip
     angles are the rear axle's): held at 0 it set the rear tyres across their path, Source's tyres fought the model and W-held turns bled
     speed, as the old sv_stability's turn-in help / side grip did (both were off there for it); 0 in a handbrake slide or drift.
-    The speed along the nose is never touched (no launching). Handbrake (Space, forward): grip x0.35, rotation x1.6,
+    The car's speed is never changed (no launching): the sideways change comes with the forward one that keeps it. Handbrake (Space, forward): grip x0.35, rotation x1.6,
     follow 2/s; over `driftMinSpeed` 7 m/s starts a drift that lasts while the slip angle > `driftHold` 10 (grip x0.6, follow 2.5);
     past `spinAngle` 70 it's caught. Under `minSpeed` 1.5 m/s (+ `fadeSpeed` 3) Source alone. `AudioEngine.HANDLING` (debug-tunable, also
     sent to clients: Global2 `audio_dbg_handling`), per car `AudioEngine.CAR_HANDLING[name]` (sh_carlist: CAR_EMOTION grip 1.3, ECONOMY 1.05,
-    others 1.15), read through `Handling.SettingsFor` (metatable over HANDLING). Also: `Integrate` (prediction: gravity along the ground,
+    others 1.15; CAR_EMOTION also `downforce` 0.5: grip x (1 + downforce x (speed / `downforceSpeed` 50 m/s)^2, capped at 1),
+    `Handling.GripAt`, the user asked fast cars to turn more at speed: 15 -> 22 deg/s at 50 m/s); every car: `cornerGrip` 0.5 (x grip on the keys' turn, not slides: `Handling.SlideGripAt`), all of it to
+    `cornerGripFrom` 11 m/s, none from `cornerGripTo` 36 (smoothstep): the turn went from the lock's to grip's at ~20 mph and the circle doubled
+    by 30 (the user: "instantly stiff at 25 mph"); full lock now 85 deg/s at 25 mph easing to 51 at 40, 28 at 60, unchanged from 80. `sideHold`
+    1.15: sideways held that much over the turn (it's held on its target every tick, so at the limit it drifted wide). Source's DegreesFast
+    is now fitted to the model's turn at FastCarSpeed x1.1 + 0.5 (at most DegreesSlow; was at most the script's DegreesFast).
+    `turnFloor` (per car, CAR_EMOTION 53; `Handling.TurnLimit`): the full-lock turn at least turnFloor deg/s at `turnFloorSpeed` 36 m/s,
+    x (that / speed)^`turnFloorPower` 0.7 elsewhere (0.5 left 50-60 mph short) (the user: the SLR should do a tight 180 at 80 mph; tyres alone gave 26 deg/s, a 180 in 7 s;
+    now 3.9 s, 2.8 at 40 mph), the sideways grip raised to cover it. Control also returns `forwardChange` (4th): the sideways change only
+    turns the velocity, the speed is kept (pushed along the right alone, a held turn gained speed: offline the SLR circling from 20 mph
+    reached 60 in 10 s), read through `Handling.SettingsFor` (a live proxy: the car's CAR_HANDLING entry, then HANDLING, read on every access; it copied the
+    entry once, so cars spawned before a Lua refresh kept old values: the SLR's turn floor never arrived). Also: `Integrate` (prediction: gravity along the ground,
     learned acceleration along the nose, rotation about up; velocity not turned), the learner (`NewLearner`/`Learn`/`LearnedAcceleration`:
     per `DriveMode` (coast, throttle, brake, reverse, handbrake, limited, idle) x 2.5 m/s bins, starts from power to weight `audio_pwr` and
     `audio_vmax`), `Predict` (replay: integrate then control, the server's order), the smoother (`SmootherAbsorb`: a correction kept as
@@ -274,7 +288,15 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `carConfig.stability == false`, or with the convar off. Every ~30 ms (every other tick at 66) an unreliable net `audio_engine_drive` to the
     driver: entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
     velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state (~60 bytes). No vehicle params set while
-    driving. `AudioEngine.RebaseHandling(veh[, params])` rebuilds `vehicle.audioBase` from `vehicle.audioScriptParams`, refreshes NW2
+    driving, except Source's wheels over FastCarSpeed (`matchSteering`, `AudioEngine.MatchedSteering`): the params get DegreesFast = the model's
+    turn x1.1 + 0.5 deg at the car's speed and FastCarSpeed = that speed (`vehicle.audioSteerOverride`, put on by `AudioEngine.SetParams`,
+    re-sent through ApplyPerformance every 2 mph / 0.2 deg; off under FastCarSpeed, getting out, model off). Source holds DegreesFast (~8)
+    over 35 mph, where the model's turn shrinks (~1.2 deg at 112 mph): the front tyres braked fast cars in turns (the user, after downforce).
+    The steering params' speeds are mph (Source compares them with the speed in mph). `SetSteeringDegrees` was tried first: it sets
+    DegreesSlow too, and Source draws the wheels' turn as a share of DegreesSlow (full lock shown at any speed; the user: the wheels
+    turned way too much, slow cars couldn't turn). Simulated on all 175 scripts: under FastCarSpeed identical, over it never under the
+    model, excess over it at most 1.2 deg (3 between updates; was up to 17). Not yet run in game. Known, old: scripts with DegreesSlow
+    under the model's lockSlow 32 (1970 Challenger 26, Carrera GT 28, ...) steer a few degrees under the model at parking speeds. `AudioEngine.RebaseHandling(veh[, params])` rebuilds `vehicle.audioBase` from `vehicle.audioScriptParams`, refreshes NW2
     `audio_vmax`/`audio_pwr` (`AudioEngine.RefreshCarStats`, sv_engine) and re-applies performance. `audio_engine_accel_log`, `audio_engine_handling_info`.
   - `cl_handling.lua`: the driver's prediction (`audio_engine_predict` 1; off in single player / for a listen host). Client `StartCommand`
     keeps each command's buttons by number (skip number 0, it happens); each frame, from the newest state, `Predict` through the commands

@@ -140,7 +140,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   check(near(c.cz, -1), 'centre of mass as PERP has it')
   check(near(c.psa, 150), 'handbrake slide as the PERP script has it')
   check(near(c.deg, 38.5), 'parking lock from the PERP script')
-  check(c.dfast > 5 && c.dfast < 10, "Source's wheel angle at speed fitted to the model's turn at 35 mph (PERP has 11)")
+  check(c.dfast > 5 && c.dfast < c.deg, "Source's wheel angle at speed fitted to the model's turn at 35 mph (+10% + 0.5), under its lock")
 
   // 2. SL65 on its own PERP script (the server): untouched
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/sl65amg.txt", SL65))`)
@@ -148,7 +148,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   console.log('SL65 on its PERP script:  ', c)
   check(c.perp === 'false', 'on its own script: no PERP physics put on')
   check(near(c.hp, 260) && near(c.mph, 94) && near(c.bf, 0.5), 'its script untouched')
-  check(c.trf === 0 && c.dfast > 5 && c.dfast < 10, "but Source's steering fitted to the model")
+  check(c.trf === 0 && c.dfast > 5 && c.dfast < c.deg, "but Source's steering fitted to the model (under its lock)")
 
   // 3. spiked: nothing
   await L.doString(`__result(Spawn("models/tdmcars/sl65amg.mdl", "scripts/vehicles/tdmcars/spiked/sl65amg.txt", SL65))`)
@@ -170,8 +170,9 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
       local asked = 0
       for _ = 1, ticks do
         local yawChange, sideChange
-        yawChange, sideChange, asked = H.Control(body, state, buttons, SPEC, 1 / 66)
-        H.ApplyControl(body, SPEC, yawChange, sideChange)
+        local forwardChange
+        yawChange, sideChange, asked, forwardChange = H.Control(body, state, buttons, SPEC, 1 / 66)
+        H.ApplyControl(body, SPEC, yawChange, sideChange, forwardChange)
       end
       local nx, ny, nz, rx, ry, rz = H.NoseOf(body, SPEC)
       return body.yawRate, (body.vx * rx + body.vy * ry) * H.INCH, (body.vx * nx + body.vy * ny) * H.INCH, asked, state
@@ -184,7 +185,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     out[#out + 1] = yaw                                     -- 2 right: (-)
     local yaw30, _, _, asked30 = Run(Body(30), L, 120)
     out[#out + 1] = yaw30                                   -- 3 at 30 m/s, held
-    out[#out + 1] = math.deg(SPEC.settings.grip * 9.81 / 30) -- 4 the grip limit there
+    out[#out + 1] = math.deg(H.GripAt(SPEC.settings, 30) * 9.81 / 30) -- 4 the grip limit there
     local _, side, forward = Run(Body(20, 5), 0, 1)
     out[#out + 1] = side                                    -- 5 sideways after one tick (from 5 m/s)
     out[#out + 1] = forward                                 -- 6 forward after it (20 m/s)
@@ -200,19 +201,86 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     out[#out + 1] = H.SettingsFor("Bugatti Veyron 16.4").grip  -- 12
     out[#out + 1] = H.SettingsFor("Chevrolet Spark").grip      -- 13
     out[#out + 1] = H.SettingsFor("Ford Crown Victoria").grip  -- 14
+    -- downforce: a fast car's grip at 50 m/s and at 10 m/s, and the turn it holds at 50
+    local fast = H.SettingsFor("Bugatti Veyron 16.4")
+    out[#out + 1] = H.SlideGripAt(fast, 50)                    -- 15
+    out[#out + 1] = H.SlideGripAt(fast, 10)                    -- 16
+    out[#out + 1] = H.SlideGripAt(H.SettingsFor("Ford Crown Victoria"), 50)  -- 17
+    local saved = SPEC.settings
+    SPEC.settings = fast
+    out[#out + 1] = Run(Body(50), L, 200)                      -- 18 held at 50 m/s
+    SPEC.settings = saved
+    out[#out + 1] = H.GripAt(SPEC.settings, 20) * SPEC.settings.sideHold  -- 19 the sideways hold at 20 m/s
+    -- the keys' turn at full lock, 20 / 25 / 30 / 40 / 50 / 60 mph (deg/s): progressive, no cliff
+    for _, mph in ipairs({ 20, 25, 30, 40, 50, 60 }) do
+      out[#out + 1] = math.deg(math.min(mph * 0.44704 * math.tan(math.rad(H.Lock(SPEC.settings, mph * 0.44704))) / 2.7, H.GripAt(SPEC.settings, mph * 0.44704) * 9.81 / (mph * 0.44704)))
+    end
     __result(table.concat(out, "|"))`)
   const v = res.split('|').map(Number)
   console.log('model:', v.map((x) => +x.toFixed(3)).join(' | '))
   check(v[0] > 5, 'steering left turns the car left')
   check(v[1] < -5, 'steering right turns it right')
   check(v[2] > v[3] * 0.9 && v[2] <= v[3] * 1.001, `at 30 m/s the turn sits at the grip limit (${v[2].toFixed(1)} of ${v[3].toFixed(1)} deg/s)`)
-  check(near(v[4], 5 - 1.15 * 9.81 / 66, 0.01), 'a slide loses grip x g of sideways speed a second')
-  check(near(v[5], 20, 0.001), 'the speed along the nose is untouched')
+  check(near(v[4], 5 - v[18] * 9.81 / 66, 0.01), 'a slide loses grip x sideHold x g of sideways speed a second')
+  check(near(Math.hypot(v[5], v[4]), Math.hypot(20, 5), 0.001), 'the speed is kept: the sideways change only turns the velocity')
   check(v[6] > v[4] && v[6] < 5, 'the handbrake lets the rear go (less sideways grip)')
   check(near(v[7], 15, 0.001) && near(v[8], 5, 0.001), 'with the model off nothing changes')
   check(v[9] < -1, 'reversing, the steering turns the car the other way')
   check(near(v[10], 7, 0.001), 'parking speeds are left to Source')
   check(near(v[11], 1.3) && near(v[12], 1.05) && near(v[13], 1.15), 'grip: high-powered 1.3, economy 1.05, others 1.15')
+
+  // 4b. every way out of Control gives all four changes as numbers (the server adds them up: a nil
+  // fourth from the early exit, standing / in the air / model off, errored every tick)
+  await L.doString(`
+    local out = {}
+    for _, case in ipairs({ { 0.5, 1 }, { 20, 0 }, { 20, 1 } }) do
+      local results = { H.Control(Body(case[1], 0, 0, case[2]), { steer = 0, drift = false }, H.KEY_LEFT, SPEC, 1 / 66) }
+      local ok = #results == 4
+      for i = 1, 4 do ok = ok and type(results[i]) == "number" end
+      out[#out + 1] = ok and 1 or 0
+    end
+    __result(table.concat(out, "|"))`)
+  check(res === '1|1|1', `Control returns four numbers on every path (parked / model off / driving): ${res}`)
+
+  // 4c. a car's settings are read live: a value added to its CAR_HANDLING entry after the car took its
+  // settings (a Lua refresh on a running server) reaches it
+  await L.doString(`
+    local settings = H.SettingsFor("Mercedes McLaren SLR")
+    local before = settings.turnFloor
+    E.CAR_HANDLING["Mercedes McLaren SLR"].testValue = 42
+    local seen = settings.testValue
+    E.CAR_HANDLING["Mercedes McLaren SLR"].testValue = nil
+    __result(before .. "|" .. tostring(seen))`)
+  check(res === '53|42', `a car's settings follow CAR_HANDLING live (turn floor ${res.split('|')[0]}, added value ${res.split('|')[1]})`)
+
+  // 5. Source's front wheels over FastCarSpeed matched to the model's turn (sv_handling
+  // MatchedSteering / SourceSteerAngle; the params' speeds are mph): PERP's line 38 deg at a
+  // standstill to the fitted 8 at 35 mph, then held
+  await L.doString(`
+    local steering = { degreesSlow = 38, degreesFast = 8, speedSlow = 0, speedFast = 35 }
+    local spec = { settings = H.SettingsFor("Bugatti Veyron 16.4"), wheelbase = 2.7 }
+    local out = {}
+    for _, mph in ipairs({ 0, 10, 35, 67, 112 }) do
+      local o = E.MatchedSteering(steering, spec, mph)
+      out[#out + 1] = o and E.SourceSteerAngle({ degreesSlow = 38, speedSlow = 0, degreesFast = o.degreesFast, speedFast = o.speedFast }, mph)
+        or E.SourceSteerAngle(steering, mph)
+      out[#out + 1] = o and 1 or 0
+    end
+    out[#out + 1] = H.TurnAngle(spec.settings, spec.wheelbase, 112 * 0.44704)
+    __result(table.concat(out, "|"))`)
+  const st = res.split('|').map(Number)
+  console.log('steering matched (deg, override on, at 0 / 10 / 35 / 67 / 112 mph | model at 112):', st.map((x) => +x.toFixed(2)).join(' | '))
+  check(near(st[0], 38) && near(st[2], 38 - 30 * 10 / 35) && near(st[4], 8) && !st[1] && !st[3] && !st[5],
+    "up to FastCarSpeed: Source's own line, no override (the params' speeds are mph)")
+  check(st[7] && st[9] && st[6] < 8 && st[8] < st[6] && st[8] < st[10] * 1.1 + 0.5 + 1e-6, "over it: the wheels follow the model's turn down, not held at DegreesFast")
+  check(st[8] >= st[10], "never less than the model's turn")
+  check(near(v[14], 1.95) && near(v[15], 1.3 * 1.02) && near(v[16], 1.15), `downforce: high-powered 1.95 g at 50 m/s, ${v[15].toFixed(3)} at 10, others none`)
+  check(v[17] > 0.95 * Math.min(1.95 * 9.81 / 50 * 180 / Math.PI, 50 * Math.tan(5 * Math.PI / 180) / 2.6 * 180 / Math.PI) && v[17] > 1.4 * 1.3 * 9.81 / 50 * 180 / Math.PI,
+    `downforce: at 50 m/s a high-powered car turns ${v[17].toFixed(1)} deg/s (grip alone ${(1.3 * 9.81 / 50 * 180 / Math.PI).toFixed(1)})`)
+  const turns = v.slice(19, 25)
+  console.log('full-lock turn at 20/25/30/40/50/60 mph:', turns.map((x) => x.toFixed(1)).join(' | '))
+  check(turns[1] > turns[0] * 0.9 && turns.slice(1).every((x, i) => x < turns[i + 1 - 1] * 1.15 && (i === 0 || x < turns[i])) && turns[2] > turns[1] * 0.8,
+    'the turn eases off with speed, no cliff after the lock (20 -> 30 mph keeps over 80% a step)')
 
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
   process.exit(fail ? 1 : 0)
