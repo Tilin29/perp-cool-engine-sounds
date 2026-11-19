@@ -59,12 +59,17 @@ AudioEngine.GearPreset = gearPreset
 AudioEngine.ENGINE_PRESETS = {
 	{ id = "sl65",   name = "SL65 AMG · 6.0 V12 biturbo",               layout = "v12",     pitch = 1.00, tone = 0.40, idle = 700,  redline = 6000,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.15, gearbox = "amg5" },
 	-- V12 / flat-12 / W16
-	{ id = "v12na",  name = "V12",                                      layout = "v12",     pitch = 1.00, tone = 0.60, idle = 1000, redline = 8000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.25, popTone = 0.3,  gearbox = "seven",
-	  character = { f1 = 92, f2 = 500, f3 = 235, w = 0.82, o1 = 0.05, o05 = 0.05 } },
+	-- v12na "raw bellow", v12r "rumble" (deep, silenced: Aston, Miura, Zonda), both tuned in Tone Studio
+	{ id = "v12na",  name = "V12",                                      layout = "v12",     pitch = 0.95, tone = 0.55, idle = 1000, redline = 8000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.3,  popTone = 0.3,  gearbox = "seven",
+	  character = { f1 = 72, f2 = 380, f3 = 180, w = 0.98, o1 = 0.11, o05 = 0.12, intakeHz = 210 } },
+	{ id = "v12r",   name = "V12 · deep rumble",                        layout = "v12",     pitch = 0.86, tone = 0.15, idle = 1000, redline = 6500,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.45, popTone = 0.2,  gearbox = "seven",
+	  character = { f1 = 54, f2 = 250, f3 = 135, w = 1.22, o1 = 0.18, o05 = 0.26, intake = 0.6, intakeHz = 180, valvetrain = 0.25 }, muffle = 0.6 },
 	{ id = "v12t",   name = "V12 · turbo",                              layout = "v12",     pitch = 1.00, tone = 0.50, idle = 900,  redline = 8000,  realism = 1, turbo = true,  bov = true,  pops = 0.3,  gurgle = 0.25, popTone = 0.25, gearbox = "close",
 	  character = { f1 = 78, f2 = 360, f3 = 185, w = 1.0, o1 = 0.08, o05 = 0.08, intake = 0.8 } },
 	{ id = "f12",    name = "Flat-12 (180° V12)",                       layout = "flat12",  pitch = 1.00, tone = 0.60, idle = 1000, redline = 7200,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.3,  popTone = 0.3,  gearbox = "close" },
-	{ id = "w16",    name = "W16 · quad-turbo",                         layout = "w16",     pitch = 0.90, tone = 0.50, idle = 750,  redline = 6600,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.35, popTone = 0.2,  gearbox = "seven" },
+	-- the voice tuned on the Veyron 16.4 (Tone Studio)
+	{ id = "w16",    name = "W16 · quad-turbo",                         layout = "w16",     pitch = 0.90, tone = 0.40, idle = 750,  redline = 6600,  realism = 1, turbo = true,  bov = true,  pops = 0.1,  gurgle = 0.2,  popTone = 0.65, gearbox = "seven",
+	  character = { f1 = 66, f2 = 486, f3 = 224, w = 0.88, o1 = 0.23, o05 = 0.42 } },
 	-- V10
 	{ id = "v10",    name = "V10",                                      layout = "v10",     pitch = 1.00, tone = 0.65, idle = 950,  redline = 8500,  realism = 1, turbo = false, bov = false, pops = 0.5,  gurgle = 0.3,  popTone = 0.4,  gearbox = "close" },
 	{ id = "v10l",   name = "V10 · big-block (Viper, Ram SRT-10)",      layout = "v10",     pitch = 0.90, tone = 0.55, idle = 750,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.3,  gurgle = 0.45, popTone = 0.3,  gearbox = "road",
