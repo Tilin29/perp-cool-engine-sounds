@@ -22,6 +22,11 @@ AudioEngine.Debug = EngineDebug
 EngineDebug.debugConVar = CreateConVar("audio_engine_debug", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"1 = the Audio Engine debug tools (audio_engine_debug_menu, !enginedebug) for superadmins (default); 0 = off")
 
+-- the debug module's convars in audio_engine_settings
+hook.Add("audio_engine/settings", "audio_engine_debug", function(groups)
+	groups[#groups + 1] = { title = "Debug module", player = { "audio_engine_debug_overlay" }, server = { "audio_engine_debug" } }
+end)
+
 function EngineDebug.Enabled() return EngineDebug.debugConVar:GetBool() end
 
 function EngineDebug.Allowed(requester)

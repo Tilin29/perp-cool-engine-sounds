@@ -25,6 +25,13 @@ CarHorn.EXHAUSTED_NW = "horn_exhausted"
 CarHorn.LimitConVar = CreateConVar("car_horn_limit", "1", { FCVAR_ARCHIVE, FCVAR_REPLICATED },
 	"1 = a player's horn runs out of breath when overused (CAR_HORN.CONFIG.limit), 0 = no limit")
 
+-- the horn's convars in the engine's audio_engine_settings list (its generic hook; nothing happens without it)
+hook.Add("audio_engine/settings", "car_horn", function(groups)
+	groups[#groups + 1] = { title = "Car horn",
+		player = { "car_horn_volume", "car_horn_maxcars", "car_horn_doppler", "car_horn_key" },
+		server = { "car_horn_limit" } }
+end)
+
 -- with a vehicle: whether its horn has the limit (an `unlimited` horn, the police PA horn, never runs out)
 function CarHorn.Limited(vehicle)
 	if not CarHorn.LimitConVar:GetBool() then return false end
