@@ -16,6 +16,20 @@ local dopplerConVar = CreateClientConVar("audio_engine_police_doppler", "1", tru
 local toneKeyConVar = CreateClientConVar("police_siren_tonekey", PoliceSiren.CONFIG.keys.tone, true, false,
 	"Key that steps the police siren of the car you drive to the next tone (a key name such as q; none = off)")
 
+-- puts the siren's settings back to their defaults, printing what each one was
+concommand.Add("police_siren_reset_settings", function()
+	local changed = 0
+	local conVars = { volumeConVar, maxSirensConVar, dopplerConVar, toneKeyConVar }
+	for _, conVar in ipairs(conVars) do
+		if conVar:GetString() ~= conVar:GetDefault() then
+			print(string.format("  %s: %s -> %s", conVar:GetName(), conVar:GetString(), conVar:GetDefault()))
+			conVar:Revert()
+			changed = changed + 1
+		end
+	end
+	print(string.format("Police siren: %d setting(s) reset to default, %d already were", changed, #conVars - changed))
+end, nil, "Put every police siren setting back to its default, printing the old values")
+
 local LIST_REFRESH = 0.5
 -- a siren past the nearest police_siren_maxcars is let go (with its release); it comes back once it's
 -- SIREN_BUDGET_MARGIN places inside, so two cars at the edge don't take turns

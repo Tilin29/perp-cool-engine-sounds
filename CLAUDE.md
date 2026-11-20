@@ -208,6 +208,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     the gearbox's speed (`car.driveSpeed`) moves at most `SPEED_SLEW` 40 m/s2. Dividing by the capped frame dt made stutters read as several times the real speed
   - Doppler (`audio_engine_doppler`: 1 = default, real, 4 = maximum, four times real. The scale was 0.25 = real until the user asked for 1:
     clients with the old `audio_engine_doppler_moved` cookie get their saved value x4 once (`audio_engine_doppler_real1` cookie)), road/wind, turbo/BOV from the env bank, pops logic
+  - `audio_engine_reset_settings` (client): every engine player setting (`PLAYER_SETTINGS` in cl_engine: the client convars of cl_engine,
+    cl_hud, cl_handling, cl_soundbank, cl_police) back to its default, printing each changed one's old value; add a new client convar there.
+    The siren and horn have their own: `police_siren_reset_settings`, `car_horn_reset_settings`
   - pass-by swell (`audio_engine_passby`): other cars follow (5 m / distance)^curve down to 30 m (after the headroom; start/stop one-shots too), up to x2 at 2.5 m, all by speed
     (`pace` 5-30 m/s): curve 0.35 (-5.4 dB at 30 m) to 0.7 (-10.9 dB; steep on every car, slow ones stopped carrying), the part over 1 scales with pace and is held under a 0.95 peak;
     a car counts as 0.2 s of its speed closer (a 60 m/s pass is otherwise a blink); combustion cars at full pace are 5 dB down from the front, 3 dB up from behind (exhaust direction);
