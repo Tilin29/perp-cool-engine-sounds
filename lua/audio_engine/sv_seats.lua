@@ -203,7 +203,9 @@ end
 
 hook.Add("PlayerUse", "audio_engine_seats", function(player, entity)
 	if not seatsConVar:GetBool() or entity:GetClass() ~= "prop_vehicle_jeep" then return end
-	if (player.audioSeatUseAt or 0) > CurTime() then return end
+	-- (false, not nil: nil let Source's own use through, so E held on into the cooldown could put a
+	-- passenger who'd just got in or out into the free driver's seat)
+	if (player.audioSeatUseAt or 0) > CurTime() then return false end
 	local config = AudioEngine.GetCarConfig(entity)
 	if not config then return end
 	local seats = layout(entity, config)

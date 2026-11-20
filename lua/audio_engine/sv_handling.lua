@@ -307,7 +307,18 @@ end
 
 local function keyDown(player, key) return player:KeyDown(key) end
 
+--[[
+	Only a driver whose client runs the prediction needs the state (~2 KB/s each): not in single
+	player, not the listen server's host, not with audio_engine_predict 0 (a userinfo convar, so the
+	server can read it). cl_handling turns itself off in the same cases.
+]]
+local function wantsState(driver)
+	if game.SinglePlayer() or driver:IsListenServerHost() then return false end
+	return driver:GetInfoNum("audio_engine_predict", 1) ~= 0
+end
+
 local function sendState(vehicle, driver, body, state, buttons, impact)
+	if not wantsState(driver) then return end
 	net.Start("audio_engine_drive", true)
 	net.WriteUInt(vehicle:EntIndex(), 13)
 	net.WriteUInt((driver.audioCommandNumber or 0) % 4294967296, 32)
@@ -453,7 +464,9 @@ hook.Add("Tick", "audio_engine_handling", function()
 	tickCount = tickCount + 1
 	local sendNow = tickCount % sendEvery == 0
 	local modelOn, now = driveModelConVar:GetBool(), CurTime()
-	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
+	-- (the cars someone drives, kept by sv_engine's Think: a tick late at most getting in, and
+	-- the driver is checked again here)
+	for vehicle in pairs(AudioEngine.DrivenVehicles or AudioEngine.TrackedVehicles or {}) do
 		if IsValid(vehicle) then
 			local driver = vehicle:GetDriver()
 			if IsValid(driver) then drive(vehicle, driver, modelOn, deltaTime, now, sendNow) end

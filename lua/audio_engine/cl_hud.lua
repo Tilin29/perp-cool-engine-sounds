@@ -53,29 +53,37 @@ end
 ---------------------------------------------------------------------------
 -- drawing helpers
 ---------------------------------------------------------------------------
--- draw.RoundedBox / text change the bound texture, so every polygon resets it first;
--- otherwise the needle and dial draw with a corner texture and vanish
-local function poly(points, color)
-	draw.NoTexture()
-	surface.SetDrawColor(color)
-	surface.DrawPoly(points)
-	-- draw the reversed winding too, so either orientation shows
-	local reversed = {}
-	for i = #points, 1, -1 do reversed[#reversed + 1] = points[i] end
-	surface.DrawPoly(reversed)
+-- The polygons' point tables are made once and filled in place: DrawPoly reads them as it's
+-- called, and building new ones for every tick, segment and circle came to ~400 tables a frame
+local function pointList(count)
+	local points = {}
+	for i = 1, count do points[i] = { x = 0, y = 0 } end
+	return points
+end
+local quadPoints, reversedQuadPoints = pointList(4), {}
+for i = 1, 4 do reversedQuadPoints[i] = quadPoints[5 - i] end   -- (the same points, the other winding)
+
+local function setPoint(points, index, x, y)
+	local point = points[index]
+	point.x, point.y = x, y
 end
 
+-- draw.RoundedBox / text change the bound texture, so every polygon resets it first;
+-- otherwise the needle and dial draw with a corner texture and vanish
 local function thickLine(startX, startY, endX, endY, width, color)
 	local deltaX, deltaY = endX - startX, endY - startY
 	local length = math.sqrt(deltaX * deltaX + deltaY * deltaY)
 	if length < 0.001 then return end
 	local offsetX, offsetY = -deltaY / length * width / 2, deltaX / length * width / 2
-	poly({
-		{ x = startX + offsetX, y = startY + offsetY },
-		{ x = endX + offsetX, y = endY + offsetY },
-		{ x = endX - offsetX, y = endY - offsetY },
-		{ x = startX - offsetX, y = startY - offsetY },
-	}, color)
+	setPoint(quadPoints, 1, startX + offsetX, startY + offsetY)
+	setPoint(quadPoints, 2, endX + offsetX, endY + offsetY)
+	setPoint(quadPoints, 3, endX - offsetX, endY - offsetY)
+	setPoint(quadPoints, 4, startX - offsetX, startY - offsetY)
+	draw.NoTexture()
+	surface.SetDrawColor(color)
+	surface.DrawPoly(quadPoints)
+	-- the reversed winding too, so either orientation shows
+	surface.DrawPoly(reversedQuadPoints)
 end
 
 local function arc(centerX, centerY, innerRadius, outerRadius, startAngle, endAngle, color)
@@ -86,25 +94,26 @@ local function arc(centerX, centerY, innerRadius, outerRadius, startAngle, endAn
 		local segmentStart = startAngle + (endAngle - startAngle) * i / segmentCount
 		local segmentEnd = startAngle + (endAngle - startAngle) * (i + 1) / segmentCount
 		local startCos, startSin, endCos, endSin = cos(segmentStart), sin(segmentStart), cos(segmentEnd), sin(segmentEnd)
-		surface.DrawPoly({
-			{ x = centerX + startCos * outerRadius, y = centerY + startSin * outerRadius },
-			{ x = centerX + endCos * outerRadius, y = centerY + endSin * outerRadius },
-			{ x = centerX + endCos * innerRadius, y = centerY + endSin * innerRadius },
-			{ x = centerX + startCos * innerRadius, y = centerY + startSin * innerRadius },
-		})
+		setPoint(quadPoints, 1, centerX + startCos * outerRadius, centerY + startSin * outerRadius)
+		setPoint(quadPoints, 2, centerX + endCos * outerRadius, centerY + endSin * outerRadius)
+		setPoint(quadPoints, 3, centerX + endCos * innerRadius, centerY + endSin * innerRadius)
+		setPoint(quadPoints, 4, centerX + startCos * innerRadius, centerY + startSin * innerRadius)
+		surface.DrawPoly(quadPoints)
 	end
 end
 
+local CIRCLE_SEGMENTS = 40
+local circlePoints = pointList(CIRCLE_SEGMENTS)
+local circleCos, circleSin = {}, {}
+for i = 1, CIRCLE_SEGMENTS do
+	local angle = (i - 1) / CIRCLE_SEGMENTS * pi * 2
+	circleCos[i], circleSin[i] = cos(angle), sin(angle)
+end
 local function circle(centerX, centerY, radius, color)
-	local points = {}
-	local segmentCount = 40
-	for i = 0, segmentCount - 1 do
-		local angle = i / segmentCount * pi * 2
-		points[#points + 1] = { x = centerX + cos(angle) * radius, y = centerY + sin(angle) * radius }
-	end
+	for i = 1, CIRCLE_SEGMENTS do setPoint(circlePoints, i, centerX + circleCos[i] * radius, centerY + circleSin[i] * radius) end
 	draw.NoTexture()
 	surface.SetDrawColor(color)
-	surface.DrawPoly(points)
+	surface.DrawPoly(circlePoints)
 end
 
 local function box(x, y, width, height, scale, color, border)

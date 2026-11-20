@@ -16,6 +16,10 @@ local autoStartConVar = CreateConVar("audio_engine_autostart", "0", FCVAR_ARCHIV
 
 local trackedVehicles = {}
 AudioEngine.TrackedVehicles = trackedVehicles
+-- the tracked cars someone drives, kept by the Think hook below: sv_handling's tick goes over these
+-- only, not every car on the map with GetDriver each tick
+local drivenVehicles = {}
+AudioEngine.DrivenVehicles = drivenVehicles
 
 local function isOurs(entity)
 	return IsValid(entity) and entity:IsVehicle() and AudioEngine.GetCarConfig(entity) ~= nil
@@ -145,6 +149,9 @@ local function track(entity)
 end
 
 hook.Add("OnEntityCreated", "audio_engine", function(entity)
+	-- (a timer for every entity the server makes, props and effects included, was for nothing;
+	-- passenger pods are vehicles too, but not jeeps)
+	if entity:GetClass() ~= "prop_vehicle_jeep" then return end
 	timer.Simple(0, function() track(entity) end)
 end)
 
@@ -236,9 +243,10 @@ end, nil, "Switch the engine of the car you're driving on or off")
 hook.Add("Think", "audio_engine", function()
 	for vehicle in pairs(trackedVehicles) do
 		if not IsValid(vehicle) then
-			trackedVehicles[vehicle] = nil
+			trackedVehicles[vehicle], drivenVehicles[vehicle] = nil, nil
 		else
 			local driver = vehicle:GetDriver()
+			drivenVehicles[vehicle] = IsValid(driver) or nil
 			local inputBits = 0
 			if IsValid(driver) then
 				if driver:KeyDown(IN_FORWARD) then inputBits = inputBits + 1 end
@@ -386,7 +394,12 @@ hook.Add("Tick", "audio_engine_wings", function()
 	local deltaTime = engine.TickInterval()
 	for vehicle in pairs(trackedVehicles) do
 		if IsValid(vehicle) then
-			local carConfig = AudioEngine.GetCarConfig(vehicle)
+			-- (the model doesn't change: looked up once per car)
+			local carConfig = vehicle.audioCarConfig
+			if carConfig == nil then
+				carConfig = AudioEngine.GetCarConfig(vehicle) or false
+				vehicle.audioCarConfig = carConfig
+			end
 			local gaugeParts, brakeWingConfig = carConfig and carConfig.gaugeParts, carConfig and carConfig.brakeWing
 			local physics = (gaugeParts or brakeWingConfig) and vehicle:GetPhysicsObject()
 			-- parked (physics asleep, no driver) with its wings settled: nothing moves until it's woken
