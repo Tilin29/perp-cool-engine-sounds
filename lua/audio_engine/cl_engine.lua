@@ -38,6 +38,30 @@ local maxCarsConVar = CreateClientConVar("audio_engine_maxcars", "16", true, fal
 local rangeConVar = CreateClientConVar("audio_engine_range", "250", true, false,
 	"Metres past which a car's engine goes quiet and stops playing (for an ordinary car; louder ones carry further; 0 = no limit)", 0, 2000)
 
+-- every player setting of the engine (client convars, saved between games; made in cl_engine, cl_hud,
+-- cl_handling, cl_soundbank, cl_police). The siren and horn have their own reset commands.
+local PLAYER_SETTINGS = {
+	"audio_engine_volume", "audio_engine_startkey", "audio_engine_roadnoise", "audio_engine_windnoise",
+	"audio_engine_doppler", "audio_engine_passby", "audio_engine_tunnel", "audio_engine_maxcars", "audio_engine_range",
+	"audio_engine_hud", "audio_engine_units", "audio_engine_hud_scale",
+	"audio_engine_predict", "audio_engine_predict_amount", "audio_engine_predict_others",
+	"audio_engine_samplerate", "audio_engine_genbudget", "audio_engine_maxsounds", "audio_engine_baked",
+	"audio_engine_lightkey",
+}
+-- puts every setting back to its default, printing what each one was
+concommand.Add("audio_engine_reset_settings", function()
+	local changed = 0
+	for _, name in ipairs(PLAYER_SETTINGS) do
+		local conVar = GetConVar(name)
+		if conVar and conVar:GetString() ~= conVar:GetDefault() then
+			print(string.format("  %s: %s -> %s", name, conVar:GetString(), conVar:GetDefault()))
+			conVar:Revert()
+			changed = changed + 1
+		end
+	end
+	print(string.format("Audio engine: %d setting(s) reset to default, %d already were", changed, #PLAYER_SETTINGS - changed))
+end, nil, "Put every engine sound / HUD / driving setting back to its default, printing the old values")
+
 -- the settings, read once a frame for every car (the Think hook below)
 local settings = { volume = 1, roadNoise = 1, windNoise = 1, doppler = 1, passby = 1, tunnel = 1, range = 250, maxCars = 16 }
 local function readSettings()

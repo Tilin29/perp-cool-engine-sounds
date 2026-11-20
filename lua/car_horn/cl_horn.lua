@@ -27,6 +27,20 @@ local dopplerConVar = CreateClientConVar("car_horn_doppler", "1", true, false,
 local keyConVar = CreateClientConVar("car_horn_key", CarHorn.CONFIG.keys.honk, true, false,
 	"Key held to sound the horn of the car you drive (a key name such as lalt; none = off)")
 
+-- puts the horn's settings back to their defaults, printing what each one was
+concommand.Add("car_horn_reset_settings", function()
+	local changed = 0
+	local conVars = { volumeConVar, maxHornsConVar, dopplerConVar, keyConVar }
+	for _, conVar in ipairs(conVars) do
+		if conVar:GetString() ~= conVar:GetDefault() then
+			print(string.format("  %s: %s -> %s", conVar:GetName(), conVar:GetString(), conVar:GetDefault()))
+			conVar:Revert()
+			changed = changed + 1
+		end
+	end
+	print(string.format("Car horn: %d setting(s) reset to default, %d already were", changed, #conVars - changed))
+end, nil, "Put every car horn setting back to its default, printing the old values")
+
 local LIST_REFRESH = 0.5
 -- a honking car past the nearest car_horn_maxcars is cut; it's back once HORN_BUDGET_MARGIN places inside
 local HORN_BUDGET_MARGIN = 2
