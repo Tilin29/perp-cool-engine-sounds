@@ -310,11 +310,14 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     model, excess over it at most 1.2 deg (3 between updates; was up to 17). Not yet run in game. Known, old: scripts with DegreesSlow
     under the model's lockSlow 32 (1970 Challenger 26, Carrera GT 28, ...) steer a few degrees under the model at parking speeds. `AudioEngine.RebaseHandling(veh[, params])` rebuilds `vehicle.audioBase` from `vehicle.audioScriptParams`, refreshes NW2
     `audio_vmax`/`audio_pwr` (`AudioEngine.RefreshCarStats`, sv_engine) and re-applies performance. `audio_engine_accel_log`, `audio_engine_handling_info`.
-  - `cl_handling.lua`: the driver's prediction (`audio_engine_predict` 1; off in single player / for a listen host). Client `StartCommand`
+  - `cl_handling.lua`: the driver's prediction (`audio_engine_predict` 1; off in single player / for a listen host; `audio_engine_predict_amount`
+    0..1, default 1, a tester's ask: how far ahead it draws your car, a blend from Source's pose, the other cars' lead scaled with it). Client `StartCommand`
     keeps each command's buttons by number (skip number 0, it happens); each frame, from the newest state, `Predict` through the commands
     after its number (at most `maxCommands` 32) + the fraction of the next; without matching numbers, one ping of the keys held. A new state's
     jump goes into the smoother (`smoothTime` 0.1 s, 0.04 during an impact, snap over 250 in). `clearShare`: a hull trace from the server's car
-    to the shown one at its leading end (world and props, not cars or players) stops it at a wall. Drawing (poses worked out at CalcView with nothing moved, put on at PreDrawOpaqueRenderables, taken off at PostRender: the render origin moves bones and attachments, and left on, the game's eye-attachment view arrived already moved and the camera ran ~2x the lead ahead, out of sight and shaking, the first multiplayer test): `SetRenderOrigin` + the Entity
+    to the shown one at its leading end (world and props, not cars or players) stops it at a wall; a hit facing up like ground (normal within ~45 deg of the car's up,
+    `groundNormal` 0.7) isn't one: traced again `traceRetryLift` 24 in higher (uneven ground pulled the drawn car and camera back by the lead
+    and let go the next frame: the camera zoomed in and out for clients, the user). Drawing (poses worked out at CalcView with nothing moved, put on at PreDrawOpaqueRenderables, taken off at PostRender: the render origin moves bones and attachments, and left on, the game's eye-attachment view arrived already moved and the camera ran ~2x the lead ahead, out of sight and shaking, the first multiplayer test): `SetRenderOrigin` + the Entity
     `SetRenderAngles` (Player's is something else) + `InvalidateBoneCache` on the car and its children (pods, lightbar), render bounds widened
     by the offset (culling goes by Source's position: your car vanished otherwise), players in it via PrePlayerDraw; stale overrides cleared.
     `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it). The camera: `hook.Call` is wrapped for "CalcView" only

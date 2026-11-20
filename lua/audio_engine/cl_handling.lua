@@ -34,6 +34,10 @@ local Handling = AudioEngine.Handling
 
 local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, false,
 	"1 = the car you drive is shown where it will be when the server runs your keys (no input delay); 0 = as Source shows it")
+-- (a tester asked to dial in how much of it they get)
+local amountConVar = CreateClientConVar("audio_engine_predict_amount", "1", true, false,
+	"How far ahead the prediction draws your car (and the other cars with it): 1 = where the server will have it (no input delay), "
+		.. "0.5 = half way, 0 = where Source shows it", 0, 1)
 local othersConVar = CreateClientConVar("audio_engine_predict_others", "1", true, false,
 	"1 = while you drive with prediction, other moving cars are shown where they are now too, so close driving and crashes line up")
 local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false, false,
@@ -54,6 +58,12 @@ AudioEngine.PREDICTION = {
 	leadSmooth = 1.5,         -- s: the lead estimate follows the connection this slowly
 	traceHeight = 20,         -- inches above the car's origin the obstacle trace runs at
 	traceHalfHeight = 8,
+	-- a hit facing up like ground (its normal within ~45 deg of the car's up: a crest, a bump, a
+	-- slope) isn't a wall: the trace runs again traceRetryLift higher. Taken as a wall, uneven
+	-- ground pulled the drawn car back by up to the lead and let it go the next frame, the
+	-- camera with it: zooming in and out (the user, third person, other players than the host)
+	groundNormal = 0.7,
+	traceRetryLift = 24,
 }
 local PREDICTION = AudioEngine.PREDICTION
 
@@ -221,12 +231,19 @@ local function clearShare(fromPosition, toPosition, direction, up, halfLength, h
 	local travel = toPosition - fromPosition
 	local distance = travel:Length()
 	if distance < 6 then return 1 end
-	local lead = direction * (travel:Dot(direction) >= 0 and (halfLength - halfWidth) or -(halfLength - halfWidth)) + up * PREDICTION.traceHeight
 	traceMins.x, traceMins.y, traceMins.z = -halfWidth, -halfWidth, -PREDICTION.traceHalfHeight
 	traceMaxs.x, traceMaxs.y, traceMaxs.z = halfWidth, halfWidth, PREDICTION.traceHalfHeight
-	traceData.start, traceData.endpos = fromPosition + lead, toPosition + lead
-	util.TraceHull(traceData)
-	if traceResult.Hit and not traceResult.StartSolid then return math.max(0, traceResult.Fraction - 2 / distance) end
+	local along = direction * (travel:Dot(direction) >= 0 and (halfLength - halfWidth) or -(halfLength - halfWidth))
+	for _, lift in ipairs({ 0, PREDICTION.traceRetryLift }) do
+		local lead = along + up * (PREDICTION.traceHeight + lift)
+		traceData.start, traceData.endpos = fromPosition + lead, toPosition + lead
+		util.TraceHull(traceData)
+		if not traceResult.Hit or traceResult.StartSolid then return 1 end
+		-- ground under the box (see groundNormal): not a wall, look again higher
+		if traceResult.HitNormal:Dot(up) < PREDICTION.groundNormal then
+			return math.max(0, traceResult.Fraction - 2 / distance)
+		end
+	end
 	return 1
 end
 
@@ -477,7 +494,7 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 		local speed = motion.velocity:Length()
 		local share = clamp((speed - PREDICTION.othersMinSpeed) / (PREDICTION.othersFullSpeed - PREDICTION.othersMinSpeed), 0, 1) * othersShare
 		if share > 0 and motion.samples >= 3 then
-			local carLead = lead * share
+			local carLead = lead * share * amountConVar:GetFloat()
 			local turn = motion.yawRate * carLead
 			local travel = motion.velocity * carLead
 			travel:Rotate(Angle(0, turn * 0.5, 0))           -- along the arc it's turning on
@@ -555,7 +572,14 @@ local function updateFrame()
 			toPosition = basePosition + (toPosition - basePosition) * clear
 			stats.clamped = stats.clamped + 1
 		end
-		own.displayPosition, own.displayAngles = toPosition, Handling.AnglesOf(display)
+		local displayAngles = Handling.AnglesOf(display)
+		-- (audio_engine_predict_amount: part of the way from where Source shows the car)
+		local amount = amountConVar:GetFloat()
+		if amount < 1 then
+			toPosition = LerpVector(amount, vehicle:GetPos(), toPosition)
+			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
+		end
+		own.displayPosition, own.displayAngles = toPosition, displayAngles
 		own.velocity = own.velocity or Vector()
 		own.velocity:SetUnpacked(predicted.vx, predicted.vy, predicted.vz)
 		own.velocityAt = realNow
