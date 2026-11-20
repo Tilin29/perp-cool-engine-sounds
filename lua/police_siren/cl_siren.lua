@@ -342,7 +342,7 @@ local function update(vehicle)
 	cars[vehicle] = wantedTone and startTone(vehicle, wantedTone, listenerInside, swapVersion and SWAP_FADE or config.attack) or nil
 end
 
-local sirenCars = {}
+local sirenCars, sirenCarSet = {}, {}
 
 -- which sounding siren cars are past the budget (the nearest ones are heard)
 local function rankSirens()
@@ -356,7 +356,8 @@ local function rankSirens()
 	table.sort(sounding, function(first, second) return first.distance < second.distance end)
 	local nextOverBudget = {}
 	for rank, entry in ipairs(sounding) do
-		local limit = overBudget[entry.vehicle] and maxSirens - SIREN_BUDGET_MARGIN or maxSirens
+		-- (at least the nearest place: with maxcars 1 or 2 the margin left none, a siren never came back)
+		local limit = overBudget[entry.vehicle] and math.max(1, maxSirens - SIREN_BUDGET_MARGIN) or maxSirens
 		if maxSirens > 0 and rank > limit then nextOverBudget[entry.vehicle] = true end
 	end
 	overBudget = nextOverBudget
@@ -386,17 +387,22 @@ hook.Add("Think", "police_siren", function()
 	listenerVelocity = trackVelocity(listener, listenerPosition, now)
 	if now >= nextRefresh then
 		nextRefresh = now + LIST_REFRESH
-		sirenCars = {}
+		sirenCars, sirenCarSet = {}, {}
 		for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
-			if PoliceSiren.HasSiren(vehicle) then table.insert(sirenCars, vehicle) end
+			if PoliceSiren.HasSiren(vehicle) then
+				table.insert(sirenCars, vehicle)
+				sirenCarSet[vehicle] = true
+			end
 		end
 		rankSirens()
 	end
 	for _, vehicle in ipairs(sirenCars) do
 		if IsValid(vehicle) then update(vehicle) end
 	end
+	-- gone, or no longer a siren car (its lightbar went, or reads invalid out of view): nothing
+	-- above updates it any more, so its loop would play on for good
 	for vehicle, state in pairs(cars) do
-		if not IsValid(vehicle) then
+		if not IsValid(vehicle) or not sirenCarSet[vehicle] then
 			stopTone(state, PoliceSiren.CONFIG.release, true)
 			cars[vehicle] = nil
 		end
@@ -409,7 +415,10 @@ hook.Add("Think", "police_siren", function()
 	end
 end)
 
-hook.Add("EntityRemoved", "police_siren", function(entity)
+-- (fullUpdate: the game "removes" every entity on a full update, after packet loss for one, but
+-- they stay: the siren would cut out)
+hook.Add("EntityRemoved", "police_siren", function(entity, fullUpdate)
+	if fullUpdate then return end
 	local state = cars[entity]
 	if not state then return end
 	state.patch:Stop()
@@ -420,9 +429,17 @@ end)
 -- Plain alt/shift/ctrl mean the left one (the game only knows KEY_LALT, KEY_LSHIFT...)
 local KEY_ALIASES = { alt = "lalt", shift = "lshift", ctrl = "lcontrol", control = "lcontrol" }
 
+-- key name -> KEY_ code, looked up once per name (a string built and looked up every frame otherwise)
+local keyCodes = {}
 local function isKeyDown(conVar)
-	local keyName = string.lower(conVar:GetString())
-	local keyCode = _G["KEY_" .. string.upper(KEY_ALIASES[keyName] or keyName)]
+	local keyName = conVar:GetString()
+	local keyCode = keyCodes[keyName]
+	if keyCode == nil then
+		local lowerName = string.lower(keyName)
+		keyCode = _G["KEY_" .. string.upper(KEY_ALIASES[lowerName] or lowerName)] or false
+		keyCodes[keyName] = keyCode
+	end
+	keyCode = keyCode or nil
 
 	return keyCode ~= nil and input.IsKeyDown(keyCode)
 end

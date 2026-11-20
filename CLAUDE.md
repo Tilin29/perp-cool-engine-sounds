@@ -179,6 +179,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   A shared env bank holds road, wind, turbo whistle, the EV hum, 2 blow-off sounds and the supercharger loops (`Synth.RenderSuperchargerLoop`: on boost + bypass per variant and band; the bypass loop keeps its on loop's gain). Sample rate is `audio_engine_samplerate`, 44100 or 22050; changing it rebuilds.
   - `Bank.Build` first tries the baked copy (`Bank.BakedEntry(cfg)`: own key or family, + file exists): names are then file paths `audio_engine/<dir>/<stem>.wav`.
     `audio_engine_baked 0` forces generation. Baked banks load lazily (when a car using them appears) and don't count toward maxsounds.
+  - `Bank.Get`: past `audio_engine_maxsounds` an engine that would be generated (no baked copy, stock ones too: content missing)
+    gets its car's stock bank, else a built bank of the same layout (`Bank.substitutes`); a failed build (`bank.failed`) falls back
+    the same way. `Bank.RebuildAll` only clears: banks are made again as cars in hearing ask, the env bank swaps in once built
+    (`replacesEnv`), and cl_engine restarts a car's loops when `Bank.env` changes (`car.envBank`).
 - `cl_engine.lua`: per-car playback.
   - band crossfade with pitch; volumes glide (VOLUME_SLEW), which avoids per-frame zipper clicks
   - per-car headroom (ceiling 0.66 driving / 0.68 neutral, leaving room for band peaks lining up mid cross-fade, using measured peaks; pops/BOV limited with `popPeakLoad`)
@@ -187,6 +191,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `audio_engine_tunnel` (0 = off, default 1 = Source's auto preset, 7 = large tunnel, `CSoundPatch:SetDSP`); a car in one carries `TUNNEL_LEVEL` 8 dB further; both inside: no pass-by drop with range.
     SetDSP/SetSoundLevel go on before PlayEx (`startPatch`) and loops restart when the room changes (`roomGeneration`): not known to reach a playing sound
   - once a second each active loop is checked with `IsPlaying` and restarted if the game dropped it (`car.revive`)
+  - each car's update runs in a pcall (`updateCarSafely`, printed once per car): one failing car stopped every car after it.
+    Every client `EntityRemoved` hook (cl_engine, cl_handling, cl_siren, cl_horn) ignores `fullUpdate` (entities stay).
+    Back from dormancy a car takes the engine state as it is (no shut-down sound for an engine switched off out of view).
+    Out of range / over budget: no bank lookup, Doppler or swell (`car.position` = this frame's GetPos, reused).
+    `Drivetrain.Step` clamps the gear to `#config.gears` (a rebuilt config with fewer gears errored) and ignores a zero step
   - performance (`updateRestState()`, `car.restState`, shown by `audio_engine_perf_snapshot`): engine off, standing, silent = asleep, looked at every
     `SLEEP_STEP` 0.25 s; idling, standing, no keys, not your car = parked: only the engine's idle plays (supercharger whine, turbo fade out;
     the EV hum stays: it's the EV's idle), every `PARKED_STEP` 0.1 s while the listener is under `PARKED_LISTENER_SPEED` 6 m/s, volume/pitch gliding over
@@ -295,7 +304,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     and degreesFast = the model's grip-capped turn at `STEER_FIT_SPEED` = FastCarSpeed 35 mph (`Handling.TurnAngle`, ~7.5 deg; PERP ~11; fitted at 25 m/s, ~3 deg, Source held 3 deg from 35 mph where the model asks ~7 and cars under throttle hardly turned): both braked cars in a turn
     (throttle cut up to 90%, front tyres scrubbing across the path). `audioScriptParams` stays the script's own; adds the
     PhysicsCollide callback (`audioImpactAt` on a velocity change over `impactSpeed` 120 in/s, not floor/ceiling normals: the model is off
-    `impactHold` 0.35 s, eases back over `impactEase` 0.5). Tick: on driven cars, reads the physics, ground share from `GetWheelContactPoint`
+    `impactHold` 0.35 s, eases back over `impactEase` 0.5). Tick: on driven cars (`AudioEngine.DrivenVehicles`, kept by sv_engine's
+    Think; sv_engine's OnEntityCreated only times jeeps), reads the physics, ground share from `GetWheelContactPoint`
     (trace fallback), runs Control and applies it (`AddAngleVelocity` local z, `AddVelocity` along the right; tried and reverted for the Furai
     climbing walls: a wall check leaving pushes into walls out (scraping a wall should still slow the car) and the push laid flat (it
     didn't help, and measured along the car's right but pushed flat, on cambered roads it never converged and dragged the car, a Mini
@@ -305,7 +315,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     (`blockedYaw` 15 + `blockedShare` 0.5 x the turn under what was set last tick, `state.yawSet`): `blockedTime` 0.3 s of the gentle
     yawFollow pull instead of the every-tick hold; controlShare 0 on spiked cars,
     `carConfig.stability == false`, or with the convar off. Every ~30 ms (every other tick at 66) an unreliable net `audio_engine_drive` to the
-    driver: entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
+    driver (only one whose client predicts: not single player / the listen host / userinfo `audio_engine_predict` 0): entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
     velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state (~60 bytes). No vehicle params set while
     driving, except Source's wheels over FastCarSpeed (`matchSteering`, `AudioEngine.MatchedSteering`): the params get DegreesFast = the model's
     turn x1.1 + 0.5 deg at the car's speed and FastCarSpeed = that speed (`vehicle.audioSteerOverride`, put on by `AudioEngine.SetParams`,
@@ -328,7 +338,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `SetRenderAngles` (Player's is something else) + `InvalidateBoneCache` on the car and its children (pods, lightbar), render bounds widened
     by the offset (culling goes by Source's position: your car vanished otherwise), players in it via PrePlayerDraw; stale overrides cleared.
     `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it). The camera: `hook.Call` is wrapped for "CalcView" only
-    (re-wrapped every 2 s if a hook library replaced it), so any gamemode/addon camera is moved with the car; if the camera didn't run through
+    (re-wrapped every 2 s if a hook library replaced it; every wrapper we made is in `AudioEngine.predictHookCalls`, they call the newest
+    `AudioEngine.PredictCalcView`, and inside one CalcView (`AudioEngine.predictInCalcView`) the next of ours passes it on: nested wrappers
+    moved the camera twice; `updateFrame` runs in a pcall), so any gamemode/addon camera is moved with the car; if the camera didn't run through
     it in a frame, nothing is moved (PreDrawOpaqueRenderables). Others (`audio_engine_predict_others` 1): the nearest 16 moving cars within
     5000 in are carried on over the lead (their smoothed velocity and yaw rate from interpolated poses, along the arc, wall-traced): without
     it your car (drawn ~RTT + interp ahead) drove into ones you only followed. The lead: found by matching Source's interpolated car to the

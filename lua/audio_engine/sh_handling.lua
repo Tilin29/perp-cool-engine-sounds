@@ -521,7 +521,28 @@ end
 	the next command the frame is (0..1, with the last buttons). Returns the predicted body (into
 	`out`) and the steering state it ends with.
 ]]
+--[[
+	The replay runs Control for every command (up to 32 a frame), and each settings read through
+	SettingsFor's live proxy is a function call: they're read into a plain table once per Predict
+	(a key not in AudioEngine.HANDLING still falls through to the proxy). Per spec, reused.
+]]
+local frozenSpecs = setmetatable({}, { __mode = "k" })
+local function frozenSpecOf(spec)
+	local frozen = frozenSpecs[spec]
+	if not frozen then
+		frozen = { settings = setmetatable({}, { __index = spec.settings }) }
+		frozenSpecs[spec] = frozen
+	end
+	for key, value in pairs(spec) do
+		if key ~= "settings" then frozen[key] = value end
+	end
+	local frozenSettings, liveSettings = frozen.settings, spec.settings
+	for key in pairs(AudioEngine.HANDLING) do frozenSettings[key] = liveSettings[key] end
+	return frozen
+end
+
 function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState)
+	spec = frozenSpecOf(spec)
 	local body = Handling.CopyBody(base, out)
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget

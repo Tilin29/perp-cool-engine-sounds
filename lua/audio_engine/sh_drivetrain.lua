@@ -179,6 +179,25 @@ local function gearRatio(config, gear)
 end
 Drivetrain.GearRatio = gearRatio
 
+-- the gearbox's helpers (file level: built inside Step they were 3 new closures per car per frame)
+-- the revs in `gear` at the wheels' speed (speedRpm = speed x rpm per m/s at 1:1)
+local function rpmInGear(config, speedRpm, gear) return speedRpm * gearRatio(config, gear) end
+-- may the box land in gear g? (under `redlineShare` of redline, and under that gear's own upshift)
+local function gearFits(config, speedRpm, gear, redlineShare)
+	local gearRpm = rpmInGear(config, speedRpm, gear)
+	local shiftPlan = config.shiftPlan
+	return gearRpm < config.redline * redlineShare and not (shiftPlan and shiftPlan.up[gear] and gearRpm > shiftPlan.up[gear] * 0.97)
+end
+-- soft: a braking / coasting downshift (a small blip and a slower rise, not a racing one)
+local function shiftTo(engineState, gear, direction, holdTime, soft)
+	engineState.gear = gear
+	engineState.shiftDirection = direction
+	engineState.gearHoldTimer = holdTime
+	engineState.stallTimer = 0
+	engineState.softShift = soft or false
+	engineState.shiftTimer = direction == 1 and 0.32 or 0.22
+end
+
 --[[
 	controls.forward, controls.backward, controls.handbrake : driver keys (W, S, Space)
 	controls.steering            : A or D held (the gearbox holds its gear through corners)
@@ -191,6 +210,15 @@ Drivetrain.GearRatio = gearRatio
 	  down[g]  m/s under which gear g changes down coasting or braking (nil: the default points)
 ]]
 function Drivetrain.Step(engineState, config, deltaTime, controls)
+	-- (a zero step would divide by zero below and leave the acceleration NaN for good)
+	if not (deltaTime > 0) then
+		engineState.limiterEvent, engineState.blowOffEvent = false, nil
+		return
+	end
+	-- a rebuilt config (new top speed, gearing or profile) can have fewer gears than the one the
+	-- car is in: config.gears[gear] was nil and the step failed every frame
+	local configGearCount = #config.gears
+	if engineState.gear > configGearCount then engineState.gear = configGearCount end
 	local speed = controls.speed or 0
 	local absoluteSpeed = abs(speed)
 	engineState.limiterEvent = false
@@ -320,32 +348,18 @@ function Drivetrain.Step(engineState, config, deltaTime, controls)
 			local rpm = engineState.rpm  -- the engine's actual revs
 			local cornering = engineState.timeSinceSteering < shiftPoints.cornerHold
 			local shiftPlan = config.shiftPlan
-			local function rpmInGear(gear) return absoluteSpeed * rpmPerSpeed * gearRatio(config, gear) end
+			local speedRpm = absoluteSpeed * rpmPerSpeed
 			-- where this gear changes up flat out, and the share of it a lazy upshift comes at
 			local fullThrottleUpshiftRpm = shiftPlan and shiftPlan.up[engineState.gear] or redline * shiftPoints.upRpm
 			local lazyUpshiftShare = shiftPoints.lazyUpRpm / shiftPoints.upRpm
-			-- may the box land in gear g? (under `frac` of redline, and under that gear's own upshift)
-			local function gearFits(gear, redlineShare)
-				local gearRpm = rpmInGear(gear)
-				return gearRpm < redline * redlineShare and not (shiftPlan and shiftPlan.up[gear] and gearRpm > shiftPlan.up[gear] * 0.97)
-			end
 			local plannedDownshiftSpeed = shiftPlan and shiftPlan.down[engineState.gear]
-			-- soft: a braking / coasting downshift (a small blip and a slower rise, not a racing one)
-			local function shiftTo(gear, direction, holdTime, soft)
-				engineState.gear = gear
-				engineState.shiftDirection = direction
-				engineState.gearHoldTimer = holdTime
-				engineState.stallTimer = 0
-				engineState.softShift = soft or false
-				engineState.shiftTimer = direction == 1 and 0.32 or 0.22
-			end
 			engineState.gearHoldTimer = engineState.gearHoldTimer - deltaTime
 			-- about to hit the limiter: change up now, even inside the hold or the shift before
 			-- (close gearing on a car that pulls hard reached redline before the hold ran out,
 			-- and the limiter kept cutting the sound)
 			if engineState.gearHoldTimer > 0 and engineState.gear < gearCount and wheelRpm > (pedal and fullThrottleUpshiftRpm or redline * 0.97) then
-				shiftTo(engineState.gear + 1, 1, 0.8)
-				wheelRpm = rpmInGear(engineState.gear)
+				shiftTo(engineState, engineState.gear + 1, 1, 0.8)
+				wheelRpm = rpmInGear(config, speedRpm, engineState.gear)
 			end
 			if engineState.gearHoldTimer <= 0 and engineState.shiftTimer <= 0 then
 				-- flat out but no longer accelerating (top speed / drag limit); slowing down
@@ -370,47 +384,47 @@ function Drivetrain.Step(engineState, config, deltaTime, controls)
 					-- or once it stops gaining speed, then settles at lower revs)
 					-- (only while it still gains speed: slowing through a turn it changed up and stuck)
 					local lazyUpshift = not cornering and engineState.acceleration > 0 and engineState.gear + 1 < gearCount
-						and wheelRpm > lazyUpshiftRpm and rpmInGear(engineState.gear + 1) > redline * shiftPoints.lazyLand
+						and wheelRpm > lazyUpshiftRpm and rpmInGear(config, speedRpm, engineState.gear + 1) > redline * shiftPoints.lazyLand
 					if controls.holdingSpeedLimit then
 						kickdown, cornerKickdown = wheelRpm < redline * shiftPoints.sagRpm, false
-						lazyUpshift = engineState.gear < gearCount and rpmInGear(engineState.gear + 1) > redline * shiftPoints.cruiseLand
+						lazyUpshift = engineState.gear < gearCount and rpmInGear(config, speedRpm, engineState.gear + 1) > redline * shiftPoints.cruiseLand
 					end
 					local stalledInGear = engineState.gear < gearCount and engineState.stallTimer > 1.2
-						and rpmInGear(engineState.gear + 1) > config.idle * 1.6
+						and rpmInGear(config, speedRpm, engineState.gear + 1) > config.idle * 1.6
 					if engineState.gear < gearCount and (wheelRpm > fullThrottleUpshiftRpm or lazyUpshift or stalledInGear) then
-						shiftTo(engineState.gear + 1, 1, 0.8)
+						shiftTo(engineState, engineState.gear + 1, 1, 0.8)
 					elseif engineState.gear > 1 and (kickdown or cornerKickdown) then
 						-- the lowest gear that keeps the revs under kickLand (skips gears if needed;
 						-- under cruise just one, back above cruiseLand)
 						local landingShare = controls.holdingSpeedLimit and shiftPoints.cruiseLand / 0.8 or kickdown and shiftPoints.kickLand or shiftPoints.cornerLand
 						local targetGear = engineState.gear
-						while targetGear > 1 and gearFits(targetGear - 1, landingShare) do targetGear = targetGear - 1 end
-						if targetGear < engineState.gear then shiftTo(targetGear, -1, 0.8) end
+						while targetGear > 1 and gearFits(config, speedRpm, targetGear - 1, landingShare) do targetGear = targetGear - 1 end
+						if targetGear < engineState.gear then shiftTo(engineState, targetGear, -1, 0.8) end
 					end
 				elseif braking then
 					-- down one gear once the revs fall below brakeRpm, as long as the lower gear
 					-- lands under brakeLand: the revs fall with the car, each downshift a small blip
 					-- (a car's own gearing: under its downshift speed, as long as the lower gear doesn't over-rev)
 					if plannedDownshiftSpeed then
-						if engineState.gear > 1 and absoluteSpeed < plannedDownshiftSpeed and rpmInGear(engineState.gear - 1) < redline * 0.97 then
-							shiftTo(engineState.gear - 1, -1, 0.3, true)
+						if engineState.gear > 1 and absoluteSpeed < plannedDownshiftSpeed and rpmInGear(config, speedRpm, engineState.gear - 1) < redline * 0.97 then
+							shiftTo(engineState, engineState.gear - 1, -1, 0.3, true)
 						end
-					elseif engineState.gear > 1 and rpm < redline * shiftPoints.brakeRpm and rpmInGear(engineState.gear - 1) < redline * shiftPoints.brakeLand then
-						shiftTo(engineState.gear - 1, -1, 0.3, true)
+					elseif engineState.gear > 1 and rpm < redline * shiftPoints.brakeRpm and rpmInGear(config, speedRpm, engineState.gear - 1) < redline * shiftPoints.brakeLand then
+						shiftTo(engineState, engineState.gear - 1, -1, 0.3, true)
 					end
 				else
 					if engineState.gear < gearCount and wheelRpm > redline * 0.97 then
-						shiftTo(engineState.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
+						shiftTo(engineState, engineState.gear + 1, 1, 0.8)                       -- rolling downhill: don't over-rev
 					elseif engineState.gear > 1 and not controls.holdingSpeedLimit and plannedDownshiftSpeed and not cornering then
-						if absoluteSpeed < plannedDownshiftSpeed and rpmInGear(engineState.gear - 1) < redline * 0.97 then
-							shiftTo(engineState.gear - 1, -1, 0.6, true)
+						if absoluteSpeed < plannedDownshiftSpeed and rpmInGear(config, speedRpm, engineState.gear - 1) < redline * 0.97 then
+							shiftTo(engineState, engineState.gear - 1, -1, 0.6, true)
 						end
 					elseif engineState.gear > 1 and not controls.holdingSpeedLimit and rpm < redline * (cornering and shiftPoints.cornerRpm or shiftPoints.lugRpm)
-						and rpmInGear(engineState.gear - 1) < redline * (cornering and shiftPoints.cornerLand or 0.75) then
-						shiftTo(engineState.gear - 1, -1, 0.6, true)                -- don't let it lug (or drone through a corner)
+						and rpmInGear(config, speedRpm, engineState.gear - 1) < redline * (cornering and shiftPoints.cornerLand or 0.75) then
+						shiftTo(engineState, engineState.gear - 1, -1, 0.6, true)                -- don't let it lug (or drone through a corner)
 					end
 				end
-				wheelRpm = rpmInGear(engineState.gear)
+				wheelRpm = rpmInGear(config, speedRpm, engineState.gear)
 			end
 		end
 

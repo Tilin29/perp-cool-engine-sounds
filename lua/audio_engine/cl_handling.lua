@@ -32,7 +32,8 @@
 local AudioEngine = AUDIO_ENGINE
 local Handling = AudioEngine.Handling
 
-local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, false,
+-- (userinfo: the server sends the driving state only to clients that use it, sv_handling.lua)
+local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, true,
 	"1 = the car you drive is shown where it will be when the server runs your keys (no input delay); 0 = as Source shows it")
 -- (a tester asked to dial in how much of it they get)
 local amountConVar = CreateClientConVar("audio_engine_predict_amount", "1", true, false,
@@ -453,6 +454,13 @@ local motions = setmetatable({}, { __mode = "k" })
 local carList, nextCarList = {}, 0
 local othersShare = 0
 local nearby = {}
+-- (the entries are reused: a new table per car per frame was garbage for nothing)
+local nearbyEntries = {}
+-- a car whose path was clear is traced again only every OTHERS_TRACE_EVERY frames (1-2 hull traces
+-- per car per frame for up to 16 cars); one blocked by a wall is traced every frame
+local OTHERS_TRACE_EVERY = 3
+local function nearerFirst(first, second) return first.distanceSqr < second.distanceSqr end
+local turnAngle = Angle(0, 0, 0)
 
 local function motionOf(vehicle, realNow)
 	local position, angles = vehicle:GetPos(), vehicle:GetAngles()
@@ -484,10 +492,16 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 	for _, vehicle in ipairs(carList) do
 		if IsValid(vehicle) and vehicle ~= ownVehicle and not vehicle:IsDormant() then
 			local distanceSqr = vehicle:GetPos():DistToSqr(eyePosition)
-			if distanceSqr < maxDistanceSqr then nearby[#nearby + 1] = { vehicle = vehicle, distanceSqr = distanceSqr } end
+			if distanceSqr < maxDistanceSqr then
+				local index = #nearby + 1
+				local entry = nearbyEntries[index]
+				if not entry then entry = {}; nearbyEntries[index] = entry end
+				entry.vehicle, entry.distanceSqr = vehicle, distanceSqr
+				nearby[index] = entry
+			end
 		end
 	end
-	table.sort(nearby, function(first, second) return first.distanceSqr < second.distanceSqr end)
+	table.sort(nearby, nearerFirst)
 	for i = 1, math.min(#nearby, PREDICTION.othersMax) do
 		local vehicle = nearby[i].vehicle
 		local motion = motionOf(vehicle, realNow)
@@ -497,7 +511,8 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 			local carLead = lead * share * amountConVar:GetFloat()
 			local turn = motion.yawRate * carLead
 			local travel = motion.velocity * carLead
-			travel:Rotate(Angle(0, turn * 0.5, 0))           -- along the arc it's turning on
+			turnAngle.y = turn * 0.5
+			travel:Rotate(turnAngle)                         -- along the arc it's turning on
 			local position, angles = vehicle:GetPos(), vehicle:GetAngles()
 			-- (along the ground only: its bumps carried over the lead made it bob, as your own did)
 			local up = vehicle:GetUp()
@@ -505,8 +520,12 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 			local toPosition = position + travel
 			local spec = specOf(vehicle)
 			local size = sizeOf(vehicle, spec)
-			local nose = vehicle:LocalToWorld(Vector(spec.noseX, spec.noseY, spec.noseZ)) - position
-			local clear = clearShare(position, toPosition, nose, vehicle:GetUp(), size.halfLength, size.halfWidth)
+			local clear = motion.clear or 1
+			if clear < 1 or frame - (motion.clearFrame or -OTHERS_TRACE_EVERY) >= OTHERS_TRACE_EVERY then
+				local nose = vehicle:LocalToWorld(Vector(spec.noseX, spec.noseY, spec.noseZ)) - position
+				clear = clearShare(position, toPosition, nose, up, size.halfLength, size.halfWidth)
+				motion.clear, motion.clearFrame = clear, frame
+			end
 			if clear < 1 then toPosition = position + travel * clear end
 			displace(vehicle, toPosition, Angle(angles.p, angles.y + turn * clear, angles.r), frame, realNow)
 		end
@@ -601,13 +620,19 @@ end
 -- the camera moves with your car as drawn. hook.Call is wrapped for CalcView only, so whatever
 -- camera the gamemode or another addon makes (first person, third person) is moved after it
 ---------------------------------------------------------------------------
-local ourCalls = setmetatable({}, { __mode = "k" })
 local cameraFrame = -1
 
+-- an error in the prediction must not take every addon's camera with it: CalcView still runs
+-- (unmoved), the error is printed once
+local predictionErrorPrinted = false
 local function calcView(originalCall, gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
-	updateFrame()
+	local updated, message = pcall(updateFrame)
+	if not updated and not predictionErrorPrinted then
+		predictionErrorPrinted = true
+		ErrorNoHalt("[audio_engine] driving prediction: " .. tostring(message) .. "\n")
+	end
 	local view = originalCall("CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
-	local entry = own.vehicle and displaced[own.vehicle]
+	local entry = updated and own.vehicle and displaced[own.vehicle]
 	if not entry then return view end
 	-- a copy: some cameras hand back the same table each frame
 	local moved = {}
@@ -618,12 +643,29 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	return moved
 end
 
+--[[
+	Our wrappers can end up nested: another addon wrapping hook.Call after us (and calling through
+	to ours), our timer wrapping theirs again, or a Lua refresh wrapping the last load's. Each
+	CalcView then went through calcView twice and the camera moved by the lead twice. So:
+	  * every wrapper we ever made is known (AudioEngine.predictHookCalls, kept over a refresh), and
+	    hook.Call is wrapped again only if it isn't one of ours;
+	  * the wrappers call the newest calcView (AudioEngine.PredictCalcView), not their own load's;
+	  * inside a CalcView we're already moving, the next wrapper down just passes it on.
+]]
+AudioEngine.predictHookCalls = AudioEngine.predictHookCalls or setmetatable({}, { __mode = "k" })
+AudioEngine.PredictCalcView = calcView
+local ourCalls = AudioEngine.predictHookCalls
+
 local function wrapHookCall()
 	if ourCalls[hook.Call] then return end
 	local originalCall = hook.Call
 	local function call(name, gamemodeTable, ...)
-		if name ~= "CalcView" then return originalCall(name, gamemodeTable, ...) end
-		return calcView(originalCall, gamemodeTable, ...)
+		if name ~= "CalcView" or AudioEngine.predictInCalcView then return originalCall(name, gamemodeTable, ...) end
+		AudioEngine.predictInCalcView = true
+		local succeeded, view = pcall(AudioEngine.PredictCalcView, originalCall, gamemodeTable, ...)
+		AudioEngine.predictInCalcView = false
+		if not succeeded then error(view, 0) end
+		return view
 	end
 	ourCalls[call] = true
 	hook.Call = call
@@ -675,7 +717,9 @@ hook.Add("PostPlayerDraw", "audio_engine_predict", function(player)
 	player:InvalidateBoneCache()
 end)
 
-hook.Add("EntityRemoved", "audio_engine_predict", function(entity)
+-- (fullUpdate: the game "removes" every entity on a full update, but they stay: see cl_engine)
+hook.Add("EntityRemoved", "audio_engine_predict", function(entity, fullUpdate)
+	if fullUpdate then return end
 	displaced[entity], overridden[entity], childrenCache[entity], originalBounds[entity], placements[entity] = nil, nil, nil, nil, nil
 	if own.vehicle == entity then own.vehicle, own.base = nil, nil end
 end)

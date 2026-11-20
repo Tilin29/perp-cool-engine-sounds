@@ -440,6 +440,8 @@ local function buildSharedBank(bank)
 	end
 	bank.blowoff = { bank.bov1, bank.bov2 }
 	bank.ready = true
+	-- a rebuild's new bank takes over only now: the old one played until it was ready (RebuildAll)
+	if bank.replacesEnv then Bank.env = bank end
 end
 
 ---------------------------------------------------------------------------
@@ -557,20 +559,54 @@ function Bank.Build(config)
 	return bank
 end
 
+-- would this engine load from the baked content (no generation, not counted toward maxsounds)?
+local function hasBakedCopy(config)
+	return bakedFiles(bakedEntry(config), "b1on") ~= nil
+end
+
+--[[
+	What an engine plays when it can't have its own bank: past the maxsounds limit with no baked
+	copy, or after its generation failed. A built bank of the same layout (the closest sound), else
+	any built one; nil when there's none yet. Kept per engine (Bank.substitutes): looked up once.
+]]
+Bank.substitutes = Bank.substitutes or {}
+local function substituteFor(config)
+	local substitute = Bank.substitutes[config.id]
+	if substitute then return substitute end
+	local anyBank
+	for _, bank in pairs(Bank.list) do
+		if bank.ready and not bank.failed then
+			if bank.config and bank.config.layout == config.layout then
+				substitute = bank
+				break
+			end
+			anyBank = anyBank or bank
+		end
+	end
+	substitute = substitute or anyBank
+	if substitute then Bank.substitutes[config.id] = substitute end
+	return substitute
+end
+
 --[[
 	The bank for an engine config: built on first use. Cars with the same engine sound share
-	one bank. Past the audio_engine_maxsounds limit, new engines fall back to `fallback`
-	(the car's stock engine) instead of generating more.
+	one bank. Past the audio_engine_maxsounds limit, an engine that would have to be generated
+	falls back to `fallback` (the car's stock engine), and a stock engine itself (no baked copy:
+	the content missing or out of date) to a built bank of the same layout: generated sounds
+	can't be freed, and the limit used to let every stock engine nearby through. A failed build
+	falls back the same way.
 	urgent = true moves it to the front of the queue (the car you're driving).
 ]]
 function Bank.Get(config, fallback, urgent)
 	local bank = Bank.list[config.id]
-	if not bank then
-		if fallback and fallback.id ~= config.id and Bank.count >= maxSoundsConVar:GetInt() then
-			return Bank.Get(fallback, nil, urgent)
-		end
-		bank = Bank.Build(config)
+	local cannotHaveOwn = (bank and bank.failed) or (not bank and Bank.count >= maxSoundsConVar:GetInt() and not hasBakedCopy(config))
+	if cannotHaveOwn then
+		if fallback and fallback.id ~= config.id then return Bank.Get(fallback, nil, urgent) end
+		local substitute = substituteFor(config)
+		if substitute then return substitute end
+		-- nothing else built yet: its own after all (a failed one stays silent, as before)
 	end
+	if not bank then bank = Bank.Build(config) end
 	if urgent and bank.buildCoroutine and Bank.queue[1] ~= bank then
 		for index, queued in ipairs(Bank.queue) do
 			if queued == bank then table.remove(Bank.queue, index) break end
@@ -591,6 +627,8 @@ hook.Add("Think", "audio_engine_bank", function()
 		if not resumed then
 			ErrorNoHalt("[Audio Engine] sound generation failed: " .. tostring(message) .. "\n")
 			bank.buildCoroutine = nil
+			-- never ready: Bank.Get hands out a fallback for it from now on
+			bank.failed = true
 		elseif coroutine.status(bank.buildCoroutine) == "dead" then
 			bank.buildCoroutine = nil
 		end
@@ -618,12 +656,23 @@ end
 hook.Add("InitPostEntity", "audio_engine_bank", prebuild)
 if IsValid(LocalPlayer()) then prebuild() end -- lua refresh / late load
 
+--[[
+	Starts over: the banks are made again as cars need them (Bank.Get from cl_engine, for the cars
+	in hearing), not every one built so far: generated sounds can't be freed, so rebuilding them
+	all added another full set to memory each time. Cars keep playing their old bank until the
+	new one is ready (cl_engine), and the shared bank swaps in only once built: replaced at once,
+	the turbo and EV hum fade-outs met it not ready (a nil name failed the car's update every frame)
+	and road, wind and the supercharger froze at their last volume.
+]]
 function Bank.RebuildAll()
-	local oldList = Bank.list
-	Bank.list, Bank.queue, Bank.count = {}, {}, 0
+	Bank.list, Bank.queue, Bank.count, Bank.substitutes = {}, {}, 0, {}
+	local oldEnv = Bank.env
 	Bank.env = nil
-	Bank.GetEnv()
-	for _, bank in pairs(oldList) do Bank.Build(bank.config) end
+	local newEnv = Bank.GetEnv()
+	if not newEnv.ready and oldEnv and oldEnv.ready then
+		newEnv.replacesEnv = true
+		Bank.env = oldEnv
+	end
 	MsgN("[Audio Engine] regenerating engine sounds at " .. currentSampleRate() .. " Hz...")
 end
 concommand.Add("audio_engine_rebuild", Bank.RebuildAll, nil, "Regenerate the procedural engine sounds (after changing the synth or presets)")

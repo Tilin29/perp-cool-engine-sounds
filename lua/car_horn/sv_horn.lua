@@ -144,6 +144,9 @@ hook.Add("PlayerLeaveVehicle", "car_horn", function(player, vehicle)
 	if IsValid(vehicle) and vehicle:GetNW2Bool(CarHorn.ON_NW, false) then setHorn(vehicle, false) end
 end)
 
+-- a driver leaving the game mid-honk: the horn goes off too (whether PlayerLeaveVehicle runs for
+-- them first isn't known; without it horn_on stayed set and everyone heard it held on)
 hook.Add("PlayerDisconnected", "car_horn", function(player)
+	if player.hornVehicle then stopHonk(player) end
 	honking[player] = nil
 end)

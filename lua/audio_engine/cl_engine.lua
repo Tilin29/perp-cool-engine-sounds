@@ -435,11 +435,15 @@ local function softPitch(ratio)
 	return 2 ^ ((semitones > 0 and bentSemitones or -bentSemitones) / 12)
 end
 
+-- scratch vectors, filled in place: two new Vectors per car per frame for Doppler and the swell
+-- were most of this file's garbage with 40 cars around
+local toListener, toEar = Vector(0, 0, 0), Vector(0, 0, 0)
 local function dopplerFactor(car, deltaTime, listenerInside)
 	local strength = settings.doppler
 	local targetRatio = 1
 	if strength > 0 and not listenerInside and listener.valid then
-		local toListener = listener.position - car.entity:GetPos()
+		toListener:Set(listener.position)
+		toListener:Sub(car.position)
 		local distance = toListener:Length()
 		if distance > 1 then
 			toListener:Mul(1 / distance)
@@ -492,9 +496,12 @@ local function proximityGain(car, listenerInside, noseDirection)
 	local cabinGain = listener.inCabin and 10 ^ (-CABIN_DB / 20) or 1
 	local strength = settings.passby
 	if strength <= 0 then return cabinGain end
-	local toEar = listener.position - car.entity:GetPos()
+	toEar:Set(listener.position)
+	toEar:Sub(car.position)
 	local distance = toEar:Length()
-	local passingSpeed = min(car.velocity:Length(), (car.velocity - listener.velocity):Length())   -- inches/s
+	local carVelocity, listenerVelocity = car.velocity, listener.velocity
+	local relativeX, relativeY, relativeZ = carVelocity.x - listenerVelocity.x, carVelocity.y - listenerVelocity.y, carVelocity.z - listenerVelocity.z
+	local passingSpeed = min(carVelocity:Length(), math.sqrt(relativeX * relativeX + relativeY * relativeY + relativeZ * relativeZ))   -- inches/s
 	local passingSpeedMs = passingSpeed * 0.0254
 	local judgedDistance = math.Clamp(distance - passingSpeed * PASSBY_LEAD, PASSBY_NEAR, PASSBY_FAR)
 	local pace = math.Clamp((passingSpeedMs - PASSBY_SLOW) / (PASSBY_FAST - PASSBY_SLOW), 0, 1)
@@ -762,7 +769,7 @@ local function updateSound(car, deltaTime)
 			getPatch(car, name):Stop()
 			startPatch(car, name, volume, math.Clamp(math.random(95, 105) * (car.dopplerRatio or 1), 20, 255))
 		end
-	elseif car.activeGroups.turbo then
+	elseif car.activeGroups.turbo and sharedBank and sharedBank.turbo then
 		-- turbo switched off in the menu, or the car parked: fade the whistle out
 		setGroup(car, "turbo", singleNameList(sharedBank.turbo), volumeList(car, "turbo", 0), 100, deltaTime)
 	end
@@ -779,7 +786,7 @@ local function updateSound(car, deltaTime)
 			end
 		end
 	end
-	if humVolume > 0 or car.activeGroups.evhum then
+	if humVolume > 0 or (car.activeGroups.evhum and sharedBank and sharedBank.evhum) then
 		local pitch = math.Clamp(100 * (car.dopplerRatio or 1) * (1 + 0.008 * math.min(evSpeedKmh, AudioEngine.EV_HUM_GONE_MPH * 1.609344)), 20, 220)
 		setGroup(car, "evhum", singleNameList(sharedBank.evhum), volumeList(car, "evhum", humVolume), pitch, deltaTime)
 	end
@@ -974,7 +981,7 @@ local function sampleSpeed(car, noseDirection, isOwnCar)
 	local now = RealTime()
 	local elapsed = now - car.sampleTime
 	if elapsed < SPEED_SAMPLE then return end
-	local position = car.entity:GetPos()
+	local position = car.position   -- (this frame's, from updateCar)
 	local predictedVelocity = isOwnCar and AudioEngine.PredictedVelocity and AudioEngine.PredictedVelocity(car.entity)
 	local measuredVelocity = predictedVelocity or (position - car.samplePosition) / elapsed   -- inches/s
 	car.samplePosition, car.sampleTime = position, now
@@ -1048,10 +1055,15 @@ local function updateCar(car, deltaTime)
 		car.restState, car.nextUpdateTime, car.parked = "dormant", RealTime() + SLEEP_STEP, false
 		return
 	end
+	local position = entity:GetPos()
+	car.position = position
+	local cameBackFromDormancy = false
 	if car.dormant then
 		-- back in view, maybe somewhere else: the next speed sample starts from here
-		car.samplePosition, car.sampleTime = entity:GetPos(), RealTime()
+		car.samplePosition, car.sampleTime = position, RealTime()
 		car.dormant = false
+		-- an engine switched off out of view went off long ago: no shut-down sound now
+		cameBackFromDormancy = true
 	end
 
 	-- follow the car's engine profile (retuned in game); its sounds are generated on demand,
@@ -1060,16 +1072,11 @@ local function updateCar(car, deltaTime)
 	car.config = config
 	local player = LocalPlayer()
 	local isOwnCar = IsValid(player) and AudioEngine.RiddenCar(player) == entity
-	local bank = Bank.Get(config, car.stockConfig, isOwnCar)
-	if bank ~= car.bank and bank.ready then
-		stopAll(car)
-		car.bank = bank
-	end
 
 	-- out of range: silent (see audibleRangeOf)
 	local audibleRange = not isOwnCar and listener.valid and audibleRangeOf(car)
 	if audibleRange then
-		local distance = listener.position:Distance(entity:GetPos())
+		local distance = listener.position:Distance(position)
 		car.rangeGain = math.Clamp((audibleRange - distance) / (audibleRange * RANGE_FADE), 0, 1)
 		car.outOfRange = distance > audibleRange or (car.outOfRange and distance > audibleRange * RANGE_BACK) or false
 	else
@@ -1081,6 +1088,21 @@ local function updateCar(car, deltaTime)
 	car.outOfRange = car.outOfRange or car.budgetGain <= 0
 	if car.outOfRange and not car.silencedByRange then stopAll(car) end
 	car.silencedByRange = car.outOfRange
+
+	-- its sounds: loaded (or generated) only once someone can hear the car
+	if not car.outOfRange then
+		local bank = Bank.Get(config, car.stockConfig, isOwnCar)
+		if bank ~= car.bank and bank.ready then
+			stopAll(car)
+			car.bank = bank
+		end
+	end
+	-- the shared bank was rebuilt (Bank.RebuildAll): its sounds have new names, and the loops still
+	-- on the old ones would play on unheld. Start over on the new ones
+	if Bank.env ~= car.envBank then
+		if car.envBank then stopAll(car) end
+		car.envBank = Bank.env
+	end
 
 	-- engine switched on / off by the server
 	local engineOn = entity:GetNW2Bool("audio_on", false)
@@ -1104,14 +1126,14 @@ local function updateCar(car, deltaTime)
 				end
 			end
 		else
-			if not car.firstUpdate and engineState.rpm > 100 and car.bank and car.bank.ready and not car.outOfRange then
+			if not car.firstUpdate and not cameBackFromDormancy and engineState.rpm > 100 and car.bank and car.bank.ready and not car.outOfRange then
 				local pitch = math.Clamp(100 * engineState.rpm / config.idle, 70, 160)
 				playOneShot(car, "stop", car.bank.stop.name, oneShotVolume, pitch, 0, car.bank.stop.dur)
 			end
 			Drivetrain.Stop(engineState)
 			car.chimeAtReady = nil
 			if car.powerUpPatch then car.powerUpPatch:FadeOut(0.1); car.powerUpPatch = nil end
-			if car.firstUpdate then engineState.rpm = 0 end
+			if car.firstUpdate or cameBackFromDormancy then engineState.rpm = 0 end
 		end
 		car.lastEngineOn = engineOn
 	end
@@ -1127,8 +1149,10 @@ local function updateCar(car, deltaTime)
 	-- driving it but watching from a camera, you hear it from outside like anyone else
 	local listenerInside = isOwnCar and GetViewEntity() == player
 	car.listenerInside = listenerInside
-	dopplerFactor(car, deltaTime, listenerInside)
-	car.passbyGain = proximityGain(car, listenerInside, noseDirection)
+	if not car.outOfRange then
+		dopplerFactor(car, deltaTime, listenerInside)
+		car.passbyGain = proximityGain(car, listenerInside, noseDirection)
+	end
 
 	-- the gearbox follows the wheels, and in a slide they still roll at the car's full speed: the
 	-- speed along the nose collapsed as the car went sideways, the revs plunged and shot back up
@@ -1211,6 +1235,7 @@ end
 ]]
 local nextBudget = 0
 local ranked = {}
+local function nearerCar(first, second) return first.budgetDistance < second.budgetDistance end
 
 local function rankCars()
 	if settings.maxCars <= 0 or not listener.valid then
@@ -1227,10 +1252,11 @@ local function rankCars()
 			car.overBudget = false
 		end
 	end
-	table.sort(ranked, function(first, second) return first.budgetDistance < second.budgetDistance end)
+	table.sort(ranked, nearerCar)
 	for rank, car in ipairs(ranked) do
 		if car.overBudget then
-			car.overBudget = rank > settings.maxCars - BUDGET_MARGIN
+			-- (at least the nearest place: with maxcars 1 or 2 the margin left none, and a car never came back)
+			car.overBudget = rank > max(1, settings.maxCars - BUDGET_MARGIN)
 		else
 			car.overBudget = rank > settings.maxCars
 		end
@@ -1241,6 +1267,15 @@ end
 -- tracking
 ---------------------------------------------------------------------------
 local nextVehicleScan = 0
+-- one car's error must not stop the others: the loop below went no further than the failing car,
+-- every frame (and the tunnel probe after it). Printed once per car
+local function updateCarSafely(car, stepTime)
+	local succeeded, message = pcall(updateCar, car, stepTime)
+	if not succeeded and not car.errorPrinted then
+		car.errorPrinted = true
+		ErrorNoHalt("[audio_engine] car " .. tostring(car.entity) .. ": " .. tostring(message) .. "\n")
+	end
+end
 hook.Add("Think", "audio_engine_cars", function()
 	local now = RealTime()
 	if now >= nextVehicleScan then
@@ -1274,10 +1309,10 @@ hook.Add("Think", "audio_engine_cars", function()
 			car.lastUpdateTime = now
 			if perfCallback then
 				local startTime = SysTime()
-				updateCar(car, stepTime)
+				updateCarSafely(car, stepTime)
 				perfCallback(entity, SysTime() - startTime)
 			else
-				updateCar(car, stepTime)
+				updateCarSafely(car, stepTime)
 			end
 		end
 	end
@@ -1286,9 +1321,19 @@ end)
 
 -- the start key, read here and sent as a console command: the server's PlayerButtonDown rides on
 -- the usercmds, so now and then a press never reached it and the car stayed off
+-- key name -> KEY_ code, looked up once per name (a string built and looked up every frame otherwise)
+local keyCodes = {}
+local function keyCodeOf(keyName)
+	local keyCode = keyCodes[keyName]
+	if keyCode == nil then
+		keyCode = _G["KEY_" .. string.upper(keyName)] or false
+		keyCodes[keyName] = keyCode
+	end
+	return keyCode or nil
+end
 local startKeyHeld = false
 hook.Add("Think", "audio_engine_startkey", function()
-	local keyCode = _G["KEY_" .. string.upper(startKeyConVar:GetString())]
+	local keyCode = keyCodeOf(startKeyConVar:GetString())
 	local isDown = keyCode ~= nil and input.IsKeyDown(keyCode)
 	local pressed = isDown and not startKeyHeld
 	startKeyHeld = isDown
@@ -1299,7 +1344,10 @@ hook.Add("Think", "audio_engine_startkey", function()
 	RunConsoleCommand("audio_engine_toggle")
 end)
 
-hook.Add("EntityRemoved", "audio_engine_cars", function(entity)
+-- (fullUpdate: the game "removes" every entity on a full update, after packet loss for one, but they
+-- stay: dropping them cut every car's sound, which came back at idle in neutral)
+hook.Add("EntityRemoved", "audio_engine_cars", function(entity, fullUpdate)
+	if fullUpdate then return end
 	local car = cars[entity]
 	if car then
 		stopAll(car)

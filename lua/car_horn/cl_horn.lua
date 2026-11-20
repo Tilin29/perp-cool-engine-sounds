@@ -388,7 +388,8 @@ local function rankHorns()
 	table.sort(honking, function(first, second) return first.distance < second.distance end)
 	local nextOverBudget = {}
 	for rank, entry in ipairs(honking) do
-		local limit = overBudget[entry.vehicle] and maxHorns - HORN_BUDGET_MARGIN or maxHorns
+		-- (at least the nearest place: with maxcars 1 or 2 the margin left none, a horn never came back)
+		local limit = overBudget[entry.vehicle] and math.max(1, maxHorns - HORN_BUDGET_MARGIN) or maxHorns
 		if maxHorns > 0 and rank > limit and entry.vehicle ~= ownCar then nextOverBudget[entry.vehicle] = true end
 	end
 	overBudget = nextOverBudget
@@ -430,9 +431,17 @@ end
 -- the honk key. Plain alt/shift/ctrl mean the left one (the game only knows KEY_LALT, KEY_LSHIFT...)
 local KEY_ALIASES = { alt = "lalt", shift = "lshift", ctrl = "lcontrol", control = "lcontrol" }
 
+-- key name -> KEY_ code, looked up once per name (a string built and looked up every frame otherwise)
+local keyCodes = {}
 local function isKeyDown(conVar)
-	local keyName = string.lower(conVar:GetString())
-	local keyCode = _G["KEY_" .. string.upper(KEY_ALIASES[keyName] or keyName)]
+	local keyName = conVar:GetString()
+	local keyCode = keyCodes[keyName]
+	if keyCode == nil then
+		local lowerName = string.lower(keyName)
+		keyCode = _G["KEY_" .. string.upper(KEY_ALIASES[lowerName] or lowerName)] or false
+		keyCodes[keyName] = keyCode
+	end
+	keyCode = keyCode or nil
 
 	return keyCode ~= nil and input.IsKeyDown(keyCode)
 end
@@ -497,7 +506,10 @@ hook.Add("Think", "car_horn", function()
 	end
 end)
 
-hook.Add("EntityRemoved", "car_horn", function(entity)
+-- (fullUpdate: the game "removes" every entity on a full update, after packet loss for one, but
+-- they stay: a held horn would cut out)
+hook.Add("EntityRemoved", "car_horn", function(entity, fullUpdate)
+	if fullUpdate then return end
 	local car = cars[entity]
 	if not car then return end
 	if car.honk then car.honk.patch:Stop() end

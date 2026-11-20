@@ -253,9 +253,19 @@ hook.Add("Think", "audio_engine_police", function()
 end)
 
 -- the light key, sent as a console command like the start key (cl_engine.lua)
+-- key name -> KEY_ code, looked up once per name (a string built and looked up every frame otherwise)
+local keyCodes = {}
+local function keyCodeOf(keyName)
+	local keyCode = keyCodes[keyName]
+	if keyCode == nil then
+		keyCode = _G["KEY_" .. string.upper(keyName)] or false
+		keyCodes[keyName] = keyCode
+	end
+	return keyCode or nil
+end
 local lightKeyHeld = false
 hook.Add("Think", "audio_engine_lightkey", function()
-	local keyCode = _G["KEY_" .. string.upper(lightKeyConVar:GetString())]
+	local keyCode = keyCodeOf(lightKeyConVar:GetString())
 	local isDown = keyCode ~= nil and input.IsKeyDown(keyCode)
 	local pressed = isDown and not lightKeyHeld
 	lightKeyHeld = isDown
