@@ -30,6 +30,12 @@ concommand.Add("police_siren_reset_settings", function()
 	print(string.format("Police siren: %d setting(s) reset to default, %d already were", changed, #conVars - changed))
 end, nil, "Put every police siren setting back to its default, printing the old values")
 
+-- the siren's convars in the engine's audio_engine_settings list (its generic hook; nothing happens without it)
+hook.Add("audio_engine/settings", "police_siren", function(groups)
+	groups[#groups + 1] = { title = "Police siren",
+		player = { "police_siren_volume", "police_siren_maxcars", "audio_engine_police_doppler", "police_siren_tonekey" } }
+end)
+
 local LIST_REFRESH = 0.5
 -- a siren past the nearest police_siren_maxcars is let go (with its release); it comes back once it's
 -- SIREN_BUDGET_MARGIN places inside, so two cars at the edge don't take turns
