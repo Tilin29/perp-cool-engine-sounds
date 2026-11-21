@@ -799,6 +799,37 @@ end
 ---------------------------------------------------------------------------
 local cameraFrame = -1
 
+--[[
+	The vehicle's third-person camera, ours: it orbits the middle of the car as drawn (the base
+	gamemode's orbits the driver's eyes), at a fixed distance (no mouse-wheel zoom: the base one
+	reads the wheel, which is the speed limiter's), from the car's own render bounds. The base
+	camera's distance follows the render bounds, which are widened while the car is drawn moved:
+	as the lean correction came and went the camera jumped in and out
+]]
+local CAMERA_RISE = 0.35        -- the orbit's centre: this share of the car's height over its middle
+local CAMERA_DISTANCE = 1       -- x the car's render bounds diagonal (the base camera at zoom 0)
+local CAMERA_WALL_GAP = 4       -- inches kept off a wall behind the camera
+local cameraHull = Vector(CAMERA_WALL_GAP, CAMERA_WALL_GAP, CAMERA_WALL_GAP)
+local cameraResult = {}
+local cameraTrace = { mins = -cameraHull, maxs = cameraHull, mask = MASK_SOLID, filter = notCar, output = cameraResult }
+
+local function thirdPersonOrigin(player, car, angles)
+	local seat = player:GetVehicle()
+	if not IsValid(seat) or not seat.GetThirdPersonMode or not seat:GetThirdPersonMode() then return nil end
+	if player:GetViewEntity() ~= player then return nil end
+	local bounds = originalBounds[car]
+	local mins, maxs
+	if bounds then mins, maxs = bounds.mins, bounds.maxs else mins, maxs = car:GetRenderBounds() end
+	local radius = (maxs - mins):Length() * CAMERA_DISTANCE
+	local centre = car:OBBCenter()
+	centre.z = centre.z + (car:OBBMaxs().z - car:OBBMins().z) * CAMERA_RISE
+	local position, carAngles = AudioEngine.DisplayPose(car)
+	local pivot = LocalToWorld(centre, angle_zero, position, carAngles)
+	cameraTrace.start, cameraTrace.endpos = pivot, pivot - angles:Forward() * radius
+	util.TraceHull(cameraTrace)
+	return cameraResult.HitPos and Vector(cameraResult.HitPos) or cameraTrace.endpos
+end
+
 -- an error in the prediction must not take every addon's camera with it: CalcView still runs
 -- (unmoved), the error is printed once
 local predictionErrorPrinted = false
@@ -812,12 +843,18 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	-- (the car you sit in drawn moved, by the prediction or less leaning: the camera with it)
 	local car = updated and cameraCar()
 	local entry = car and displaced[car]
-	if not entry then return view end
+	local thirdPerson = IsValid(car) and IsValid(player) and thirdPersonOrigin(player, car, (type(view) == "table" and view.angles) or angles)
+	if not entry and not thirdPerson then return view end
 	-- a copy: some cameras hand back the same table each frame
 	local moved = {}
 	if type(view) == "table" then for key, value in pairs(view) do moved[key] = value end end
 	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
-	moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
+	if thirdPerson then
+		-- (already from the car as drawn; the look direction is the player's own, not turned with the car)
+		moved.origin, moved.angles, moved.drawviewer = thirdPerson, moved.angles or angles, true
+	else
+		moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
+	end
 	cameraFrame = FrameNumber()
 	return moved
 end
