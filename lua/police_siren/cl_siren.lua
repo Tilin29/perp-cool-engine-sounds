@@ -58,6 +58,7 @@ local BASE_PITCH = 200
 local PITCH_MIN, PITCH_MAX = 150, 255
 local PITCH_GLIDE = 0.05
 local REVIVE_EVERY = 1   -- s between checks that the game still plays a siren
+local KEEPALIVE_SHARE = 0.002   -- the volume nudge each check that restarts a siren stopsound killed
 
 -- sound.Generate names can't be reused: a lua refresh builds under a new serial
 PoliceSiren.Serial = (PoliceSiren.Serial or 0) + 1
@@ -359,6 +360,13 @@ local function update(vehicle)
 			if not state.patch:IsPlaying() then
 				state.patch:Stop()
 				state.patch:PlayEx(state.volume, state.pitch)
+			else
+				-- stopsound kills the channel but IsPlaying (the patch's own flag) stays true; a volume
+				-- change on a sound whose channel is gone starts it again (Source's S_StartSound). The
+				-- siren's volume often stays put (inside the car, standing), so it gets one each check,
+				-- alternating with KEEPALIVE_SHARE under its level (~0.02 dB)
+				state.keepAliveLow = not state.keepAliveLow
+				state.patch:ChangeVolume(state.volume * (state.keepAliveLow and 1 - KEEPALIVE_SHARE or 1), 0)
 			end
 		end
 		-- (inside the car you move with it: no Doppler)

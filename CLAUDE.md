@@ -196,11 +196,12 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     it is caught (`PlayerBindPress`, 0.1 s later), typed in the console it needs `audio_engine_restart_sounds` (`AudioEngine.RestartSounds`:
     stopAll on every car, groups start again next update). The siren and horn restart theirs on the generic `audio_engine/restart-sounds`
     hook and catch the bind themselves too (each works without the engine)
-    A typed stopsound (sirens stayed dead, the user): a once-a-second volume nudge on every playing loop (a change on a sound whose
-    channel is gone starts it again, Source's S_StartSound) was tried and removed: it didn't bring the sirens back, and with many
-    cars it restarted every sound the game had taken back for want of channels, a loud "water drop" blip from passing sirens after
-    the first few (the user, 30-car race). stopsound seems to drop sound.Generate data (the siren and horn are generated; the
-    engines' WAV files came back). So the siren's and horn's restarts build every tone again under a new serial (`police_siren_restart`, `car_horn_restart`, also run by
+    A typed stopsound (sirens stayed dead, the user): a volume change on a sound whose channel is gone starts it again (Source's
+    S_StartSound falls through to starting it), so loops whose volume moves came back alone and steady ones didn't. Once a second
+    every playing loop gets a volume change (`KEEPALIVE_SHARE` 0.002 under its level, alternating, ~0.02 dB): engine groups
+    (`car.keepAliveLow`), sirens, held honks. Didn't bring the sirens back (the user), nor did a Stop + PlayEx: stopsound seems
+    to drop sound.Generate data (the siren and horn are generated; the engines' WAV files came back). So the siren's and horn's
+    restarts build every tone again under a new serial (`police_siren_restart`, `car_horn_restart`, also run by
     audio_engine_restart_sounds). Not yet confirmed in game; if it works, WAV files baked offline would survive a typed stopsound
     "Clean up everything" (game.CleanUpMap) broke the sirens the same way (the user); it's announced: `PostCleanupMap` restarts the
     engine (stopAll + `Bank.RebuildAll`, generated banks die too), the siren and the horn (each hooks it itself)
