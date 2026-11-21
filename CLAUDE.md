@@ -343,7 +343,12 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     cornering and its inside wheels hung off the road) within 4000 in: 4 traces down from the body's corners (its OBB, 80% out, 24 in
     over its bottom; not the wheel attachments: they ride on the wheel bones, read before the car is drawn they can be one point) to the
     road each frame, each side's height over it (`audio_engine_lean_info` prints what it measures; `audio_engine_lean_set <0..1>` tries a share on the car you sit in, this client only, until a reload; works in game, the user), turned about the lower side's wheels on the road (`levelCar`, after the prediction, smoothed 0.08 s);
-    the camera follows the car you sit in when it's drawn moved (`cameraCar`). The camera: `hook.Call` is wrapped for "CalcView" only
+    the camera follows the car you sit in when it's drawn moved (`cameraCar`).
+    Third-person vehicle camera is ours (`thirdPersonOrigin`, in calcView): it orbits the drawn car's middle (`CAMERA_RISE` 0.35 of its
+    height up), not the driver's eyes (the user's), at a fixed `CAMERA_DISTANCE` 1 x the car's own render bounds diagonal (the base camera
+    at zoom 0), hull-traced off walls. No mouse-wheel zoom (base `GM:VehicleMove` still sets the camera distance, ignored; the wheel is the
+    speed limiter's). The base camera's distance follows the render bounds, which widenBounds pads while a car is drawn moved: the lean
+    correction coming and going made the camera jump in and out (the user's "flickers"). The camera: `hook.Call` is wrapped for "CalcView" only
     (re-wrapped every 2 s if a hook library replaced it; every wrapper we made is in `AudioEngine.predictHookCalls`, they call the newest
     `AudioEngine.PredictCalcView`, and inside one CalcView (`AudioEngine.predictInCalcView`) the next of ours passes it on: nested wrappers
     moved the camera twice; `updateFrame` runs in a pcall), so any gamemode/addon camera is moved with the car; if the camera didn't run through
