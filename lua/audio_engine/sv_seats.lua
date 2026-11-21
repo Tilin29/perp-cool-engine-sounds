@@ -205,7 +205,7 @@ hook.Add("PlayerUse", "audio_engine_seats", function(player, entity)
 	if not seatsConVar:GetBool() or entity:GetClass() ~= "prop_vehicle_jeep" then return end
 	-- (false, not nil: nil let Source's own use through, so E held on into the cooldown could put a
 	-- passenger who'd just got in or out into the free driver's seat)
-	if (player.audioSeatUseAt or 0) > CurTime() then return false end
+	if (player.audioSeatUseAt or 0) > CurTime() or player.audioSeatUseHeld then return false end
 	local config = AudioEngine.GetCarConfig(entity)
 	if not config then return end
 	local seats = layout(entity, config)
@@ -293,17 +293,38 @@ local function placeBeside(player, vehicle, seatIndex)
 	end
 end
 
+-- out of any seat, the driver's too: no seat until E has been let go (and the cooldown is over).
+-- The E that got you out is still down, and it went on to put you in the nearest free seat:
+-- out of the driver's seat, now and then the passenger's
+hook.Add("KeyRelease", "audio_engine_seats", function(player, key)
+	if key == IN_USE then player.audioSeatUseHeld = nil end
+end)
+
+-- Getting out you keep looking the way you looked in the car: the game turns you to the seat's
+-- exit (looking at the ground). In a seat the eye angles are the seat's own (local), so the way
+-- you look is taken in world angles as you ask to get out, still seated (CanExitVehicle: by the
+-- time PlayerLeaveVehicle runs the game may have turned them already). Returns nothing: the
+-- answer is left to the others
+hook.Add("CanExitVehicle", "audio_engine_seats", function(seat, player)
+	if not IsValid(seat) or not IsValid(player) then return end
+	local view = seat:LocalToWorldAngles(player:EyeAngles())
+	player.audioSeatView = Angle(math.Clamp(math.NormalizeAngle(view.p), -89, 89), view.y, 0)
+end)
+
 hook.Add("PlayerLeaveVehicle", "audio_engine_seats", function(player, pod)
-	local vehicle = pod.audioSeatCar
-	if not vehicle then return end
 	player.audioSeatUseAt = CurTime() + USE_COOLDOWN
+	player.audioSeatUseHeld = player:KeyDown(IN_USE) or nil
+	local view = player.audioSeatView
+	player.audioSeatView = nil
+	local vehicle = pod.audioSeatCar
 	local seatIndex = pod.audioSeatIndex
-	-- after Source has put the player at the pod's own exit (inside the car, or nowhere)
+	-- after Source has put the player at the seat's own exit (for our seats: inside the car, or nowhere)
 	timer.Simple(0, function()
-		if IsValid(player) and IsValid(vehicle) and not player:InVehicle() then
-			placeBeside(player, vehicle, seatIndex)
+		if IsValid(player) and not player:InVehicle() then
+			if vehicle and IsValid(vehicle) then placeBeside(player, vehicle, seatIndex) end
+			if view then player:SetEyeAngles(view) end
 		end
-		if IsValid(pod) and not IsValid(pod:GetDriver()) then pod:Remove() end
+		if vehicle and IsValid(pod) and not IsValid(pod:GetDriver()) then pod:Remove() end
 	end)
 end)
 
