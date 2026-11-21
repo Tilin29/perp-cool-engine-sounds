@@ -280,10 +280,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   client only draws ahead of it. The average PERP player has 150 ms ping: a key showed ~0.25 s late (half ping up, half down, cl_interp 0.1).
   - `sh_handling.lua` (`AudioEngine.Handling`): the model, plain Lua on numbers (no Vector/Angle: no allocations, and it runs offline).
     Bodies { px.. position, vx.. velocity (in/s), ax.. model x axis, bx.. y (left), cx.. z (up), yawRate (deg/s, left +), groundShare,
-    controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 4.5 / `steerReturn` 6 / `steerReverse` 9 per s), the yaw rate
-    follows a bicycle-model target (on grip: the target eased at `yawFollow` 8/s and the car put on it every tick, `state.yawTarget`, sent to the
+    controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 7 / `steerReturn` 8 / `steerReverse` 9 per s; were 4.5 / 6), the yaw rate
+    follows a bicycle-model target (on grip: the target eased at `yawFollow` 12/s (was 8: ~0.5 s to the full turn) and the car put on it every tick, `state.yawTarget`, sent to the
     driver; closing 12% of the gap a tick, Source's tyres held it well short: "barely turns" at 40-70 mph; not yet run in game; handbrake/drift:
-    drawn at their follow rates) (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 30 m/s, wheelbase from the
+    drawn at their follow rates) (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 40 m/s (was 30: the lock, not the tyres, capped the turn at 40-60 mph, the user found cars stiff there; full lock now 86 deg/s at 40, 74 at 50, 65 at 60 mph on a 3.4 m wheelbase, was 68 / 60 / 49; measured in game at the old values: set = measured), wheelbase from the
     attachments, `AudioEngine.CarGeometry`, moved here from sv_stability) capped at `grip` x g / speed, and sideways speed goes at up to
     `grip` g towards a rolling car's (the rear axle along its wheels: the middle moves into the turn at wheelbase/2 x yaw rate; slip
     angles are the rear axle's): held at 0 it set the rear tyres across their path, Source's tyres fought the model and W-held turns bled

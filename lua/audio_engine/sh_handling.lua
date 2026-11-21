@@ -64,12 +64,12 @@ Handling.driveModelConVar = Handling.driveModelConVar or CreateConVar("audio_eng
 ---------------------------------------------------------------------------
 local HANDLING_DEFAULTS = {
 	-- steering: A/D are on/off keys, the wheel angle ramps to them
-	steerRate = 4.5,        -- per second towards the pressed key (centre to full lock in 0.22 s)
-	steerReturn = 6,        -- per second back to the centre with no key
+	steerRate = 7,          -- per second towards the pressed key (centre to full lock in 0.14 s; 4.5 felt slow to turn in)
+	steerReturn = 8,        -- per second back to the centre with no key
 	steerReverse = 9,       -- per second through the centre, from one lock to the other
 	lockSlow = 32,          -- front wheel angle at full lock, parking speeds (degrees)
 	lockFast = 5,           -- ... at lockFadeSpeed and over
-	lockFadeSpeed = 30,     -- m/s
+	lockFadeSpeed = 40,     -- m/s (90 mph; at 30 the lock, not the tyres, capped the turn at 40-60 mph: the user, "stiff")
 	lockFadePower = 1.4,    -- (1 - speed / lockFadeSpeed) ^ this blends slow into fast
 	-- the tyres: the most sideways acceleration they hold (g). Turns are capped at it (the yaw
 	-- rate asked never needs more), and a slide loses its sideways speed at it
@@ -106,7 +106,7 @@ local HANDLING_DEFAULTS = {
 	turnFloor = 53,
 	turnFloorSpeed = 36,    -- m/s (80 mph)
 	turnFloorPower = 0.7,   -- (0.5 left 50-60 mph short, the user)
-	yawFollow = 8,          -- per second: how firmly the rotation follows the steering
+	yawFollow = 12,         -- per second: how firmly the rotation follows the steering (8: ~0.5 s to the full turn)
 	minSpeed = 1.5,         -- m/s: under this Source alone (parking, standing)...
 	fadeSpeed = 3,          -- ...fully on minSpeed + this
 	-- handbrake (Space): the rear lets go, the car rotates past what the steering asks
