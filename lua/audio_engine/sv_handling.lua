@@ -161,6 +161,8 @@ local driveModelConVar = Handling.driveModelConVar   -- audio_engine_drivemodel 
 -- a collision that changed the car's velocity a lot: the model lets go while the crash plays out
 local function onCollide(vehicle, data)
 	if not data.HitNormal or math.abs(data.HitNormal.z) > 0.7 then return end   -- landing, bottoming out
+	-- any touch from the side (a wall, a car): the model's obstructed check only runs then
+	vehicle.audioContactAt = CurTime()
 	if not (data.OurNewVelocity and data.OurOldVelocity) then return end
 	local settings = vehicle.audioHandlingSpec and vehicle.audioHandlingSpec.settings or AudioEngine.HANDLING
 	if (data.OurNewVelocity - data.OurOldVelocity):LengthSqr() < settings.impactSpeed * settings.impactSpeed then return end
@@ -435,6 +437,8 @@ local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
 	Handling.SetAxes(body, vehicle:GetAngles())
 	body.yawRate = physics:GetAngleVelocity().z     -- local, deg/s: the car's up
 	body.groundShare = groundShareOf(vehicle)
+	local contactAt = vehicle.audioContactAt
+	body.touching = contactAt ~= nil and now - contactAt < spec.settings.contactHold
 	local impactShare = impactShareOf(vehicle, spec.settings, now)
 	-- (carConfig.stability = false: a car registered without the model)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)

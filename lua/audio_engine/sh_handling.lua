@@ -90,10 +90,14 @@ local HANDLING_DEFAULTS = {
 	sideHold = 1.15,
 	-- obstructed: when the car turned less than it was set to last tick by over blockedYaw deg/s
 	-- (+ blockedShare of it), something solid holds it (a wall, a car): for blockedTime s the turn
-	-- only follows at yawFollow, as before the every-tick hold, instead of forcing it again
+	-- only follows at yawFollow, as before the every-tick hold, instead of forcing it again.
+	-- Only while the car touches something from the side (body.touching: a side collision within
+	-- contactHold s, sv_handling): without it Source's own tyres pulling the rotation back counted
+	-- as a wall and the car kept dropping to the gentle follow (it turned much less)
 	blockedYaw = 15,
 	blockedShare = 0.5,
 	blockedTime = 0.3,
+	contactHold = 0.5,      -- s a side collision counts as touching
 	-- turn floor (arcade): the keys' full-lock turn never under turnFloor deg/s at turnFloorSpeed,
 	-- x (turnFloorSpeed / speed) ^ turnFloorPower elsewhere (still the lock's at most). The tyres' grip
 	-- alone gave the SLR ~26 deg/s at 80 mph (a 180 in 7 s); the user wanted a tight 180 at 80 mph.
@@ -293,7 +297,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 		-- held against something (a wall: the front corner stopped every tick, slammed round again by
 		-- the next and the car climbed the wall, the user, on the Furai): back to following gently
 		local set = state.yawSet
-		if set and abs(body.yawRate - set) > settings.blockedYaw + settings.blockedShare * abs(set) then
+		if set and body.touching and abs(body.yawRate - set) > settings.blockedYaw + settings.blockedShare * abs(set) then
 			state.blockedFor = settings.blockedTime
 		end
 		if (state.blockedFor or 0) > 0 then

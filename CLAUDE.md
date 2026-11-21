@@ -329,7 +329,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     Control's `forwardChange` only takes speed off (a held turn gains none), never adds it: keeping the speed both ways turned a slide's
     (a wall's) velocity back along the nose at full speed, and scraping a wall the car kept its speed and climbed it. Obstructed
     (`blockedYaw` 15 + `blockedShare` 0.5 x the turn under what was set last tick, `state.yawSet`): `blockedTime` 0.3 s of the gentle
-    yawFollow pull instead of the every-tick hold; controlShare 0 on spiked cars,
+    yawFollow pull instead of the every-tick hold, only while touching something (`body.touching`: a side PhysicsCollide, any speed, within
+    `contactHold` 0.5 s, `vehicle.audioContactAt`; without it Source's own tyres taking the rotation back tripped it and cars turned much
+    less, the user's "used to turn a lot better"; not yet run in game); controlShare 0 on spiked cars,
     `carConfig.stability == false`, or with the convar off. Every ~30 ms (every other tick at 66) an unreliable net `audio_engine_drive` to the
     driver (only one whose client predicts: not single player / the listen host / userinfo `audio_engine_predict` 0): entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
     velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state (~60 bytes). No vehicle params set while
