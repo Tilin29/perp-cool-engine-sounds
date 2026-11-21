@@ -200,6 +200,21 @@ end
 
 local listener = {}
 local listenerPosition, listenerVelocity = Vector(0, 0, 0), Vector(0, 0, 0)
+--[[
+	Each siren car's velocity, tracked while it's silent too (the Think hook, every siren car): a tone
+	started with an empty track and at the plain pitch, the car's speed showed up a few samples later
+	and the pitch swept to the Doppler one at DOPPLER_RATE as it faded in, a "water drop" blip each
+	time a passing siren started (lights on, or back inside police_siren_maxcars; the user, 30 cars)
+]]
+local velocityTracks = setmetatable({}, { __mode = "k" })
+local function velocityOf(vehicle)
+	local track = velocityTracks[vehicle]
+	if not track then
+		track = {}
+		velocityTracks[vehicle] = track
+	end
+	return trackVelocity(track, vehicle:GetPos(), RealTime())
+end
 
 -- the listener: the camera entity when the view is on one, else the player's eyes (EyePos()
 -- is only reliable while drawing: read in Think it jittered, and so did the listener's speed)
@@ -276,7 +291,10 @@ local function startTone(vehicle, toneId, inside, fadeTime)
 	end
 	local patch = CreateSound(vehicle, name)
 	patch:SetSoundLevel(config.soundLevels[string.lower(vehicle:GetModel() or "")] or config.soundLevel)
-	patch:PlayEx(0, BASE_PITCH)
+	-- (at the pitch it's heard at now, not swept to it: see velocityTracks)
+	local ratio = inside and 1 or dopplerRatio(vehicle:GetPos(), velocityOf(vehicle))
+	local pitch = math.Clamp(math.Round(BASE_PITCH * ratio), PITCH_MIN, PITCH_MAX)
+	patch:PlayEx(0, pitch)
 	local baseVolume = config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
 	local volume = baseVolume * (inside and 1 or distanceGain(vehicle))
 
@@ -284,7 +302,7 @@ local function startTone(vehicle, toneId, inside, fadeTime)
 		toneId = toneId, name = name, vehicle = vehicle, inside = inside, patch = patch, baseVolume = baseVolume,
 		airPhase = math.random() * 2 * math.pi, airPhase2 = math.random() * 2 * math.pi,
 		volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
-		pitch = BASE_PITCH, dopplerRatio = 1, velocityTrack = {}, nextReviveCheck = RealTime() + REVIVE_EVERY,
+		pitch = pitch, dopplerRatio = ratio, nextReviveCheck = RealTime() + REVIVE_EVERY,
 	}
 end
 
@@ -334,7 +352,7 @@ local function update(vehicle)
 			end
 		end
 		-- (inside the car you move with it: no Doppler)
-		local velocity = trackVelocity(state.velocityTrack, vehicle:GetPos(), RealTime())
+		local velocity = velocityOf(vehicle)
 		local targetRatio = listenerInside and 1 or dopplerRatio(vehicle:GetPos(), velocity)
 		state.dopplerRatio = state.dopplerRatio + (targetRatio - state.dopplerRatio) * math.min(1, RealFrameTime() * DOPPLER_RATE)
 		local pitch = math.Clamp(math.Round(BASE_PITCH * state.dopplerRatio), PITCH_MIN, PITCH_MAX)
@@ -405,7 +423,10 @@ hook.Add("Think", "police_siren", function()
 		rankSirens()
 	end
 	for _, vehicle in ipairs(sirenCars) do
-		if IsValid(vehicle) then update(vehicle) end
+		if IsValid(vehicle) then
+			velocityOf(vehicle)
+			update(vehicle)
+		end
 	end
 	-- gone, or no longer a siren car (its lightbar went, or reads invalid out of view): nothing
 	-- above updates it any more, so its loop would play on for good
