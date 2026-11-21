@@ -235,16 +235,6 @@ local GROUP_START_VOLUME = 0.01
 -- under 0.002 before, so a fast rev sweep kept six or seven bands open as they faded)
 local GROUP_STOP_VOLUME, GROUP_STOP_HOLD = 0.004, 0.1
 
---[[
-	stopsound kills every channel, but a CSoundPatch still says it plays (IsPlaying is its own flag,
-	cleared only by Stop()), so the revive never saw it. A volume change on a sound whose channel is
-	gone starts it again (Source's S_StartSound: a change it can't apply to a playing channel falls
-	through to starting the sound). Loops whose volume moves came back by themselves; steady ones
-	(idling, a siren from inside) stayed silent. So once a second (car.reviveCheckDue) every playing
-	loop gets a volume change, alternating between its level and KEEPALIVE_SHARE under it (~0.02 dB)
-]]
-local KEEPALIVE_SHARE = 0.002
-
 local function setGroup(car, groupKey, names, targetVolumes, pitch, deltaTime)
 	local total = 0
 	for i = 1, #targetVolumes do total = total + targetVolumes[i] end
@@ -271,13 +261,6 @@ local function setGroup(car, groupKey, names, targetVolumes, pitch, deltaTime)
 				if roomChanged or (car.reviveCheckDue and not patch:IsPlaying()) then
 					patch:Stop()
 					startPatch(car, names[i], max(currentVolumes[i], 0.001), pitch)
-				elseif car.reviveCheckDue then
-					-- (stopsound: see KEEPALIVE_SHARE)
-					local volume = max(currentVolumes[i], 0.001) * (car.keepAliveLow and 1 - KEEPALIVE_SHARE or 1)
-					patch:ChangeVolume(volume, 0)
-					car.sentVolumes[names[i]] = volume
-					-- (the pitch as every frame: the nudge is under sendPatch's volume step)
-					sendPatch(car, names[i], patch, volume, pitch)
 				else
 					sendPatch(car, names[i], patch, max(currentVolumes[i], 0.001), pitch)
 				end
@@ -1213,7 +1196,7 @@ local function updateCar(car, deltaTime)
 	updateRoom(car, deltaTime)
 	local now = RealTime()
 	car.reviveCheckDue = now >= car.nextReviveCheck
-	if car.reviveCheckDue then car.nextReviveCheck, car.keepAliveLow = now + 1, not car.keepAliveLow end
+	if car.reviveCheckDue then car.nextReviveCheck = now + 1 end
 	if not car.outOfRange then updateSound(car, deltaTime) end
 
 	-- the model's own dashboard tach needle follows the revs. Cars whose wings/vents also hang off

@@ -66,7 +66,6 @@ local BASE_PITCH = 200
 local PITCH_MIN, PITCH_MAX = 100, 255
 local PITCH_GLIDE = 0.05
 local REVIVE_EVERY = 1   -- s between checks that the game still plays a honk
-local KEEPALIVE_SHARE = 0.002   -- the volume nudge each check that restarts a honk stopsound killed
 --[[
 	The game knows a playing sound by its entity and name: a honk fading out and a new one of the
 	same name on the same car were the same sound to it, so the old one's fade and stop killed the
@@ -365,11 +364,6 @@ local function update(vehicle, car, now)
 			honk.volume, honk.pitch = volume, pitch
 			return
 		end
-		-- stopsound kills the channel but IsPlaying (the patch's own flag) stays true; a volume change on
-		-- a sound whose channel is gone starts it again (Source's S_StartSound): one each check
-		honk.keepAliveLow = not honk.keepAliveLow
-		honk.volume = volume * (honk.keepAliveLow and 1 - KEEPALIVE_SHARE or 1)
-		honk.patch:ChangeVolume(honk.volume, 0)
 	end
 	if math.abs(volume - honk.volume) > VOLUME_STEP then
 		honk.patch:ChangeVolume(volume, VOLUME_GLIDE)
