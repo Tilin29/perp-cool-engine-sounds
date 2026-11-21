@@ -515,3 +515,20 @@ hook.Add("EntityRemoved", "car_horn", function(entity, fullUpdate)
 	if car.honk then car.honk.patch:Stop() end
 	cars[entity] = nil
 end)
+
+-- after stopsound: it kills the channels but the patches still think they play (IsPlaying is their
+-- own flag). A held honk is started again; caught from a key bound to stopsound, or the audio
+-- engine's restart (audio_engine_restart_sounds) through its generic hook
+local function restartHonks()
+	for _, car in pairs(cars) do
+		local honk = car.honk
+		if honk then
+			honk.patch:Stop()
+			honk.patch:PlayEx(honk.volume, honk.pitch)
+		end
+	end
+end
+hook.Add("audio_engine/restart-sounds", "car_horn", restartHonks)
+hook.Add("PlayerBindPress", "car_horn_stopsound", function(_, bind, pressed)
+	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, restartHonks) end
+end)

@@ -1359,3 +1359,25 @@ end)
 function AudioEngine.GetClientCar(entity)
 	return cars[entity]
 end
+
+--[[
+	stopsound (the console command) kills every channel the game plays, but a CSoundPatch keeps its
+	own "playing" flag (Source's soundenvelope: IsPlaying() is that flag, only Stop() clears it), so
+	the once-a-second revive never saw the loops were gone and the cars stayed silent. Lua isn't told
+	when stopsound runs: it's caught from a key bound to it (PlayerBindPress), and
+	audio_engine_restart_sounds does the same by hand. Every car's sounds are stopped and its groups
+	start again on its next update (a short fade in). Other modules (siren, horn) restart theirs on
+	the audio_engine/restart-sounds hook.
+]]
+function AudioEngine.RestartSounds()
+	for _, car in pairs(cars) do stopAll(car) end
+	hook.Run("audio_engine/restart-sounds")
+end
+
+concommand.Add("audio_engine_restart_sounds", function() AudioEngine.RestartSounds() end, nil,
+	"Start every car sound again (after stopsound)")
+
+-- (a moment later: the bind's stopsound runs after this hook)
+hook.Add("PlayerBindPress", "audio_engine_stopsound", function(_, bind, pressed)
+	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, AudioEngine.RestartSounds) end
+end)

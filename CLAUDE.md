@@ -191,6 +191,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `audio_engine_tunnel` (0 = off, default 1 = Source's auto preset, 7 = large tunnel, `CSoundPatch:SetDSP`); a car in one carries `TUNNEL_LEVEL` 8 dB further; both inside: no pass-by drop with range.
     SetDSP/SetSoundLevel go on before PlayEx (`startPatch`) and loops restart when the room changes (`roomGeneration`): not known to reach a playing sound
   - once a second each active loop is checked with `IsPlaying` and restarted if the game dropped it (`car.revive`)
+  - `stopsound` kills every channel but not a CSoundPatch's own playing flag (Source's soundenvelope: `IsPlaying` is that flag,
+    only `Stop()` clears it), so the revive never fired and cars stayed silent. Lua isn't told when stopsound runs: a key bound to
+    it is caught (`PlayerBindPress`, 0.1 s later), typed in the console it needs `audio_engine_restart_sounds` (`AudioEngine.RestartSounds`:
+    stopAll on every car, groups start again next update). The siren and horn restart theirs on the generic `audio_engine/restart-sounds`
+    hook and catch the bind themselves too (each works without the engine)
   - each car's update runs in a pcall (`updateCarSafely`, printed once per car): one failing car stopped every car after it.
     Every client `EntityRemoved` hook (cl_engine, cl_handling, cl_siren, cl_horn) ignores `fullUpdate` (entities stay).
     Back from dormancy a car takes the engine state as it is (no shut-down sound for an engine switched off out of view).
