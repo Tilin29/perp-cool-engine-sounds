@@ -533,6 +533,180 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 end
 
 ---------------------------------------------------------------------------
+-- drawn less leaning: cars in AudioEngine.CAR_LEAN_LEVEL (sh_carlist.lua) have that share of their
+-- lean against the road taken out where they're drawn, turned about the axis of their lower side's
+-- wheels on the road, so those stay on it and the raised side comes down. Drawing only: the
+-- physics, the server and everyone's collisions are as they were
+---------------------------------------------------------------------------
+local LEAN_DISTANCE = 4000      -- inches from your eyes: further out a car is left as it is
+local LEAN_REACH = 96           -- inches the traces look down from each wheel's centre
+local LEAN_FOLLOW = 0.08        -- s: the correction's smoothing (the ground under a wheel jumps at kerbs)
+local LEAN_MAX = math.rad(15)   -- never turned more than this
+local LEAN_INSET = 0.8           -- the corners measured: this share of the body's half length / width out
+local LEAN_START = 24            -- inches above the bottom of the body the traces start
+local leanCars, nextLeanScan = {}, 0
+local leanAngles = setmetatable({}, { __mode = "k" })   -- vehicle -> the correction (radians, + = first side high)
+local leanSeen = setmetatable({}, { __mode = "k" })     -- vehicle -> what the last frame measured (audio_engine_lean_info)
+local cornerLayouts = {}   -- model -> 4 points at the bottom of the body, in the car's space: one side front, back, then the other
+local groundResult = {}
+local groundTrace = { mask = MASK_SOLID, filter = notCar, output = groundResult }
+local wheelPoints, groundPoints = {}, {}
+
+-- The corners come from the model's bounds, which are there from the start. (The wheel attachments
+-- ride on the wheel bones: read before the car has been drawn they can all be one point, and a
+-- layout cached from that corrected nothing.) The long axis is the longer side of the bounds
+local function wheelLayoutOf(vehicle)
+	local model = vehicle:GetModel()
+	local layout = cornerLayouts[model]
+	if layout then return layout end
+	local mins, maxs = vehicle:OBBMins(), vehicle:OBBMaxs()
+	local centreX, centreY = (mins.x + maxs.x) * 0.5, (mins.y + maxs.y) * 0.5
+	local halfX, halfY = (maxs.x - mins.x) * 0.5 * LEAN_INSET, (maxs.y - mins.y) * 0.5 * LEAN_INSET
+	if halfX < 8 or halfY < 8 then return nil end
+	local z = mins.z + LEAN_START
+	if halfY >= halfX then
+		-- long along y: the sides are -x and +x
+		layout = { Vector(centreX - halfX, centreY + halfY, z), Vector(centreX - halfX, centreY - halfY, z),
+			Vector(centreX + halfX, centreY + halfY, z), Vector(centreX + halfX, centreY - halfY, z) }
+	else
+		layout = { Vector(centreX + halfX, centreY - halfY, z), Vector(centreX - halfX, centreY - halfY, z),
+			Vector(centreX + halfX, centreY + halfY, z), Vector(centreX - halfX, centreY + halfY, z) }
+	end
+	cornerLayouts[model] = layout
+	return layout
+end
+
+-- point turned about the axis (unit vector) through pivot, by angle (radians)
+local function turnedAbout(point, pivot, axis, angle)
+	local x, y, z = Handling.Rotate(point.x - pivot.x, point.y - pivot.y, point.z - pivot.z, axis.x, axis.y, axis.z, angle)
+	return Vector(pivot.x + x, pivot.y + y, pivot.z + z)
+end
+
+local function levelCar(vehicle, share, frame, realNow, frameTime)
+	local layout = wheelLayoutOf(vehicle)
+	if not layout then return end
+	-- from where it's drawn already (the prediction), else where Source has it
+	local entry = displaced[vehicle]
+	local position = entry and entry.toPosition or vehicle:GetPos()
+	local angles = entry and entry.toAngles or vehicle:GetAngles()
+	local target, onGround = 0, true
+	local seen = leanSeen[vehicle] or {}
+	leanSeen[vehicle] = seen
+	for index = 1, 4 do
+		local wheel = LocalToWorld(layout[index], angle_zero, position, angles)
+		wheelPoints[index] = wheel
+		groundTrace.start, groundTrace.endpos = wheel, wheel - Vector(0, 0, LEAN_REACH)
+		util.TraceLine(groundTrace)
+		if not groundResult.Hit or groundResult.StartSolid then
+			onGround, seen.missed = false, index
+			break
+		end
+		groundPoints[index] = Vector(groundResult.HitPos)
+	end
+	local leftMid, rightMid, axis
+	if onGround then
+		-- each side's height over the road, and the car's long axis from its wheels
+		local leftHeight = (wheelPoints[1].z - groundPoints[1].z + wheelPoints[2].z - groundPoints[2].z) * 0.5
+		local rightHeight = (wheelPoints[3].z - groundPoints[3].z + wheelPoints[4].z - groundPoints[4].z) * 0.5
+		leftMid, rightMid = (wheelPoints[1] + wheelPoints[2]) * 0.5, (wheelPoints[3] + wheelPoints[4]) * 0.5
+		axis = (wheelPoints[1] + wheelPoints[3]) - (wheelPoints[2] + wheelPoints[4])
+		axis:Normalize()
+		local across = rightMid - leftMid
+		local track = (across - axis * across:Dot(axis)):Length()
+		if track > 1 then target = clamp(math.atan((leftHeight - rightHeight) / track) * share, -LEAN_MAX, LEAN_MAX) end
+		seen.leftHeight, seen.rightHeight, seen.track, seen.missed = leftHeight, rightHeight, track, nil
+	end
+	seen.onGround, seen.target, seen.at = onGround, target, realNow
+	-- (off the ground, a jump: eased back to none)
+	local current = leanAngles[vehicle] or 0
+	current = current + (target - current) * math.min(1, frameTime / LEAN_FOLLOW)
+	leanAngles[vehicle] = current
+	seen.current = current
+	if not onGround or math.abs(current) < 0.002 then return end
+	-- about the lower side's wheels on the road: the raised side comes down to it
+	local pivot = current > 0 and (groundPoints[3] + groundPoints[4]) * 0.5 or (groundPoints[1] + groundPoints[2]) * 0.5
+	local raised = current > 0 and leftMid or rightMid
+	local turn = math.abs(current)
+	if turnedAbout(raised, pivot, axis, turn).z > raised.z then turn = -turn end
+	local newPosition = turnedAbout(position, pivot, axis, turn)
+	local forward, up = angles:Forward(), angles:Up()
+	local forwardX, forwardY, forwardZ = Handling.Rotate(forward.x, forward.y, forward.z, axis.x, axis.y, axis.z, turn)
+	local upX, upY, upZ = Handling.Rotate(up.x, up.y, up.z, axis.x, axis.y, axis.z, turn)
+	displace(vehicle, newPosition, Vector(forwardX, forwardY, forwardZ):AngleEx(Vector(upX, upY, upZ)), frame, realNow)
+end
+
+local function levelLeaningCars(frame, realNow, eyePosition, frameTime)
+	local levels = AudioEngine.CAR_LEAN_LEVEL
+	if not levels or next(levels) == nil then return end
+	if realNow >= nextLeanScan then
+		nextLeanScan = realNow + 0.5
+		table.Empty(leanCars)
+		for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
+			local carConfig = AudioEngine.GetCarConfig(vehicle)
+			local share = carConfig and levels[carConfig.name]
+			if share and share > 0 then leanCars[vehicle] = share end
+		end
+	end
+	local maxDistanceSqr = LEAN_DISTANCE * LEAN_DISTANCE
+	for vehicle, share in pairs(leanCars) do
+		if IsValid(vehicle) and not vehicle:IsDormant() and vehicle:GetPos():DistToSqr(eyePosition) < maxDistanceSqr then
+			levelCar(vehicle, share, frame, realNow, frameTime)
+		end
+	end
+end
+
+-- what the lean correction sees on the cars it handles (to check it runs)
+concommand.Add("audio_engine_lean_info", function()
+	if not AudioEngine.CAR_LEAN_LEVEL then
+		print("[Audio Engine] lean correction: AudioEngine.CAR_LEAN_LEVEL is missing: this client has an older sh_carlist.lua loaded "
+			.. "(a Lua refresh reloads only the files that changed). Restart or change the map")
+		return
+	end
+	local levels = AudioEngine.CAR_LEAN_LEVEL
+	print(string.format("[Audio Engine] lean correction: %d car kinds listed, %d such cars in the scan", table.Count(levels), table.Count(leanCars)))
+	for vehicle, share in pairs(leanCars) do
+		local seen = IsValid(vehicle) and leanSeen[vehicle]
+		if not seen then
+			print(string.format("  %s: not measured (too far, out of view or no bounds)", tostring(vehicle)))
+		elseif not seen.onGround then
+			print(string.format("  %s: corner %s found no road under it (%.1f s ago)", tostring(vehicle), tostring(seen.missed), RealTime() - seen.at))
+		else
+			print(string.format("  %s: share %.2f | sides %.1f / %.1f in over the road, %.0f in apart | lean taken out %.1f deg (now %.1f) | %.1f s ago",
+				tostring(vehicle), share, seen.leftHeight or 0, seen.rightHeight or 0, seen.track or 0, math.deg(seen.target or 0),
+				math.deg(seen.current or 0), RealTime() - seen.at))
+		end
+	end
+end, nil, "Print what the drawn lean correction (AudioEngine.CAR_LEAN_LEVEL) measures on the cars near you")
+
+-- try a share on the car you sit in, live and on this client only (0 = off, 1 = drawn level)
+concommand.Add("audio_engine_lean_set", function(player, _, arguments)
+	local car = IsValid(player) and AudioEngine.RiddenCar(player)
+	local carConfig = IsValid(car) and AudioEngine.GetCarConfig(car)
+	if not carConfig or not carConfig.name then
+		print("[Audio Engine] lean correction: sit in a car from the car list first")
+		return
+	end
+	local share = tonumber(arguments[1])
+	AudioEngine.CAR_LEAN_LEVEL = AudioEngine.CAR_LEAN_LEVEL or {}
+	if not share then
+		print(string.format("[Audio Engine] lean correction for %s: %s (audio_engine_lean_set <0..1>)", carConfig.name,
+			tostring(AudioEngine.CAR_LEAN_LEVEL[carConfig.name] or 0)))
+		return
+	end
+	share = clamp(share, 0, 1)
+	AudioEngine.CAR_LEAN_LEVEL[carConfig.name] = share > 0 and share or nil
+	nextLeanScan = 0
+	print(string.format("[Audio Engine] lean correction for %s set to %.2f on this client (until a reload; the lasting value is AudioEngine.CAR_LEAN_LEVEL in sh_carlist.lua)", carConfig.name, share))
+end, nil, "Set the drawn lean correction (0..1 of the lean taken out) for the car you sit in, on this client, to try values")
+
+-- the car the camera rides with: the one you drive with the prediction, else the one you sit in
+local function cameraCar()
+	if own.vehicle then return own.vehicle end
+	local player = LocalPlayer()
+	return IsValid(player) and AudioEngine.RiddenCar(player) or nil
+end
+
+---------------------------------------------------------------------------
 -- each frame (from CalcView, before anything is drawn)
 ---------------------------------------------------------------------------
 local lastRealTime = RealTime()
@@ -609,10 +783,13 @@ local function updateFrame()
 		if not vehicle then own.vehicle = nil end
 	end
 
+	local player = LocalPlayer()
+	local eyePosition = IsValid(player) and player:EyePos() or vector_origin
 	if othersShare > 0 and own.lead then
-		local player = LocalPlayer()
-		updateOthers(vehicle, own.lead, frame, realNow, IsValid(player) and player:EyePos() or vector_origin)
+		updateOthers(vehicle, own.lead, frame, realNow, eyePosition)
 	end
+	-- (after the prediction: it starts from where that draws a car)
+	levelLeaningCars(frame, realNow, eyePosition, frameTime)
 	clearStale(frame)
 end
 
@@ -632,7 +809,9 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 		ErrorNoHalt("[audio_engine] driving prediction: " .. tostring(message) .. "\n")
 	end
 	local view = originalCall("CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
-	local entry = updated and own.vehicle and displaced[own.vehicle]
+	-- (the car you sit in drawn moved, by the prediction or less leaning: the camera with it)
+	local car = updated and cameraCar()
+	local entry = car and displaced[car]
 	if not entry then return view end
 	-- a copy: some cameras hand back the same table each frame
 	local moved = {}
@@ -685,7 +864,7 @@ hook.Add("PreDrawOpaqueRenderables", "audio_engine_predict", function()
 		takePlacementsOff()
 		clearStale(frame)
 		return
-	elseif own.vehicle and displaced[own.vehicle] and cameraFrame ~= frame then
+	elseif cameraCar() and displaced[cameraCar()] and cameraFrame ~= frame then
 		table.Empty(displaced)
 		takePlacementsOff()
 		clearStale(frame + 1)

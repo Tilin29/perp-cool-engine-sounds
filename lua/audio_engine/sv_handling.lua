@@ -486,13 +486,18 @@ concommand.Add("audio_engine_accel_log", function(player, _, args)
 	local seconds = math.Clamp(tonumber(args[1]) or 12, 1, 60)
 	local startTime = CurTime()
 	local function printLine(line) if IsValid(player) then player:PrintMessage(HUD_PRINTCONSOLE, line) end end
-	printLine("[Audio Engine] accel log: t | mph | Source gear, rpm | steer | yaw asked, yaw deg/s | slip angle deg | ground, control")
+	-- (mph: the body's full speed; nose: along the car's nose, what the HUD shows; Source: GetOperatingParams' own speed,
+	-- raw, what its speed governor compares with maxSpeed. Top speed short of the script's: these tell a HUD, a model or
+	-- a Source cause apart)
+	printLine("[Audio Engine] accel log: t | mph | nose mph | Source speed | Source gear, rpm | steer | yaw asked, yaw deg/s | slip angle deg | ground, control")
+	printLine(string.format("[Audio Engine] script maxSpeed %.1f mph, handling model %s", (AudioEngine.CarTopSpeed(vehicle, AudioEngine.GetCarConfig(vehicle)) or 0) / 1.609344,
+		(driveModelConVar:GetBool() and modelAllowed(vehicle, AudioEngine.GetCarConfig(vehicle))) and "on" or "off"))
 	local timerId = "audio_engine_accel_log_" .. vehicle:EntIndex()
 	-- calibration for the acceleration model (sh_presets.lua AudioEngine.GEAR_ACCEL): the time to each share of the
 	-- top speed, next to the model's. Start from a standstill and hold W on a straight road
 	local topKmh = AudioEngine.CarTopSpeed(vehicle, AudioEngine.GetCarConfig(vehicle))
 	local powerToWeight = AudioEngine.CarPower(vehicle, AudioEngine.GetCarConfig(vehicle)) * ((AudioEngine.DecodeProfile(vehicle:GetNW2String("audio_prof", "")) or {}).accel or 1)
-	local marks, reached, setOffTime = { 0.25, 0.5, 0.75, 0.9, 0.95 }, {}, nil
+	local marks, reached, setOffTime, reported = { 0.25, 0.5, 0.75, 0.9, 0.95 }, {}, nil, false
 	local function report()
 		local parts = {}
 		for _, mark in ipairs(marks) do
@@ -514,19 +519,26 @@ concommand.Add("audio_engine_accel_log", function(player, _, args)
 			end
 		end
 		ticks = ticks - 1
-		if ticks <= 0 or reached[0.95] then timer.Remove(timerId) report() end
+		-- (the times are reported at 95%, but the log runs on for its seconds: stopping there it never showed
+		-- where the top speed settles)
+		if reached[0.95] and not reported then reported = true report() end
+		if ticks <= 0 then
+			timer.Remove(timerId)
+			if not reported then report() end
+		end
 		local gotParams, operatingParams = pcall(vehicle.GetOperatingParams, vehicle)
 		operatingParams = gotParams and istable(operatingParams) and operatingParams or {}
 		local body, spec, state = vehicle.audioHandlingBody, vehicle.audioHandlingSpec, vehicle.audioHandlingState
-		local slipAngle = 0
+		local slipAngle, noseMph = 0, 0
 		if body and spec then
 			local noseX, noseY, noseZ, rightX, rightY, rightZ = Handling.NoseOf(body, spec)
 			local forwardSpeed = body.vx * noseX + body.vy * noseY + body.vz * noseZ
 			local sideSpeed = body.vx * rightX + body.vy * rightY + body.vz * rightZ
+			noseMph = math.abs(forwardSpeed) / HU_PER_MPH
 			if forwardSpeed * forwardSpeed + sideSpeed * sideSpeed > 400 then slipAngle = math.deg(math.atan2(sideSpeed, math.abs(forwardSpeed))) end
 		end
-		printLine(string.format("  %5.2fs | %5.1f | G%s %5.0f | %5.2f | %6.1f %6.1f | %5.1f | %.2f %.2f", CurTime() - startTime, mph,
-			tostring(operatingParams.gear or "?"), operatingParams.RPM or 0, state and state.steer or 0, vehicle.audioLogAsked or 0,
+		printLine(string.format("  %5.2fs | %5.1f | %5.1f | %6.1f | G%s %5.0f | %5.2f | %6.1f %6.1f | %5.1f | %.2f %.2f", CurTime() - startTime, mph,
+			noseMph, tonumber(operatingParams.speed) or -1, tostring(operatingParams.gear or "?"), operatingParams.RPM or 0, state and state.steer or 0, vehicle.audioLogAsked or 0,
 			body and body.yawRate or 0, slipAngle, body and body.groundShare or 0, body and body.controlShare or 0))
 	end)
 end, nil, "Log speed, Source gear/rpm, steering and rotation of the car you drive (admins)")
