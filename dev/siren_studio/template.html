@@ -388,8 +388,7 @@ function soundingTone() {
 function nextTone(id) {
   const c = CFG.cycle
   const i = c.indexOf(id)
-  // (round and round, never off: holding the tone key switches it off, as in game)
-  if (i >= 0) return c[(i + 1) % c.length]
+  if (i >= 0) return c[i + 1] || ''
   return c[0] || ''
 }
 function simUpdate() {
@@ -399,16 +398,7 @@ function simUpdate() {
   $('lightDots').className = 'lights' + (sim.lights ? ' c' + (sim.lights + 1) : '')
   sound(soundingTone())
 }
-// a tap steps CODE 2 <-> CODE 3 (from off: CODE 2); holding the key HOLD_SECONDS switches off (as in game)
-const HOLD_SECONDS = 0.4
-function simLights() { sim.lights = sim.lights % 2 + 1; simUpdate() }
-function simLightsOff() { sim.lights = 0; simUpdate() }
-function simToneOff() {
-  if (!sim.lights) return
-  sim.tone = ''
-  sim.at = sim.lights
-  simUpdate()
-}
+function simLights() { sim.lights = (sim.lights + 1) % 3; simUpdate() }
 function simTone() {
   if (!sim.lights) { status('The tone key works with the lights on'); return }
   sim.tone = nextTone(chosenTone())
@@ -476,33 +466,17 @@ $('simTone').onclick = simTone
 const GAME_TO_PAGE = { lalt: 'alt', ralt: 'alt', lshift: 'shift', rshift: 'shift', lcontrol: 'control', rcontrol: 'control', ctrl: 'control', enter: 'enter', space: ' ' }
 const pageKey = (name) => { const n = String(name).toLowerCase(); return GAME_TO_PAGE[n] || n }
 function typing() { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT') }
-// the light and tone keys: a tap steps on letting go, held HOLD_SECONDS they switch off
-const held = {}
-function holdKey(name, onHold) {
-  if (held[name]) return
-  held[name] = { done: false, timer: setTimeout(() => { held[name].done = true; onHold() }, HOLD_SECONDS * 1000) }
-}
-function releaseKey(name, onTap) {
-  const h = held[name]
-  if (!h) return
-  clearTimeout(h.timer)
-  delete held[name]
-  if (!h.done) onTap()
-}
 document.addEventListener('keydown', (e) => {
   if (!CFG || typing() || e.repeat) return
   const k = e.key.toLowerCase()
-  if (e.key === 'Shift') holdKey('lights', simLightsOff)
-  else if (k === pageKey(CFG.keys.tone)) holdKey('tone', simToneOff)
+  if (e.key === 'Shift') simLights()
+  else if (k === pageKey(CFG.keys.tone)) simTone()
   else if (e.key === 'Alt') { sim.honk = true; if (sim.lights) simUpdate() }
   else return
   e.preventDefault()
 })
 // the car horn's key (Alt, lua/car_horn): while held with the siren sounding, the honk tone plays
 document.addEventListener('keyup', (e) => {
-  const k = e.key.toLowerCase()
-  if (e.key === 'Shift') { releaseKey('lights', simLights); return }
-  if (CFG && k === pageKey(CFG.keys.tone)) { releaseKey('tone', simTone); return }
   if (e.key !== 'Alt') return
   e.preventDefault()
   sim.honk = false
