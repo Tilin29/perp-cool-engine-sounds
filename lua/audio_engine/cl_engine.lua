@@ -235,6 +235,16 @@ local GROUP_START_VOLUME = 0.01
 -- under 0.002 before, so a fast rev sweep kept six or seven bands open as they faded)
 local GROUP_STOP_VOLUME, GROUP_STOP_HOLD = 0.004, 0.1
 
+--[[
+	stopsound kills every channel, but a CSoundPatch still says it plays (IsPlaying is its own flag,
+	cleared only by Stop()), so the revive never saw it. A volume change on a sound whose channel is
+	gone starts it again (Source's S_StartSound: a change it can't apply to a playing channel falls
+	through to starting the sound). Loops whose volume moves came back by themselves; steady ones
+	(idling, a siren from inside) stayed silent. So once a second (car.reviveCheckDue) every playing
+	loop gets a volume change, alternating between its level and KEEPALIVE_SHARE under it (~0.02 dB)
+]]
+local KEEPALIVE_SHARE = 0.002
+
 local function setGroup(car, groupKey, names, targetVolumes, pitch, deltaTime)
 	local total = 0
 	for i = 1, #targetVolumes do total = total + targetVolumes[i] end
@@ -261,6 +271,13 @@ local function setGroup(car, groupKey, names, targetVolumes, pitch, deltaTime)
 				if roomChanged or (car.reviveCheckDue and not patch:IsPlaying()) then
 					patch:Stop()
 					startPatch(car, names[i], max(currentVolumes[i], 0.001), pitch)
+				elseif car.reviveCheckDue then
+					-- (stopsound: see KEEPALIVE_SHARE)
+					local volume = max(currentVolumes[i], 0.001) * (car.keepAliveLow and 1 - KEEPALIVE_SHARE or 1)
+					patch:ChangeVolume(volume, 0)
+					car.sentVolumes[names[i]] = volume
+					-- (the pitch as every frame: the nudge is under sendPatch's volume step)
+					sendPatch(car, names[i], patch, volume, pitch)
 				else
 					sendPatch(car, names[i], patch, max(currentVolumes[i], 0.001), pitch)
 				end
@@ -1196,7 +1213,7 @@ local function updateCar(car, deltaTime)
 	updateRoom(car, deltaTime)
 	local now = RealTime()
 	car.reviveCheckDue = now >= car.nextReviveCheck
-	if car.reviveCheckDue then car.nextReviveCheck = now + 1 end
+	if car.reviveCheckDue then car.nextReviveCheck, car.keepAliveLow = now + 1, not car.keepAliveLow end
 	if not car.outOfRange then updateSound(car, deltaTime) end
 
 	-- the model's own dashboard tach needle follows the revs. Cars whose wings/vents also hang off
@@ -1359,3 +1376,36 @@ end)
 function AudioEngine.GetClientCar(entity)
 	return cars[entity]
 end
+
+--[[
+	stopsound (the console command) kills every channel the game plays, but a CSoundPatch keeps its
+	own "playing" flag (Source's soundenvelope: IsPlaying() is that flag, only Stop() clears it), so
+	the once-a-second revive never saw the loops were gone and the cars stayed silent. Lua isn't told
+	when stopsound runs: it's caught from a key bound to it (PlayerBindPress), and
+	audio_engine_restart_sounds does the same by hand. Every car's sounds are stopped and its groups
+	start again on its next update (a short fade in). Other modules (siren, horn) restart theirs on
+	the audio_engine/restart-sounds hook.
+]]
+-- (the banks too: a generated one, a tuned engine's, is as dead as the siren's tones; baked ones
+-- load again from their files at once)
+local function restartEngineSounds()
+	for _, car in pairs(cars) do stopAll(car) end
+	Bank.RebuildAll()
+end
+function AudioEngine.RestartSounds()
+	restartEngineSounds()
+	hook.Run("audio_engine/restart-sounds")
+end
+
+-- "clean up everything" (game.CleanUpMap) leaves generated sounds silent as stopsound does (the
+-- user: the sirens stopped working); unlike stopsound it's announced, so everything restarts at once.
+-- The siren and horn modules hook it themselves (each works without the engine)
+hook.Add("PostCleanupMap", "audio_engine_restart", restartEngineSounds)
+
+concommand.Add("audio_engine_restart_sounds", function() AudioEngine.RestartSounds() end, nil,
+	"Start every car sound again (after stopsound)")
+
+-- (a moment later: the bind's stopsound runs after this hook)
+hook.Add("PlayerBindPress", "audio_engine_stopsound", function(_, bind, pressed)
+	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, AudioEngine.RestartSounds) end
+end)

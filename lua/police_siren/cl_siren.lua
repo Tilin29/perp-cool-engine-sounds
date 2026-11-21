@@ -58,6 +58,7 @@ local BASE_PITCH = 200
 local PITCH_MIN, PITCH_MAX = 150, 255
 local PITCH_GLIDE = 0.05
 local REVIVE_EVERY = 1   -- s between checks that the game still plays a siren
+local KEEPALIVE_SHARE = 0.002   -- the volume nudge each check that restarts a siren stopsound killed
 
 -- sound.Generate names can't be reused: a lua refresh builds under a new serial
 PoliceSiren.Serial = (PoliceSiren.Serial or 0) + 1
@@ -199,6 +200,39 @@ end
 
 local listener = {}
 local listenerPosition, listenerVelocity = Vector(0, 0, 0), Vector(0, 0, 0)
+--[[
+	Each siren car's velocity, tracked while it's silent too once it's near enough to be heard (the
+	Think hook: within TRACK_MARGIN x the audible range, so the track is warm before it's audible): a
+	tone started with an empty track and at the plain pitch, the car's speed showed up a few samples
+	later and the pitch swept to the Doppler one at DOPPLER_RATE as it faded in, a "water drop" blip
+	each time a passing siren started (lights on, or back inside police_siren_maxcars; the user, 30 cars)
+]]
+local DEFAULT_RANGE = 250   -- m: the engine's audible range for an 85 dB sound when audio_engine_range isn't there (or 0)
+local TRACK_MARGIN = 1.2
+local velocityTracks = setmetatable({}, { __mode = "k" })
+local function velocityOf(vehicle)
+	local track = velocityTracks[vehicle]
+	if not track then
+		track = {}
+		velocityTracks[vehicle] = track
+	end
+	return trackVelocity(track, vehicle:GetPos(), RealTime())
+end
+
+-- (squared, units) where a car's track starts: the engine's audible range (audio_engine_range, read
+-- by name as the horn does, for an 85 dB sound; Source's falloff scales with 20 / (level - 50)) at
+-- this car's siren level, x TRACK_MARGIN
+local rangeConVar
+local function trackRangeSqr(vehicle)
+	rangeConVar = rangeConVar or GetConVar("audio_engine_range")
+	local meters = rangeConVar and rangeConVar:GetFloat() or 0
+	if meters <= 0 then meters = DEFAULT_RANGE end
+	local config = PoliceSiren.CONFIG
+	local level = config.soundLevels[string.lower(vehicle:GetModel() or "")] or config.soundLevel or 85
+	local range = meters / 0.0254 * math.max(level - 50, 1) / 35 * TRACK_MARGIN
+
+	return range * range
+end
 
 -- the listener: the camera entity when the view is on one, else the player's eyes (EyePos()
 -- is only reliable while drawing: read in Think it jittered, and so did the listener's speed)
@@ -275,7 +309,10 @@ local function startTone(vehicle, toneId, inside, fadeTime)
 	end
 	local patch = CreateSound(vehicle, name)
 	patch:SetSoundLevel(config.soundLevels[string.lower(vehicle:GetModel() or "")] or config.soundLevel)
-	patch:PlayEx(0, BASE_PITCH)
+	-- (at the pitch it's heard at now, not swept to it: see velocityTracks)
+	local ratio = inside and 1 or dopplerRatio(vehicle:GetPos(), velocityOf(vehicle))
+	local pitch = math.Clamp(math.Round(BASE_PITCH * ratio), PITCH_MIN, PITCH_MAX)
+	patch:PlayEx(0, pitch)
 	local baseVolume = config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
 	local volume = baseVolume * (inside and 1 or distanceGain(vehicle))
 
@@ -283,7 +320,7 @@ local function startTone(vehicle, toneId, inside, fadeTime)
 		toneId = toneId, name = name, vehicle = vehicle, inside = inside, patch = patch, baseVolume = baseVolume,
 		airPhase = math.random() * 2 * math.pi, airPhase2 = math.random() * 2 * math.pi,
 		volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
-		pitch = BASE_PITCH, dopplerRatio = 1, velocityTrack = {}, nextReviveCheck = RealTime() + REVIVE_EVERY,
+		pitch = pitch, dopplerRatio = ratio, nextReviveCheck = RealTime() + REVIVE_EVERY,
 	}
 end
 
@@ -323,10 +360,17 @@ local function update(vehicle)
 			if not state.patch:IsPlaying() then
 				state.patch:Stop()
 				state.patch:PlayEx(state.volume, state.pitch)
+			else
+				-- stopsound kills the channel but IsPlaying (the patch's own flag) stays true; a volume
+				-- change on a sound whose channel is gone starts it again (Source's S_StartSound). The
+				-- siren's volume often stays put (inside the car, standing), so it gets one each check,
+				-- alternating with KEEPALIVE_SHARE under its level (~0.02 dB)
+				state.keepAliveLow = not state.keepAliveLow
+				state.patch:ChangeVolume(state.volume * (state.keepAliveLow and 1 - KEEPALIVE_SHARE or 1), 0)
 			end
 		end
 		-- (inside the car you move with it: no Doppler)
-		local velocity = trackVelocity(state.velocityTrack, vehicle:GetPos(), RealTime())
+		local velocity = velocityOf(vehicle)
 		local targetRatio = listenerInside and 1 or dopplerRatio(vehicle:GetPos(), velocity)
 		state.dopplerRatio = state.dopplerRatio + (targetRatio - state.dopplerRatio) * math.min(1, RealFrameTime() * DOPPLER_RATE)
 		local pitch = math.Clamp(math.Round(BASE_PITCH * state.dopplerRatio), PITCH_MIN, PITCH_MAX)
@@ -397,7 +441,15 @@ hook.Add("Think", "police_siren", function()
 		rankSirens()
 	end
 	for _, vehicle in ipairs(sirenCars) do
-		if IsValid(vehicle) then update(vehicle) end
+		if IsValid(vehicle) then
+			-- (out of reach the track is dropped: back in, it starts fresh rather than from a stale one)
+			if cars[vehicle] or vehicle:GetPos():DistToSqr(listenerPosition) < trackRangeSqr(vehicle) then
+				velocityOf(vehicle)
+			else
+				velocityTracks[vehicle] = nil
+			end
+			update(vehicle)
+		end
 	end
 	-- gone, or no longer a siren car (its lightbar went, or reads invalid out of view): nothing
 	-- above updates it any more, so its loop would play on for good
@@ -459,13 +511,49 @@ hook.Add("SpawnMenuOpen", "police_siren", function()
 	if PoliceSiren.HasSiren(sirenCar) then return false end
 end)
 
-local toneHeld = false
+--[[
+	The tone key: a tap (let go within TONE_HOLD_SECONDS) steps to the next tone, round and round;
+	held that long the siren goes off (the user's: switching between the tones without turning it
+	off in between). The tap acts on letting go, so a hold never plays the next tone first
+]]
+local TONE_HOLD_SECONDS = 0.4
+local tonePressedAt, toneHoldDone = nil, false
 hook.Add("Think", "police_siren_keys", function()
 	local player = LocalPlayer()
 	local vehicle = IsValid(player) and player:GetVehicle()
 	local usable = IsValid(vehicle) and PoliceSiren.HasSiren(vehicle) and not player:IsTyping()
 		and not gui.IsGameUIVisible() and not IsValid(vgui.GetKeyboardFocus())
 	local toneKeyDown = usable and isKeyDown(toneKeyConVar)
-	if toneKeyDown and not toneHeld then RunConsoleCommand("police_siren_tone") end
-	toneHeld = toneKeyDown
+	local now = RealTime()
+	if toneKeyDown then
+		if not tonePressedAt then tonePressedAt, toneHoldDone = now, false end
+		if not toneHoldDone and now - tonePressedAt >= TONE_HOLD_SECONDS then
+			toneHoldDone = true
+			RunConsoleCommand("police_siren_tone", "off")
+		end
+	elseif tonePressedAt then
+		-- (let go: a tap, unless it was a hold or the key stopped counting: out of the car, typing)
+		if not toneHoldDone and usable then RunConsoleCommand("police_siren_tone") end
+		tonePressedAt = nil
+	end
+end)
+
+-- after stopsound: the generated tones stay silent even started again (stopsound seems to drop the
+-- sound.Generate data, which the game can't reload: the engine's WAV files come back), so every tone
+-- is built again under a new serial and each siren starts from it once built. Caught from a key bound
+-- to stopsound, or the audio engine's restart (audio_engine_restart_sounds) through its generic hook
+local function restartSirens()
+	for vehicle, state in pairs(cars) do
+		state.patch:Stop()
+		cars[vehicle] = nil
+	end
+	PoliceSiren.Serial = PoliceSiren.Serial + 1
+	soundNames, queued, failed, builder = {}, {}, {}, nil
+end
+concommand.Add("police_siren_restart", restartSirens, nil, "Build the siren tones again and restart every siren (after stopsound)")
+hook.Add("audio_engine/restart-sounds", "police_siren", restartSirens)
+-- "clean up everything" leaves the generated tones silent too (the user); it's announced: built again at once
+hook.Add("PostCleanupMap", "police_siren_restart", restartSirens)
+hook.Add("PlayerBindPress", "police_siren_stopsound", function(_, bind, pressed)
+	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, restartSirens) end
 end)

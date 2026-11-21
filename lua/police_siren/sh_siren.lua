@@ -66,8 +66,10 @@ end)
 -- the tone after `id` for the tone key: through the car's cycle, then off, then round again
 function PoliceSiren.NextTone(vehicle, toneId)
 	local cycle = PoliceSiren.Scheme(vehicle).cycle
+	-- (round and round, never off: holding the tone key switches it off, cl_siren.lua; the user's,
+	-- so a tap switches between the tones without silence in between)
 	for index, cycleTone in ipairs(cycle) do
-		if cycleTone == toneId then return cycle[index + 1] or "" end
+		if cycleTone == toneId then return cycle[index % #cycle + 1] end
 	end
 
 	return cycle[1] or ""

@@ -67,7 +67,8 @@ end)
 -- lua refresh: cars already out there
 for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do setupPolice(vehicle) end
 
--- no argument: the next mode; 0 = off, 1 = CODE 2, 2 = CODE 3
+-- no argument: the next mode round the lit ones (off -> CODE 2 -> CODE 3 -> CODE 2: holding the
+-- light key switches them off, cl_police.lua, the user's); 0 = off, 1 = CODE 2, 2 = CODE 3
 concommand.Add("audio_engine_lights", function(player, _, args)
 	if not IsValid(player) then return end
 	local vehicle = player:GetVehicle()
@@ -79,7 +80,7 @@ concommand.Add("audio_engine_lights", function(player, _, args)
 	if mode then
 		mode = math.Clamp(math.floor(mode), 0, modeCount)
 	else
-		mode = (vehicle:GetNW2Int("audio_lights", 0) + 1) % (modeCount + 1)
+		mode = vehicle:GetNW2Int("audio_lights", 0) % modeCount + 1
 	end
 	vehicle:SetNW2Int("audio_lights", mode)
-end, nil, "Emergency lights of the car you're driving: no argument = next mode, 0 = off, 1 = CODE 2, 2 = CODE 3")
+end, nil, "Emergency lights of the car you're driving: no argument = next lit mode, 0 = off, 1 = CODE 2, 2 = CODE 3")

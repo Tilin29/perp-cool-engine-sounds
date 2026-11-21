@@ -396,10 +396,87 @@ local hookLights = {}
 	travels to it (eased, at `slowest`..`fastest` per s: a gear change's drop is still quick) and
 	stops there. Digits show the needle's value (rpm in steps of RPM_DIGIT_STEP)
 ]]
-local SPEED_GAUGE = { filter = 0.25, band = 0.8, slowest = 4, fastest = 150, follow = 8 }        -- mph or km/h
 local RPM_GAUGE = { filter = 0.15, band = 120, slowest = 700, fastest = 16000, follow = 14 }      -- rpm
 local RPM_DIGIT_STEP = 50
-local speedNeedle, rpmNeedle = {}, {}
+local rpmNeedle = {}
+
+--[[
+	The speedometer: the stepper-style hold above made it move in steps (held, then a jump each
+	0.8 mph pulling away), and its speed came from the car's drawn position frame to frame, which
+	jittered more the faster the car (fast cars' needles kept kicking). Now the speed is the server's
+	own physics (AudioEngine.ServerSpeed, the driver's drive state, cl_handling), else a line fitted
+	through the last SPEED_FIT_SECONDS of positions on game time (single player, the listen host,
+	prediction off), and the needle follows it smoothly over SPEED_NEEDLE_TIME s (no overshoot, so
+	no sway). The digits change only once the needle is SPEED_DIGIT_HOLD past the shown number
+]]
+local SPEED_FIT_SECONDS = 0.3
+local SPEED_NEEDLE_TIME = 0.15
+local SPEED_DIGIT_HOLD = 0.6
+local speedNeedle = {}
+local speedHistory = { vehicle = nil, count = 0 }
+
+-- metres/s from the drawn positions, fitted over the last SPEED_FIT_SECONDS (a least squares slope per axis)
+local function fittedSpeed(vehicle)
+	if speedHistory.vehicle ~= vehicle then speedHistory.vehicle, speedHistory.count = vehicle, 0 end
+	local now, position = CurTime(), vehicle:GetPos()
+	local count = speedHistory.count
+	-- (a frame on the same game time adds nothing)
+	if count == 0 or now > speedHistory[count].time then
+		count = count + 1
+		local sample = speedHistory[count] or {}
+		sample.time, sample.x, sample.y, sample.z = now, position.x, position.y, position.z
+		speedHistory[count] = sample
+	end
+	-- drop samples older than the window (shifted down; a few dozen at most)
+	local first = 1
+	while first < count and now - speedHistory[first].time > SPEED_FIT_SECONDS do first = first + 1 end
+	if first > 1 then
+		for index = first, count do speedHistory[index - first + 1], speedHistory[index] = speedHistory[index], speedHistory[index - first + 1] end
+		count = count - first + 1
+	end
+	speedHistory.count = count
+	if count < 3 then return nil end
+	local meanTime, meanX, meanY, meanZ = 0, 0, 0, 0
+	for index = 1, count do
+		local sample = speedHistory[index]
+		meanTime, meanX, meanY, meanZ = meanTime + sample.time, meanX + sample.x, meanY + sample.y, meanZ + sample.z
+	end
+	meanTime, meanX, meanY, meanZ = meanTime / count, meanX / count, meanY / count, meanZ / count
+	local timeSquares, slopeX, slopeY, slopeZ = 0, 0, 0, 0
+	for index = 1, count do
+		local sample = speedHistory[index]
+		local timeOffset = sample.time - meanTime
+		timeSquares = timeSquares + timeOffset * timeOffset
+		slopeX = slopeX + timeOffset * (sample.x - meanX)
+		slopeY = slopeY + timeOffset * (sample.y - meanY)
+		slopeZ = slopeZ + timeOffset * (sample.z - meanZ)
+	end
+	if timeSquares <= 0 then return nil end
+	return math.sqrt(slopeX * slopeX + slopeY * slopeY + slopeZ * slopeZ) / timeSquares * 0.0254
+end
+
+--[[
+	The revs for the arc (B) and the strip (C): their rev bar and LED segments stepped with the
+	stepper-style needle value (held, then a jump every RPM_GAUGE.band), which a needle hides and a
+	filled bar doesn't. They follow the revs smoothly over RPM_SMOOTH_TIME s instead; the digits
+	change once the value is RPM_DIGIT_HOLD past them (idle's wobble otherwise flickered them)
+]]
+local RPM_SMOOTH_TIME = 0.05
+local RPM_DIGIT_HOLD = 75
+local smoothRpm = {}
+local function smoothRpmValue(target, deltaTime)
+	if not smoothRpm.value then smoothRpm.value, smoothRpm.digits = target, target end
+	smoothRpm.value = smoothRpm.value + (target - smoothRpm.value) * min(1, deltaTime / RPM_SMOOTH_TIME)
+	if abs(smoothRpm.value - smoothRpm.digits) > RPM_DIGIT_HOLD then smoothRpm.digits = smoothRpm.value end
+	return smoothRpm.value, smoothRpm.digits
+end
+
+local function smoothSpeedNeedle(target, deltaTime)
+	if not speedNeedle.value then speedNeedle.value, speedNeedle.digits = target, floor(target + 0.5) end
+	speedNeedle.value = speedNeedle.value + (target - speedNeedle.value) * min(1, deltaTime / SPEED_NEEDLE_TIME)
+	if abs(speedNeedle.value - speedNeedle.digits) > SPEED_DIGIT_HOLD then speedNeedle.digits = floor(speedNeedle.value + 0.5) end
+	return speedNeedle.value, speedNeedle.digits
+end
 
 local function stepGauge(needle, spec, target, deltaTime)
 	if not needle.value then needle.value, needle.filtered, needle.moving = target, target, false end
@@ -421,6 +498,9 @@ local function readState(player, vehicle, car, deltaTime)
 	local config, engineState = car.config, car.engineState
 	state.rpm = max(0, stepGauge(rpmNeedle, RPM_GAUGE, engineState.rpm, deltaTime))
 	state.rpmDigits = string.Comma(floor(state.rpm / RPM_DIGIT_STEP + 0.5) * RPM_DIGIT_STEP)
+	local rpmSmooth, rpmSmoothDigits = smoothRpmValue(max(0, engineState.rpm), deltaTime)
+	state.rpmSmooth = rpmSmooth
+	state.rpmSmoothDigits = string.Comma(floor(rpmSmoothDigits / RPM_DIGIT_STEP + 0.5) * RPM_DIGIT_STEP)
 	state.redline = config.redline
 	state.majorRpm = (config.redline + 500 > 12000) and 2000 or 1000
 	state.dialRpm = math.ceil((config.redline + 500) / state.majorRpm) * state.majorRpm
@@ -428,10 +508,11 @@ local function readState(player, vehicle, car, deltaTime)
 	state.limiter = engineState.limiterHoldTimer > 0 or state.share > 0.985
 	local usesMph, factor, unitLabel = speedUnits()
 	state.unitLabel, state.usesMph = unitLabel, usesMph
-	local measured = abs(car.speedAlongNose) * factor
+	local serverSpeed = AudioEngine.ServerSpeed and AudioEngine.ServerSpeed(vehicle)
+	local metresPerSecond = serverSpeed and serverSpeed * 0.0254 or fittedSpeed(vehicle) or abs(car.speedAlongNose)
 	if state.speedUnits ~= unitLabel then state.speedUnits, speedNeedle.value = unitLabel, nil end
-	state.speed = max(0, stepGauge(speedNeedle, SPEED_GAUGE, measured, deltaTime))
-	state.speedDigits = floor(state.speed + 0.5)
+	local speed, digits = smoothSpeedNeedle(metresPerSecond * factor, deltaTime)
+	state.speed, state.speedDigits = max(0, speed), max(0, digits)
 	local topSpeed = (tonumber(config.topSpeed) or 200) / 3.6 * factor
 	state.speedMajor = topSpeed > 190 and 40 or 20
 	state.dialSpeed = clamp(math.ceil(topSpeed * 1.1 / state.speedMajor) * state.speedMajor, usesMph and 80 or 120, usesMph and 260 or 400)
@@ -747,11 +828,12 @@ end
 ---------------------------------------------------------------------------
 -- HUD
 ---------------------------------------------------------------------------
+-- smoothRevs: the cluster shows the revs as a bar / segments (smoothRpmValue), not a needle
 local CLUSTERS = {
 	a = { box = A, draw = drawClassic, fonts = "A" },
 	a2 = { box = A, draw = drawClassic, fonts = "A", police = true },
-	b = { box = B, draw = drawArc, fonts = "B" },
-	c = { box = C, draw = drawStrip, fonts = "C" },
+	b = { box = B, draw = drawArc, fonts = "B", smoothRevs = true },
+	c = { box = C, draw = drawStrip, fonts = "C", smoothRevs = true },
 }
 
 local function isPoliceCar(vehicle)
@@ -788,6 +870,10 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	local clusterId = clusterFor(vehicle)
 	local cluster = CLUSTERS[clusterId]
 	local box = cluster.box
+	if cluster.smoothRevs then
+		info.rpm, info.rpmDigits = info.rpmSmooth, info.rpmSmoothDigits
+		info.share = info.rpm / info.redline
+	end
 	local screenScale = ScrH() / 1080 * scaleConVar:GetFloat()
 	pixel = screenScale * CLUSTER_SIZE[clusterId]
 	fontsFor(cluster.fonts .. "_", pixel)

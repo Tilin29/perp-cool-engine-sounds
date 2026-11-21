@@ -66,6 +66,7 @@ local BASE_PITCH = 200
 local PITCH_MIN, PITCH_MAX = 100, 255
 local PITCH_GLIDE = 0.05
 local REVIVE_EVERY = 1   -- s between checks that the game still plays a honk
+local KEEPALIVE_SHARE = 0.002   -- the volume nudge each check that restarts a honk stopsound killed
 --[[
 	The game knows a playing sound by its entity and name: a honk fading out and a new one of the
 	same name on the same car were the same sound to it, so the old one's fade and stop killed the
@@ -364,6 +365,11 @@ local function update(vehicle, car, now)
 			honk.volume, honk.pitch = volume, pitch
 			return
 		end
+		-- stopsound kills the channel but IsPlaying (the patch's own flag) stays true; a volume change on
+		-- a sound whose channel is gone starts it again (Source's S_StartSound): one each check
+		honk.keepAliveLow = not honk.keepAliveLow
+		honk.volume = volume * (honk.keepAliveLow and 1 - KEEPALIVE_SHARE or 1)
+		honk.patch:ChangeVolume(honk.volume, 0)
 	end
 	if math.abs(volume - honk.volume) > VOLUME_STEP then
 		honk.patch:ChangeVolume(volume, VOLUME_GLIDE)
@@ -514,4 +520,26 @@ hook.Add("EntityRemoved", "car_horn", function(entity, fullUpdate)
 	if not car then return end
 	if car.honk then car.honk.patch:Stop() end
 	cars[entity] = nil
+end)
+
+-- after stopsound: it kills the channels but the patches still think they play (IsPlaying is their
+-- own flag). A held honk is started again; caught from a key bound to stopsound, or the audio
+-- engine's restart (audio_engine_restart_sounds) through its generic hook
+-- (the horns are generated like the siren's tones: built again under a new serial, as the siren)
+local function restartHonks()
+	for _, car in pairs(cars) do
+		if car.honk then
+			car.honk.patch:Stop()
+			car.honk = nil
+		end
+	end
+	CarHorn.Serial = CarHorn.Serial + 1
+	built, queued, failed, builder = {}, {}, {}, nil
+end
+concommand.Add("car_horn_restart", restartHonks, nil, "Build the horns again (after stopsound)")
+hook.Add("audio_engine/restart-sounds", "car_horn", restartHonks)
+-- "clean up everything" leaves the generated horns silent too; it's announced: built again at once
+hook.Add("PostCleanupMap", "car_horn_restart", restartHonks)
+hook.Add("PlayerBindPress", "car_horn_stopsound", function(_, bind, pressed)
+	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, restartHonks) end
 end)

@@ -177,7 +177,7 @@ net.Receive("audio_engine_drive", function()
 	-- (unreliable: an older one can arrive after a newer one)
 	if base and state.time <= base.time then return end
 	learnFrom(base, state)
-	own.previousBase, own.base, own.fresh = base, state, true
+	own.previousBase, own.base, own.fresh, own.baseAt = base, state, true, RealTime()
 	own.stats.states = own.stats.states + 1
 	local received = own.received
 	received[#received + 1] = { time = state.time, x = state.px, y = state.py, z = state.pz }
@@ -391,6 +391,16 @@ end
 function AudioEngine.PredictedVelocity(vehicle)
 	if vehicle ~= own.vehicle or not own.velocity or RealTime() - (own.velocityAt or 0) > 0.1 then return nil end
 	return own.velocity
+end
+
+-- the speed (inches/s) the server's physics gave the car you drive in its latest state, or nil
+-- without one in the last 0.3 s (single player, the listen host, prediction off): cl_hud's
+-- speedometer. Exact, ~33 a second and a ping old; the positions' speed jittered more the faster
+local SERVER_SPEED_FRESH = 0.3
+function AudioEngine.ServerSpeed(vehicle)
+	local base = own.base
+	if vehicle ~= own.vehicle or not base or not own.baseAt or RealTime() - own.baseAt > SERVER_SPEED_FRESH then return nil end
+	return math.sqrt(base.vx * base.vx + base.vy * base.vy + base.vz * base.vz)
 end
 
 -- where an entity is drawn (other code drawing at a car: cl_police's lights). Its own pose when

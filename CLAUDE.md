@@ -59,7 +59,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669: model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
   turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
-  Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
+  Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only; no argument steps the lit modes, off -> CODE 2 <-> CODE 3: a tap of the light key, holding it `LIGHT_HOLD_SECONDS` 0.4 s sends 0 = off, the user's) sets
   off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the bar's LEDs are plain textures, so lit modules get an additive lens
   quad + a glow sprite faded by facing, the nearest 4 cars a dynamic light per side; key `audio_engine_lightkey` (default lshift;
   no police script has a Source boost block, so shift is free). HUD shows the mode, plus whatever the `audio_engine/lights-label`
@@ -191,6 +191,20 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `audio_engine_tunnel` (0 = off, default 1 = Source's auto preset, 7 = large tunnel, `CSoundPatch:SetDSP`); a car in one carries `TUNNEL_LEVEL` 8 dB further; both inside: no pass-by drop with range.
     SetDSP/SetSoundLevel go on before PlayEx (`startPatch`) and loops restart when the room changes (`roomGeneration`): not known to reach a playing sound
   - once a second each active loop is checked with `IsPlaying` and restarted if the game dropped it (`car.revive`)
+  - `stopsound` kills every channel but not a CSoundPatch's own playing flag (Source's soundenvelope: `IsPlaying` is that flag,
+    only `Stop()` clears it), so the revive never fired and cars stayed silent. Lua isn't told when stopsound runs: a key bound to
+    it is caught (`PlayerBindPress`, 0.1 s later), typed in the console it needs `audio_engine_restart_sounds` (`AudioEngine.RestartSounds`:
+    stopAll on every car, groups start again next update). The siren and horn restart theirs on the generic `audio_engine/restart-sounds`
+    hook and catch the bind themselves too (each works without the engine)
+    A typed stopsound (sirens stayed dead, the user): a volume change on a sound whose channel is gone starts it again (Source's
+    S_StartSound falls through to starting it), so loops whose volume moves came back alone and steady ones didn't. Once a second
+    every playing loop gets a volume change (`KEEPALIVE_SHARE` 0.002 under its level, alternating, ~0.02 dB): engine groups
+    (`car.keepAliveLow`), sirens, held honks. Didn't bring the sirens back (the user), nor did a Stop + PlayEx: stopsound seems
+    to drop sound.Generate data (the siren and horn are generated; the engines' WAV files came back). So the siren's and horn's
+    restarts build every tone again under a new serial (`police_siren_restart`, `car_horn_restart`, also run by
+    audio_engine_restart_sounds). Not yet confirmed in game; if it works, WAV files baked offline would survive a typed stopsound
+    "Clean up everything" (game.CleanUpMap) broke the sirens the same way (the user); it's announced: `PostCleanupMap` restarts the
+    engine (stopAll + `Bank.RebuildAll`, generated banks die too), the siren and the horn (each hooks it itself)
   - each car's update runs in a pcall (`updateCarSafely`, printed once per car): one failing car stopped every car after it.
     Every client `EntityRemoved` hook (cl_engine, cl_handling, cl_siren, cl_horn) ignores `fullUpdate` (entities stay).
     Back from dormancy a car takes the engine state as it is (no shut-down sound for an engine switched off out of view).
@@ -260,7 +274,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   PERP's own vehicle methods win where they exist (IsIndicating / GetIndicatorDirection true = left / HasHazardLights /
   GetHeadlights / GetFuel 0..10000, low under 1000 / IsHandBraking; `vehicle.indicatorOn` = PERP's flash phase, read from PERP's
   cached client Lua), and the `audio_engine/cluster-lights` hook (vehicle, lights { left, right, hazards, headlights, fuel 0..1,
-  handbrake }) can fill them in. No PERP: fuel shows full. Lamps just light up (the user: no circles round them); only the indicators keep a soft glow disc (`indicatorGlow`). A's dial numbers are 25/25/21 design px (the user: the design's 19/18/16 were small); A2's panel is buttons only (the user took the siren icon and LED strip off): WAIL / YELP / PHASER 80 x 30, CODE 2 / CODE 3 100 x 30, 16 px plain text (the design's 10 px with a blurred glow came out smeared); PHASER red like CODE 3; the active CODE button flashes with the car's own lights (`AudioEngine.PoliceSideLit(vehicle, side)` in cl_police, its isLit timing, either side), dim between flashes; text drawn on whole pixels. Needles move like a stepper-motor gauge (`stepGauge`; the user: jittery on the speed limiter, then "should move robotically and not sway"): the value filtered (`SPEED_GAUGE` 0.25 s / `RPM_GAUGE` 0.15 s), the needle holds until that is `band` away (0.8 mph-or-km/h / 120 rpm), then travels to it eased at slowest..fastest per s and stops; digits show the needle (rpm in 50s). Offline: a cruise wobbling +-1 mph / +-150 rpm moves the needles ~0-2% of frames; pulling 10 mph/s the needle trails ~3.5 mph; a 6500 -> 4000 gear change lands in ~0.7 s. Engine-off prompt, LIMIT and (not on a2) the light mode sit above it.
+  handbrake }) can fill them in. No PERP: fuel shows full. Lamps just light up (the user: no circles round them); only the indicators keep a soft glow disc (`indicatorGlow`). A's dial numbers are 25/25/21 design px (the user: the design's 19/18/16 were small); A2's panel is buttons only (the user took the siren icon and LED strip off): WAIL / YELP / PHASER 80 x 30, CODE 2 / CODE 3 100 x 30, 16 px plain text (the design's 10 px with a blurred glow came out smeared); PHASER red like CODE 3; the active CODE button flashes with the car's own lights (`AudioEngine.PoliceSideLit(vehicle, side)` in cl_police, its isLit timing, either side), dim between flashes; text drawn on whole pixels. Needles move like a stepper-motor gauge (`stepGauge`; the user: jittery on the speed limiter, then "should move robotically and not sway"): the value filtered (`SPEED_GAUGE` 0.25 s / `RPM_GAUGE` 0.15 s), the needle holds until that is `band` away (0.8 mph-or-km/h / 120 rpm), then travels to it eased at slowest..fastest per s and stops; digits show the needle (rpm in 50s). Offline: a cruise wobbling +-1 mph / +-150 rpm moves the needles ~0-2% of frames; pulling 10 mph/s the needle trails ~3.5 mph; a 6500 -> 4000 gear change lands in ~0.7 s. The speed needle no longer steps (the user: clunky, moved in steps, fast cars fluctuated a lot): its speed is the server's physics (`AudioEngine.ServerSpeed`, the driver's drive state, cl_handling), else a least squares line through the last `SPEED_FIT_SECONDS` 0.3 s of positions on CurTime (`fittedSpeed`: single player, listen host, prediction off; the frame-to-frame position speed jittered more the faster the car); the needle follows smoothly over `SPEED_NEEDLE_TIME` 0.15 s, the digits move once it is `SPEED_DIGIT_HOLD` 0.6 past them. The rpm needle (A, A2) keeps `stepGauge`; B's rev bar and C's LED segments follow `smoothRpmValue` (`RPM_SMOOTH_TIME` 0.05 s, digits held `RPM_DIGIT_HOLD` 75 rpm; `CLUSTERS[id].smoothRevs`): with the stepper value they moved in steps (the user: A fine, the other two buggy). Not yet seen in game. Engine-off prompt, LIMIT and (not on a2) the light mode sit above it.
   Offline render check (mocked GMod -> SVG -> headless Chrome) lives in the scratchpad, not the repo.
 - `sv_engine.lua`: ignition, run by the server.
   - Engine off on entry; start key `audio_engine_startkey` (default R; polled by cl_engine, which sends `audio_engine_toggle`: the server's
@@ -280,10 +294,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   client only draws ahead of it. The average PERP player has 150 ms ping: a key showed ~0.25 s late (half ping up, half down, cl_interp 0.1).
   - `sh_handling.lua` (`AudioEngine.Handling`): the model, plain Lua on numbers (no Vector/Angle: no allocations, and it runs offline).
     Bodies { px.. position, vx.. velocity (in/s), ax.. model x axis, bx.. y (left), cx.. z (up), yawRate (deg/s, left +), groundShare,
-    controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 4.5 / `steerReturn` 6 / `steerReverse` 9 per s), the yaw rate
-    follows a bicycle-model target (on grip: the target eased at `yawFollow` 8/s and the car put on it every tick, `state.yawTarget`, sent to the
+    controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 7 / `steerReturn` 8 / `steerReverse` 9 per s; were 4.5 / 6), the yaw rate
+    follows a bicycle-model target (on grip: the target eased at `yawFollow` 12/s (was 8: ~0.5 s to the full turn) and the car put on it every tick, `state.yawTarget`, sent to the
     driver; closing 12% of the gap a tick, Source's tyres held it well short: "barely turns" at 40-70 mph; not yet run in game; handbrake/drift:
-    drawn at their follow rates) (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 30 m/s, wheelbase from the
+    drawn at their follow rates) (lock `lockSlow` 32 -> `lockFast` 5 deg by `lockFadeSpeed` 40 m/s (was 30: the lock, not the tyres, capped the turn at 40-60 mph, the user found cars stiff there; full lock now 86 deg/s at 40, 74 at 50, 65 at 60 mph on a 3.4 m wheelbase, was 68 / 60 / 49; measured in game at the old values: set = measured), wheelbase from the
     attachments, `AudioEngine.CarGeometry`, moved here from sv_stability) capped at `grip` x g / speed, and sideways speed goes at up to
     `grip` g towards a rolling car's (the rear axle along its wheels: the middle moves into the turn at wheelbase/2 x yaw rate; slip
     angles are the rear axle's): held at 0 it set the rear tyres across their path, Source's tyres fought the model and W-held turns bled
@@ -329,7 +343,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     Control's `forwardChange` only takes speed off (a held turn gains none), never adds it: keeping the speed both ways turned a slide's
     (a wall's) velocity back along the nose at full speed, and scraping a wall the car kept its speed and climbed it. Obstructed
     (`blockedYaw` 15 + `blockedShare` 0.5 x the turn under what was set last tick, `state.yawSet`): `blockedTime` 0.3 s of the gentle
-    yawFollow pull instead of the every-tick hold; controlShare 0 on spiked cars,
+    yawFollow pull instead of the every-tick hold, only while touching something (`body.touching`: a side PhysicsCollide, any speed, within
+    `contactHold` 0.5 s, `vehicle.audioContactAt`; without it Source's own tyres taking the rotation back tripped it and cars turned much
+    less, the user's "used to turn a lot better"; not yet run in game); controlShare 0 on spiked cars,
     `carConfig.stability == false`, or with the convar off. Every ~30 ms (every other tick at 66) an unreliable net `audio_engine_drive` to the
     driver (only one whose client predicts: not single player / the listen host / userinfo `audio_engine_predict` 0): entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
     velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state (~60 bytes). No vehicle params set while
@@ -429,13 +445,13 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   highpass -> tanh drive -> resonant peak -> lowpass (+ a 4-pole lowpass at cabin.muffle for the inside version). Seamless loops: each
   voice scaled to whole cycles per loop, vibrato/tremolo whole cycles, rendered twice and the second pass kept, peak 0.95.
 - `sh_siren.lua`: `PoliceSiren.SoundingTone(veh)`: the driver's pick (NW2 `siren_tone`, valid while NW2 `siren_at` = the light mode it was
-  picked in), else `lightTones[mode]` of the car's scheme (`PoliceSiren.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle,
-  then off), driver only, lights on.
+  picked in), else `lightTones[mode]` of the car's scheme (`PoliceSiren.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle, round and round; `off` = no tone: a tap of the tone key steps on letting go, held `TONE_HOLD_SECONDS` 0.4 s it sends off, the user's: switching tones without silence between;
+  was: next, then off), driver only, lights on. The siren studio mirrors it (Shift / tone key, tap / hold).
 - `cl_siren.lua`: builds a tone twice (outside / inside) in a coroutine (5 ms/frame; stored as the engine's loops are, one
   pre-roll sample [y_L, y_1 .. y_L] with loopStart 1: the game loops from sample 1, and without it every pass skipped y_1,
   a tick the user heard on the wail) the first time a car near sounds it (a failed one isn't retried); `sound.Generate`
   names carry `PoliceSiren.Serial` (lua refresh); one CSoundPatch per car (fade-in a frame after PlayEx; once a second it's checked with IsPlaying and restarted at full volume if the game dropped it; only the nearest `police_siren_maxcars` (12, 0 = all) sounding cars are heard, others released, back at 2 places inside: with many cars driving, the engines' loops took the channels and a siren, starting at volume 0, stayed silent), swapped in 0.15 s on getting in/out
-  (driver or a seat parented to the car, and the view on the player: watching through a camera = outside, as the engine). Doppler from its own speed sampling (positions >= 0.05 s apart, gaps > 0.3 s and teleports
+  (driver or a seat parented to the car, and the view on the player: watching through a camera = outside, as the engine). Doppler from its own speed sampling (every siren car within `TRACK_MARGIN` 1.2 x the audible range, audio_engine_range at its siren level, tracked while silent too, `velocityTracks`, and a tone starts at its Doppler pitch: started at the plain pitch with an empty track, it swept to the Doppler one as it faded in, a "water drop" each time a passing siren started, the user, 30-car race; positions >= 0.05 s apart, gaps > 0.3 s and teleports
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on
   the near-pure tone 1 % Doppler steps were audible; so the pitch stays within 150..255 (-5..+4 semitones). Key `police_siren_tonekey` (q; alt/shift/ctrl = left one),
