@@ -394,9 +394,12 @@ local hookLights = {}
 	measured speed and revs (position samples, the limiter trimming the power, the converter): the
 	value is filtered over `filter` s, the needle stays put until that is `band` away, then
 	travels to it (eased, at `slowest`..`fastest` per s: a gear change's drop is still quick) and
-	stops there. Digits show the needle's value (rpm in steps of RPM_DIGIT_STEP)
+	stops there. Digits show the needle's value (rpm in steps of RPM_DIGIT_STEP).
+	Once it has caught up, it keeps following while the revs go on moving the same way faster than
+	`drift` per s (their rate filtered over `rateTime` s) and holds again when they stop or turn: a
+	slow climb (the last of the pull to top speed) went up in band-sized steps (the user)
 ]]
-local RPM_GAUGE = { filter = 0.15, band = 120, slowest = 700, fastest = 16000, follow = 14 }      -- rpm
+local RPM_GAUGE = { filter = 0.15, band = 120, slowest = 700, fastest = 16000, follow = 14, drift = 40, rateTime = 0.3 }      -- rpm
 local RPM_DIGIT_STEP = 50
 local rpmNeedle = {}
 
@@ -479,14 +482,28 @@ local function smoothSpeedNeedle(target, deltaTime)
 end
 
 local function stepGauge(needle, spec, target, deltaTime)
-	if not needle.value then needle.value, needle.filtered, needle.moving = target, target, false end
-	needle.filtered = needle.filtered + (target - needle.filtered) * min(1, deltaTime / spec.filter)
+	if not needle.value then needle.value, needle.filtered, needle.moving, needle.rate = target, target, false, 0 end
+	local previous = needle.filtered
+	needle.filtered = previous + (target - previous) * min(1, deltaTime / spec.filter)
+	if deltaTime > 0 then
+		needle.rate = needle.rate + ((needle.filtered - previous) / deltaTime - needle.rate) * min(1, deltaTime / spec.rateTime)
+	end
+	-- (following a steady climb or fall: needle.tracking is its direction, 1 or -1)
+	if needle.tracking then
+		if needle.rate * needle.tracking > spec.drift then
+			needle.value = needle.filtered
+			return needle.value
+		end
+		needle.tracking = nil
+	end
 	local gap = needle.filtered - needle.value
 	if not needle.moving and abs(gap) > spec.band then needle.moving = true end
 	if needle.moving then
 		local step = clamp(abs(gap) * spec.follow, spec.slowest, spec.fastest) * deltaTime
 		if abs(gap) <= step then
 			needle.value, needle.moving = needle.filtered, false
+			local direction = gap > 0 and 1 or -1
+			if needle.rate * direction > spec.drift then needle.tracking = direction end
 		else
 			needle.value = needle.value + (gap > 0 and step or -step)
 		end

@@ -20,7 +20,7 @@
 	pitch        overall pitch of every tone
 	sampleRate   44100 or 22050
 	lightTones   the tone each light mode starts: [1] = CODE 2, [2] = CODE 3 ("" = none)
-	cycle        the tones the tone key steps through, in order (round and round; holding the key switches it off)
+	cycle        the tones the tone key steps through, in order (then off, then the first again)
 	honkTone     the tone the car horn's key plays while the siren sounds, instead of the horn (as a real
 	             siren's horn override; "" = the horn honks as ever). Lights alone (no tone): the horn
 	schemes      lightTones, cycle and honkTone for the other light schemes (the lights' NW2
