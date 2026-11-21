@@ -525,15 +525,18 @@ end)
 -- after stopsound: it kills the channels but the patches still think they play (IsPlaying is their
 -- own flag). A held honk is started again; caught from a key bound to stopsound, or the audio
 -- engine's restart (audio_engine_restart_sounds) through its generic hook
+-- (the horns are generated like the siren's tones: built again under a new serial, as the siren)
 local function restartHonks()
 	for _, car in pairs(cars) do
-		local honk = car.honk
-		if honk then
-			honk.patch:Stop()
-			honk.patch:PlayEx(honk.volume, honk.pitch)
+		if car.honk then
+			car.honk.patch:Stop()
+			car.honk = nil
 		end
 	end
+	CarHorn.Serial = CarHorn.Serial + 1
+	built, queued, failed, builder = {}, {}, {}, nil
 end
+concommand.Add("car_horn_restart", restartHonks, nil, "Build the horns again (after stopsound)")
 hook.Add("audio_engine/restart-sounds", "car_horn", restartHonks)
 hook.Add("PlayerBindPress", "car_horn_stopsound", function(_, bind, pressed)
 	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, restartHonks) end

@@ -478,15 +478,19 @@ hook.Add("Think", "police_siren_keys", function()
 	toneHeld = toneKeyDown
 end)
 
--- after stopsound: it kills the channels but the patches still think they play (IsPlaying is their
--- own flag), so the revive never restarts them. Caught from a key bound to stopsound, or the audio
--- engine's restart (audio_engine_restart_sounds) through its generic hook
+-- after stopsound: the generated tones stay silent even started again (stopsound seems to drop the
+-- sound.Generate data, which the game can't reload: the engine's WAV files come back), so every tone
+-- is built again under a new serial and each siren starts from it once built. Caught from a key bound
+-- to stopsound, or the audio engine's restart (audio_engine_restart_sounds) through its generic hook
 local function restartSirens()
-	for _, state in pairs(cars) do
+	for vehicle, state in pairs(cars) do
 		state.patch:Stop()
-		state.patch:PlayEx(state.volume, state.pitch)
+		cars[vehicle] = nil
 	end
+	PoliceSiren.Serial = PoliceSiren.Serial + 1
+	soundNames, queued, failed, builder = {}, {}, {}, nil
 end
+concommand.Add("police_siren_restart", restartSirens, nil, "Build the siren tones again and restart every siren (after stopsound)")
 hook.Add("audio_engine/restart-sounds", "police_siren", restartSirens)
 hook.Add("PlayerBindPress", "police_siren_stopsound", function(_, bind, pressed)
 	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, restartSirens) end

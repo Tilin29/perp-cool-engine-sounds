@@ -199,7 +199,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     A typed stopsound (sirens stayed dead, the user): a volume change on a sound whose channel is gone starts it again (Source's
     S_StartSound falls through to starting it), so loops whose volume moves came back alone and steady ones didn't. Once a second
     every playing loop gets a volume change (`KEEPALIVE_SHARE` 0.002 under its level, alternating, ~0.02 dB): engine groups
-    (`car.keepAliveLow`), sirens, held honks. Not yet confirmed in game
+    (`car.keepAliveLow`), sirens, held honks. Didn't bring the sirens back (the user), nor did a Stop + PlayEx: stopsound seems
+    to drop sound.Generate data (the siren and horn are generated; the engines' WAV files came back). So the siren's and horn's
+    restarts build every tone again under a new serial (`police_siren_restart`, `car_horn_restart`, also run by
+    audio_engine_restart_sounds). Not yet confirmed in game; if it works, WAV files baked offline would survive a typed stopsound
   - each car's update runs in a pcall (`updateCarSafely`, printed once per car): one failing car stopped every car after it.
     Every client `EntityRemoved` hook (cl_engine, cl_handling, cl_siren, cl_horn) ignores `fullUpdate` (entities stay).
     Back from dormancy a car takes the engine state as it is (no shut-down sound for an engine switched off out of view).
