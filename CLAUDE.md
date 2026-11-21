@@ -337,7 +337,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     and let go the next frame: the camera zoomed in and out for clients, the user). Drawing (poses worked out at CalcView with nothing moved, put on at PreDrawOpaqueRenderables, taken off at PostRender: the render origin moves bones and attachments, and left on, the game's eye-attachment view arrived already moved and the camera ran ~2x the lead ahead, out of sight and shaking, the first multiplayer test): `SetRenderOrigin` + the Entity
     `SetRenderAngles` (Player's is something else) + `InvalidateBoneCache` on the car and its children (pods, lightbar), render bounds widened
     by the offset (culling goes by Source's position: your car vanished otherwise), players in it via PrePlayerDraw; stale overrides cleared.
-    `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it). The camera: `hook.Call` is wrapped for "CalcView" only
+    `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it).
+    Drawn less leaning (drawing only, the user's: not the handling): cars in `AudioEngine.CAR_LEAN_LEVEL[name]` (sh_carlist, share of the
+    lean taken out; the Defender 0.6, not yet seen in game: SpringConstant 10, no anti-roll bar, it leaned right over under the model's
+    cornering and its inside wheels hung off the road) within 4000 in: 4 traces down from the body's corners (its OBB, 80% out, 24 in
+    over its bottom; not the wheel attachments: they ride on the wheel bones, read before the car is drawn they can be one point) to the
+    road each frame, each side's height over it (`audio_engine_lean_info` prints what it measures; `audio_engine_lean_set <0..1>` tries a share on the car you sit in, this client only, until a reload; works in game, the user), turned about the lower side's wheels on the road (`levelCar`, after the prediction, smoothed 0.08 s);
+    the camera follows the car you sit in when it's drawn moved (`cameraCar`). The camera: `hook.Call` is wrapped for "CalcView" only
     (re-wrapped every 2 s if a hook library replaced it; every wrapper we made is in `AudioEngine.predictHookCalls`, they call the newest
     `AudioEngine.PredictCalcView`, and inside one CalcView (`AudioEngine.predictInCalcView`) the next of ours passes it on: nested wrappers
     moved the camera twice; `updateFrame` runs in a pcall), so any gamemode/addon camera is moved with the car; if the camera didn't run through

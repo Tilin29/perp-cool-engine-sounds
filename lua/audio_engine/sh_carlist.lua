@@ -1556,3 +1556,13 @@ end
 AudioEngine.CAR_HANDLING = {}
 for carName in pairs(AudioEngine.CAR_EMOTION) do AudioEngine.CAR_HANDLING[carName] = { grip = 1.3, downforce = 0.5 } end
 for carName in pairs(AudioEngine.ECONOMY) do AudioEngine.CAR_HANDLING[carName] = { grip = 1.05 } end
+
+--[[
+	Drawing only (cl_handling.lua): the share of a car's lean against the road taken out where it's
+	drawn. The physics are untouched. The Defender (SpringConstant 10, no anti-roll bar) leaned right
+	over under the handling model's cornering and its inside wheels hung off the road (the user: only
+	the look should change, not the handling). 0.6: not yet seen in game
+]]
+AudioEngine.CAR_LEAN_LEVEL = {
+	["Land Rover Defender"] = 0.6,
+}
