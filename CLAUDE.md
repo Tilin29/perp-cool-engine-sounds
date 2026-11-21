@@ -246,6 +246,22 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     with the sandbox bone editor) and rises by the spoiler speed rules (`AudioEngine.WingSpeedUp`) or while the flap is up.
     `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
     shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
+- `cl_hud.lua`: the instrument cluster (the old panel is gone), centred at the bottom of the screen, no panel behind it
+  (the user's), from the user's design canvas "Speedometer HUD" (claude.ai artifact 9u8bvacxqDaVy57zJ6s3tr: artboards A classic, B
+  floating arc, C motorsport strip, A2 classic + police; positions are its pixels x `CLUSTER_SIZE` x screen height / 1080 x
+  `audio_engine_hud_scale`). `audio_engine_cluster` 0 | 1 | 2 | 3 | 4 (the user's numbers: 1 = A, 2 = B, 3 = C, 4 = A2; client, NOT archived: every load starts on 0);
+  0 = automatic, the default: A2 in a police car (NW2 `audio_lightscheme` "police" + a light bar: the 9 marked ones, not unmarked
+  cars), A in any other (the user: A2 by default in any cop car); 4 in a non-police car shows A. A2's panel: WAIL / YELP / PHASER lit by the
+  `audio_engine/lights-label` hook's answer (the siren module returns the playing tone, PHASER while the horn plays its honk tone),
+  CODE 2 / CODE 3 from NW2 `audio_lights`, the bar's LEDs flashing like the design. Dials scale per car (tach to redline + 500, red
+  from redline; speedo from `config.topSpeed` x 1.1). Roboto Condensed (ships with the game) for the design's Barlow / Chakra Petch.
+  Indicators, hazards and headlights are lamps on the cluster only, nothing on the car (the user's: "ready to be implemented into
+  PERP"): left click = left indicator, right click = right, both within 0.15 s = hazards, F = headlights, Space = handbrake lamp.
+  PERP's own vehicle methods win where they exist (IsIndicating / GetIndicatorDirection true = left / HasHazardLights /
+  GetHeadlights / GetFuel 0..10000, low under 1000 / IsHandBraking; `vehicle.indicatorOn` = PERP's flash phase, read from PERP's
+  cached client Lua), and the `audio_engine/cluster-lights` hook (vehicle, lights { left, right, hazards, headlights, fuel 0..1,
+  handbrake }) can fill them in. No PERP: fuel shows full. Lamps just light up (the user: no circles round them); only the indicators keep a soft glow disc (`indicatorGlow`). A's dial numbers are 25/25/21 design px (the user: the design's 19/18/16 were small); A2's panel is buttons only (the user took the siren icon and LED strip off): WAIL / YELP / PHASER 80 x 30, CODE 2 / CODE 3 100 x 30, 16 px plain text (the design's 10 px with a blurred glow came out smeared); PHASER red like CODE 3; the active CODE button flashes with the car's own lights (`AudioEngine.PoliceSideLit(vehicle, side)` in cl_police, its isLit timing, either side), dim between flashes; text drawn on whole pixels. Needles move like a stepper-motor gauge (`stepGauge`; the user: jittery on the speed limiter, then "should move robotically and not sway"): the value filtered (`SPEED_GAUGE` 0.25 s / `RPM_GAUGE` 0.15 s), the needle holds until that is `band` away (0.8 mph-or-km/h / 120 rpm), then travels to it eased at slowest..fastest per s and stops; digits show the needle (rpm in 50s). Offline: a cruise wobbling +-1 mph / +-150 rpm moves the needles ~0-2% of frames; pulling 10 mph/s the needle trails ~3.5 mph; a 6500 -> 4000 gear change lands in ~0.7 s. Engine-off prompt, LIMIT and (not on a2) the light mode sit above it.
+  Offline render check (mocked GMod -> SVG -> headless Chrome) lives in the scratchpad, not the repo.
 - `sv_engine.lua`: ignition, run by the server.
   - Engine off on entry; start key `audio_engine_startkey` (default R; polled by cl_engine, which sends `audio_engine_toggle`: the server's
     PlayerButtonDown rides on usercmds and missed presses). A press within 1.5 s of starting can't switch it off (`START_LOCK`: at 150 ms ping a second press did). Getting out leaves it

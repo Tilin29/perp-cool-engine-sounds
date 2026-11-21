@@ -444,9 +444,10 @@ local function isKeyDown(conVar)
 	return keyCode ~= nil and input.IsKeyDown(keyCode)
 end
 
--- the tone next to the light mode on the audio engine's HUD (its audio_engine/lights-label hook)
+-- the tone next to the light mode on the audio engine's HUD (its audio_engine/lights-label hook):
+-- the one playing, so the honk tone (PHASER) while the horn key plays it
 hook.Add("audio_engine/lights-label", "police_siren", function(vehicle)
-	local toneId = PoliceSiren.SoundingTone(vehicle)
+	local toneId = playingTone(vehicle, RealTime())
 	if toneId then return string.upper(PoliceSiren.CONFIG.tones[toneId].name) end
 end)
 

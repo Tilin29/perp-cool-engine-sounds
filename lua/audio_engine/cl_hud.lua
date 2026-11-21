@@ -1,12 +1,24 @@
 --[[
-	Audio Engine - driver HUD (client)
-	Tachometer with red zone and shift lights, gear, speed, rpm, throttle and brake.
-	Same look as the Rev Bench instrument cluster.
+	Audio Engine - driver HUD (client): the instrument cluster, centred at the bottom of the screen,
+	no panel behind it. Four looks, picked with audio_engine_cluster (not saved: every load starts
+	on 0):
+	  0   automatic (the default): 4 in a police car, 1 in any other
+	  1   classic (design A): rev counter, speedometer and fuel gauge as dials with needles
+	  2   floating arc (B): one rev arc with the speed and gear in its middle
+	  3   motorsport strip (C): a bar of rev segments over speed / gear / rpm read-outs
+	  4   classic with the police panel (A2: siren tones, CODE 2 / CODE 3, the light bar's flashes):
+	      police cars only (scheme "police" with a light bar), any other car shows 1
+	Drawn after the "Speedometer HUD" design canvas (artboards A, A2, B, C): the positions and
+	sizes below are that design's pixels, scaled to the screen.
+
+	Indicators, hazards and headlights are the cluster's own lamps on the default controls (see
+	"the cluster's own lights" below), PERP's where it has them; without PERP the fuel gauge sits
+	at full.
 ]]
 
 local AudioEngine = AUDIO_ENGINE
 
-local hudConVar = CreateClientConVar("audio_engine_hud", "1", true, false, "Show the speed/rpm HUD")
+local hudConVar = CreateClientConVar("audio_engine_hud", "1", true, false, "Show the instrument cluster")
 local unitsConVar = CreateClientConVar("audio_engine_units", "mph", true, false, "HUD speed units: mph or kmh")
 -- the default used to be kmh, and the old value is archived: move everyone to mph once
 -- (a cookie remembers it, so choosing kmh again afterwards sticks)
@@ -15,171 +27,753 @@ if cookie.GetNumber("audio_engine_units_mph", 0) == 0 then
 	if unitsConVar:GetString() ~= "mph" then RunConsoleCommand("audio_engine_units", "mph") end
 end
 local scaleConVar = CreateClientConVar("audio_engine_hud_scale", "1", true, false, "HUD size multiplier", 0.5, 2)
+-- (not archived: the user's rule, every load starts on A)
+local clusterConVar = CreateClientConVar("audio_engine_cluster", "0", false, false,
+	"Instrument cluster: 0 automatic (4 in police cars, else 1), 1 classic, 2 floating arc, 3 motorsport strip, 4 classic + police panel (police cars only). Not saved")
 
-local COLORS = {
-	panel = Color(23, 27, 33, 235),
-	face = Color(18, 21, 26, 255),
-	line = Color(42, 48, 57, 255),
-	text = Color(232, 227, 214, 255),
-	muted = Color(141, 147, 156, 255),
-	amber = Color(255, 165, 61, 255),
-	amberGlow = Color(255, 165, 61, 50),
-	red = Color(255, 75, 58, 255),
-	green = Color(95, 211, 138, 255),
+local cos, sin, rad, min, max, floor, abs, clamp = math.cos, math.sin, math.rad, math.min, math.max, math.floor, math.abs, math.Clamp
+
+-- the design's size of each cluster x this x (screen height / 1080) x audio_engine_hud_scale
+local CLUSTER_SIZE = { a = 0.7, a2 = 0.7, b = 0.75, c = 0.65 }
+local BOTTOM_MARGIN = 20       -- px at 1080 between the cluster and the bottom of the screen
+local MIN_FONT = 9             -- px: smaller text can't be read
+
+local function rgb(hex, alpha)
+	return Color(tonumber(hex:sub(1, 2), 16), tonumber(hex:sub(3, 4), 16), tonumber(hex:sub(5, 6), 16), alpha or 255)
+end
+local function mix(colorA, colorB, share, alpha)
+	return Color(colorA.r + (colorB.r - colorA.r) * share, colorA.g + (colorB.g - colorA.g) * share, colorA.b + (colorB.b - colorA.b) * share, alpha or 255)
+end
+local function faded(color, alpha) return Color(color.r, color.g, color.b, alpha) end
+
+local WHITE, BLACK = rgb("ffffff"), rgb("000000")
+
+---------------------------------------------------------------------------
+-- fonts (made again when the size changes). Roboto Condensed ships with the game; the design's
+-- Barlow / Chakra Petch would be a download for every player
+---------------------------------------------------------------------------
+local FONTS = {
+	-- name = { design px, weight, italic, glow (blur px) }
+	A_Tach = { 25, 500, false, 3 }, A_Speed = { 25, 500, false, 3 }, A_Fuel = { 21, 500, false, 3 },
+	A_Label = { 12, 600 }, A_Unit = { 15, 600 }, A_Gear = { 27, 600, false, 3 }, A_Button = { 16, 700 },
+	B_Num = { 17, 600, true }, B_Small = { 13, 600, true }, B_Speed = { 118, 700, true }, B_Unit = { 18, 600 },
+	B_Rpm = { 18, 500 }, B_Gear = { 76, 700, true },
+	C_Scale = { 14, 600 }, C_Label = { 13, 600 }, C_Speed = { 84, 700, true }, C_Gear = { 140, 700, true },
+	C_Rpm = { 44, 600, true }, C_Unit = { 18, 600 },
 }
-local SHIFT_LIGHT_AT = { 0.74, 0.81, 0.87, 0.92, 0.96 }
-local SHIFT_LIGHT_COLORS = { COLORS.green, COLORS.green, COLORS.amber, COLORS.amber, COLORS.red }
-
-local cos, sin, pi, min, max, floor = math.cos, math.sin, math.pi, math.min, math.max, math.floor
-
----------------------------------------------------------------------------
--- fonts (rebuilt when the resolution or scale changes)
----------------------------------------------------------------------------
-local fontScale
-local function makeFonts(scale)
-	if fontScale == scale then return end
-	fontScale = scale
-	local function createFont(name, size, weight)
-		surface.CreateFont(name, { font = "Roboto", size = math.max(8, floor(size * scale)), weight = weight, antialias = true, extended = true })
-	end
-	createFont("AudioHud_Gear", 96, 800)
-	createFont("AudioHud_Big", 40, 700)
-	createFont("AudioHud_Num", 30, 700)
-	createFont("AudioHud_Dial", 18, 700)
-	createFont("AudioHud_Unit", 15, 500)
-	createFont("AudioHud_Label", 13, 600)
-end
-
----------------------------------------------------------------------------
--- drawing helpers
----------------------------------------------------------------------------
--- The polygons' point tables are made once and filled in place: DrawPoly reads them as it's
--- called, and building new ones for every tick, segment and circle came to ~400 tables a frame
-local function pointList(count)
-	local points = {}
-	for i = 1, count do points[i] = { x = 0, y = 0 } end
-	return points
-end
-local quadPoints, reversedQuadPoints = pointList(4), {}
-for i = 1, 4 do reversedQuadPoints[i] = quadPoints[5 - i] end   -- (the same points, the other winding)
-
-local function setPoint(points, index, x, y)
-	local point = points[index]
-	point.x, point.y = x, y
-end
-
--- draw.RoundedBox / text change the bound texture, so every polygon resets it first;
--- otherwise the needle and dial draw with a corner texture and vanish
-local function thickLine(startX, startY, endX, endY, width, color)
-	local deltaX, deltaY = endX - startX, endY - startY
-	local length = math.sqrt(deltaX * deltaX + deltaY * deltaY)
-	if length < 0.001 then return end
-	local offsetX, offsetY = -deltaY / length * width / 2, deltaX / length * width / 2
-	setPoint(quadPoints, 1, startX + offsetX, startY + offsetY)
-	setPoint(quadPoints, 2, endX + offsetX, endY + offsetY)
-	setPoint(quadPoints, 3, endX - offsetX, endY - offsetY)
-	setPoint(quadPoints, 4, startX - offsetX, startY - offsetY)
-	draw.NoTexture()
-	surface.SetDrawColor(color)
-	surface.DrawPoly(quadPoints)
-	-- the reversed winding too, so either orientation shows
-	surface.DrawPoly(reversedQuadPoints)
-end
-
-local function arc(centerX, centerY, innerRadius, outerRadius, startAngle, endAngle, color)
-	local segmentCount = max(4, floor((endAngle - startAngle) / (pi / 48)))
-	draw.NoTexture()
-	surface.SetDrawColor(color)
-	for i = 0, segmentCount - 1 do
-		local segmentStart = startAngle + (endAngle - startAngle) * i / segmentCount
-		local segmentEnd = startAngle + (endAngle - startAngle) * (i + 1) / segmentCount
-		local startCos, startSin, endCos, endSin = cos(segmentStart), sin(segmentStart), cos(segmentEnd), sin(segmentEnd)
-		setPoint(quadPoints, 1, centerX + startCos * outerRadius, centerY + startSin * outerRadius)
-		setPoint(quadPoints, 2, centerX + endCos * outerRadius, centerY + endSin * outerRadius)
-		setPoint(quadPoints, 3, centerX + endCos * innerRadius, centerY + endSin * innerRadius)
-		setPoint(quadPoints, 4, centerX + startCos * innerRadius, centerY + startSin * innerRadius)
-		surface.DrawPoly(quadPoints)
-	end
-end
-
-local CIRCLE_SEGMENTS = 40
-local circlePoints = pointList(CIRCLE_SEGMENTS)
-local circleCos, circleSin = {}, {}
-for i = 1, CIRCLE_SEGMENTS do
-	local angle = (i - 1) / CIRCLE_SEGMENTS * pi * 2
-	circleCos[i], circleSin[i] = cos(angle), sin(angle)
-end
-local function circle(centerX, centerY, radius, color)
-	for i = 1, CIRCLE_SEGMENTS do setPoint(circlePoints, i, centerX + circleCos[i] * radius, centerY + circleSin[i] * radius) end
-	draw.NoTexture()
-	surface.SetDrawColor(color)
-	surface.DrawPoly(circlePoints)
-end
-
-local function box(x, y, width, height, scale, color, border)
-	draw.RoundedBox(floor(10 * scale), x - 1, y - 1, width + 2, height + 2, border or COLORS.line)
-	draw.RoundedBox(floor(10 * scale), x, y, width, height, color or COLORS.face)
-end
-
-local function formatThousands(number)
-	local digits = tostring(floor(number + 0.5))
-	local grouped = digits:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-	return (grouped:gsub("^,", ""))
-end
-
----------------------------------------------------------------------------
--- tachometer
----------------------------------------------------------------------------
-local function drawTachometer(centerX, centerY, radius, scale, rpm, config)
-	local redline = config.redline
-	local majorStep = (redline + 500 > 12000) and 2000 or 1000
-	local dialMaxRpm = math.ceil((redline + 500) / majorStep) * majorStep
-	local startAngle, sweep = pi * 0.75, pi * 1.5
-	local function angleOf(dialRpm) return startAngle + sweep * math.Clamp(dialRpm, 0, dialMaxRpm) / dialMaxRpm end
-	local pixelScale = radius / 194 -- the page's dial is 194 px in radius
-
-	circle(centerX, centerY, radius + 2 * pixelScale, COLORS.line)
-	circle(centerX, centerY, radius, COLORS.face)
-
-	-- red zone
-	arc(centerX, centerY, radius - 19 * pixelScale, radius - 9 * pixelScale, angleOf(redline), angleOf(dialMaxRpm), COLORS.red)
-
-	-- ticks and numerals
-	local minorStep = majorStep / 4
-	for tickRpm = 0, dialMaxRpm, minorStep do
-		local angle = angleOf(tickRpm)
-		local isMajor = tickRpm % majorStep == 0
-		local isHalf = tickRpm % (majorStep / 2) == 0
-		local tickLength = (isMajor and 18 or isHalf and 11 or 6) * pixelScale
-		local angleCos, angleSin = cos(angle), sin(angle)
-		local tickColor = tickRpm >= redline and COLORS.red or (isMajor and COLORS.text or COLORS.muted)
-		local tickOuter, tickInner = radius - 8 * pixelScale, radius - 8 * pixelScale - tickLength
-		thickLine(centerX + angleCos * tickOuter, centerY + angleSin * tickOuter, centerX + angleCos * tickInner, centerY + angleSin * tickInner,
-			(isMajor and 3 or 1.5) * pixelScale, tickColor)
-		if isMajor then
-			draw.SimpleText(tostring(tickRpm / 1000), "AudioHud_Dial", centerX + angleCos * (radius - 44 * pixelScale), centerY + angleSin * (radius - 44 * pixelScale),
-				tickRpm >= redline and COLORS.red or COLORS.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+local fontScales = {}
+local function fontsFor(prefix, scale)
+	if fontScales[prefix] == scale then return end
+	fontScales[prefix] = scale
+	for name, spec in pairs(FONTS) do
+		if name:sub(1, #prefix) == prefix then
+			local size = max(MIN_FONT, floor(spec[1] * scale + 0.5))
+			surface.CreateFont("AudioHud_" .. name, { font = "Roboto Condensed", size = size, weight = spec[2], italic = spec[3] or false, antialias = true, extended = true })
+			if spec[4] then
+				surface.CreateFont("AudioHud_" .. name .. "_Glow", { font = "Roboto Condensed", size = size, weight = spec[2], italic = spec[3] or false,
+					antialias = true, extended = true, blursize = max(1, floor(spec[4] * scale + 0.5)) })
+			end
 		end
 	end
+end
 
-	draw.SimpleText("x1000 r/min", "AudioHud_Label", centerX, centerY + radius * 0.34, COLORS.muted, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-	draw.SimpleText(formatThousands(rpm), "AudioHud_Dial", centerX, centerY + radius * 0.52, COLORS.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+---------------------------------------------------------------------------
+-- drawing, in the design's pixels: x, y go through place() to the screen
+---------------------------------------------------------------------------
+local originX, originY, pixel = 0, 0, 1
+local function place(x, y) return originX + x * pixel, originY + y * pixel end
 
-	-- needle with a soft glow
-	local angle = angleOf(rpm)
-	local angleCos, angleSin = cos(angle), sin(angle)
-	local needleBaseX, needleBaseY = centerX - angleCos * 16 * pixelScale, centerY - angleSin * 16 * pixelScale
-	local needleTipX, needleTipY = centerX + angleCos * (radius - 22 * pixelScale), centerY + angleSin * (radius - 22 * pixelScale)
-	thickLine(needleBaseX, needleBaseY, needleTipX, needleTipY, 12 * pixelScale, COLORS.amberGlow)
-	thickLine(needleBaseX, needleBaseY, needleTipX, needleTipY, 4.5 * pixelScale, COLORS.amber)
-	circle(centerX, centerY, 11 * pixelScale, COLORS.line)
-	circle(centerX, centerY, 4 * pixelScale, COLORS.amber)
+-- polygons' point tables are made once and filled in place (DrawPoly reads them as it's called)
+local pointPool = {}
+local function points(count)
+	local list = pointPool[count]
+	if not list then
+		list = {}
+		for i = 1, count do list[i] = { x = 0, y = 0 } end
+		pointPool[count] = list
+	end
+	return list
+end
+
+-- DrawPoly needs a convex polygon wound clockwise on screen: turned round if it isn't
+local function fillPoly(list, count, color)
+	local area = 0
+	for i = 1, count do
+		local a, b = list[i], list[i % count + 1]
+		area = area + a.x * b.y - b.x * a.y
+	end
+	if area < 0 then
+		for i = 1, floor(count / 2) do
+			local a, b = list[i], list[count + 1 - i]
+			a.x, b.x, a.y, b.y = b.x, a.x, b.y, a.y
+		end
+	end
+	draw.NoTexture()
+	surface.SetDrawColor(color)
+	surface.DrawPoly(list)
+end
+
+-- screen point at `radius` design px from a centre, at a gauge angle (degrees, 0 = up, clockwise)
+local function polar(centreX, centreY, radius, degrees)
+	local angle = rad(degrees)
+	return centreX + radius * sin(angle) * pixel, centreY - radius * cos(angle) * pixel
+end
+
+local function line(x0, y0, x1, y1, width, color)
+	local deltaX, deltaY = x1 - x0, y1 - y0
+	local length = math.sqrt(deltaX * deltaX + deltaY * deltaY)
+	if length < 0.001 then return end
+	local offsetX, offsetY = -deltaY / length * width * 0.5, deltaX / length * width * 0.5
+	local list = points(4)
+	list[1].x, list[1].y = x0 + offsetX, y0 + offsetY
+	list[2].x, list[2].y = x1 + offsetX, y1 + offsetY
+	list[3].x, list[3].y = x1 - offsetX, y1 - offsetY
+	list[4].x, list[4].y = x0 - offsetX, y0 - offsetY
+	fillPoly(list, 4, color)
+end
+
+-- a band between two radii (design px) from one gauge angle to another
+local function band(centreX, centreY, innerRadius, outerRadius, fromDegrees, toDegrees, color, stepDegrees)
+	if toDegrees - fromDegrees < 0.05 then return end
+	local segments = max(2, floor((toDegrees - fromDegrees) / (stepDegrees or 4)))
+	local list = points(4)
+	for i = 0, segments - 1 do
+		local a0 = fromDegrees + (toDegrees - fromDegrees) * i / segments
+		local a1 = fromDegrees + (toDegrees - fromDegrees) * (i + 1) / segments
+		list[1].x, list[1].y = polar(centreX, centreY, outerRadius, a0)
+		list[2].x, list[2].y = polar(centreX, centreY, outerRadius, a1)
+		list[3].x, list[3].y = polar(centreX, centreY, innerRadius, a1)
+		list[4].x, list[4].y = polar(centreX, centreY, innerRadius, a0)
+		fillPoly(list, 4, color)
+	end
+end
+
+local CIRCLE_SEGMENTS = 48
+local function disc(centreX, centreY, radius, color)
+	local list = points(CIRCLE_SEGMENTS)
+	for i = 1, CIRCLE_SEGMENTS do list[i].x, list[i].y = polar(centreX, centreY, radius, (i - 1) / CIRCLE_SEGMENTS * 360) end
+	fillPoly(list, CIRCLE_SEGMENTS, color)
+end
+
+local function text(value, font, x, y, color, alignX, alignY, glowColor)
+	local screenX, screenY = place(x, y)
+	screenX, screenY = floor(screenX + 0.5), floor(screenY + 0.5)
+	if glowColor then draw.SimpleText(value, "AudioHud_" .. font .. "_Glow", screenX, screenY, glowColor, alignX, alignY) end
+	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, color, alignX or TEXT_ALIGN_CENTER, alignY or TEXT_ALIGN_CENTER)
+end
+local function textShadowed(value, font, x, y, color, alignX, alignY)
+	local screenX, screenY = place(x, y)
+	screenX, screenY = floor(screenX + 0.5), floor(screenY + 0.5)
+	draw.SimpleText(value, "AudioHud_" .. font, screenX + pixel, screenY + 2 * pixel, Color(0, 0, 0, 150), alignX, alignY)
+	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, color, alignX, alignY)
+end
+local function textWidth(value, font)
+	surface.SetFont("AudioHud_" .. font)
+	return (surface.GetTextSize(value)) / pixel
+end
+
+-- a box leaning like italic type (CSS skewX(-degrees)): x, y = its top left before the lean
+local function leaningBox(x, y, width, height, degrees, color)
+	local shift = math.tan(rad(degrees)) * height * 0.5
+	local list = points(4)
+	list[1].x, list[1].y = place(x + shift, y)
+	list[2].x, list[2].y = place(x + width + shift, y)
+	list[3].x, list[3].y = place(x + width - shift, y + height)
+	list[4].x, list[4].y = place(x - shift, y + height)
+	fillPoly(list, 4, color)
+end
+
+local function rectangle(x, y, width, height, color)
+	local screenX, screenY = place(x, y)
+	surface.SetDrawColor(color)
+	surface.DrawRect(screenX, screenY, width * pixel, height * pixel)
+end
+local function outline(x, y, width, height, color)
+	local screenX, screenY = place(x, y)
+	surface.SetDrawColor(color)
+	surface.DrawOutlinedRect(screenX, screenY, width * pixel, height * pixel, max(1, floor(pixel + 0.5)))
+end
+
+---------------------------------------------------------------------------
+-- icons: drawn in their own viewBox, centred on x, y, `width` design px wide
+---------------------------------------------------------------------------
+local iconX, iconY, iconScale = 0, 0, 1
+local function iconPoint(u, v) return iconX + u * iconScale, iconY + v * iconScale end
+local function iconStart(x, y, width, boxWidth, boxHeight)
+	iconScale = width / boxWidth * pixel
+	local screenX, screenY = place(x, y)
+	iconX, iconY = screenX - boxWidth * 0.5 * iconScale, screenY - boxHeight * 0.5 * iconScale
+end
+local function iconPoly(color, ...)
+	local coordinates = { ... }
+	local count = #coordinates / 2
+	local list = points(count)
+	for i = 1, count do list[i].x, list[i].y = iconPoint(coordinates[i * 2 - 1], coordinates[i * 2]) end
+	fillPoly(list, count, color)
+end
+local function iconLine(width, color, ...)
+	local coordinates = { ... }
+	for i = 1, #coordinates / 2 - 1 do
+		local x0, y0 = iconPoint(coordinates[i * 2 - 1], coordinates[i * 2])
+		local x1, y1 = iconPoint(coordinates[i * 2 + 1], coordinates[i * 2 + 2])
+		line(x0, y0, x1, y1, width * iconScale, color)
+	end
+end
+-- an arc in the icon's box: centre u, v, radius, gauge angles
+local function iconArc(u, v, radius, fromDegrees, toDegrees, width, color)
+	local centreX, centreY = iconPoint(u, v)
+	local savedPixel = pixel
+	pixel = iconScale
+	band(centreX, centreY, radius - width * 0.5, radius + width * 0.5, fromDegrees, toDegrees, color)
+	pixel = savedPixel
+end
+local function iconDisc(u, v, radius, color)
+	local centreX, centreY = iconPoint(u, v)
+	local savedPixel = pixel
+	pixel = iconScale
+	disc(centreX, centreY, radius, color)
+	pixel = savedPixel
+end
+
+-- the indicators' soft glow behind their arrows (only theirs: the user's; other lamps just light up)
+local function indicatorGlow(x, y, radius, color)
+	local screenX, screenY = place(x, y)
+	disc(screenX, screenY, radius, faded(color, 38))
+	disc(screenX, screenY, radius * 0.6, faded(color, 30))
+end
+
+local ICONS = {}
+function ICONS.headlights(x, y, width, color, stroke)
+	iconStart(x, y, width, 30, 24)
+	-- M17 3 C27 3 27 21 17 21 Z: a half ellipse
+	local coordinates = {}
+	for i = 0, 12 do
+		local angle = rad(-90 + i * 15)
+		coordinates[#coordinates + 1] = 17 + 7.5 * cos(angle)
+		coordinates[#coordinates + 1] = 12 + 9 * sin(angle)
+	end
+	iconPoly(color, unpack(coordinates))
+	iconLine(stroke or 2.2, color, 3, 6, 13, 8)
+	iconLine(stroke or 2.2, color, 3, 11, 13, 13)
+	iconLine(stroke or 2.2, color, 3, 16, 13, 18)
+end
+function ICONS.handbrake(x, y, width, color, stroke)
+	stroke = stroke or 2
+	iconStart(x, y, width, 32, 24)
+	iconArc(16, 12, 8, 0, 360, stroke, color)
+	iconLine(stroke, color, 13.6, 16.5, 13.6, 7.5, 17, 7.5)
+	iconArc(17, 10.1, 2.6, 0, 180, stroke, color)
+	iconLine(stroke, color, 17, 12.7, 13.6, 12.7)
+	iconArc(13.35, 12, 10.5, -135.6, -44.4, stroke, color)
+	iconArc(18.65, 12, 10.5, 44.4, 135.6, stroke, color)
+end
+function ICONS.fuel(x, y, width, color, stroke)
+	stroke = stroke or 2
+	iconStart(x, y, width, 24, 24)
+	iconLine(stroke, color, 4, 3, 14, 3, 14, 21, 4, 21, 4, 3)
+	iconPoly(color, 6.5, 5.5, 11.5, 5.5, 11.5, 10, 6.5, 10)
+	iconLine(stroke * 0.9, color, 14, 9, 16.5, 9, 18.3, 10.8, 18.3, 17, 19.65, 18.4, 21, 17, 21, 8.5, 18.5, 6)
+end
+-- A's arrows: a head and a shaft (the polygon isn't convex)
+function ICONS.arrowA(x, y, width, color, left)
+	iconStart(x, y, width, 34, 28)
+	if left then
+		iconPoly(color, 2, 14, 14, 2, 14, 26)
+		iconPoly(color, 14, 9, 32, 9, 32, 19, 14, 19)
+	else
+		iconPoly(color, 32, 14, 20, 26, 20, 2)
+		iconPoly(color, 2, 9, 20, 9, 20, 19, 2, 19)
+	end
+end
+-- B's double chevrons
+function ICONS.chevrons(x, y, width, color, left)
+	iconStart(x, y, width, 34, 26)
+	if left then
+		iconLine(4.5, color, 16, 2, 4, 13, 16, 24)
+		iconLine(4.5, color, 30, 2, 18, 13, 30, 24)
+	else
+		iconLine(4.5, color, 18, 2, 30, 13, 18, 24)
+		iconLine(4.5, color, 4, 2, 16, 13, 4, 24)
+	end
+end
+-- C's arrowheads (two triangles: the shape isn't convex)
+function ICONS.arrowhead(x, y, width, color, left)
+	iconStart(x, y, width, 22, 26)
+	if left then
+		iconPoly(color, 20, 1, 15, 13, 2, 13)
+		iconPoly(color, 2, 13, 15, 13, 20, 25)
+	else
+		iconPoly(color, 2, 1, 20, 13, 7, 13)
+		iconPoly(color, 7, 13, 20, 13, 2, 25)
+	end
+end
+
+---------------------------------------------------------------------------
+-- what the cluster shows (read once a frame)
+---------------------------------------------------------------------------
+local state = { rpm = 0, fuelShown = 1 }
+
+local function speedUnits()
+	local usesMph = unitsConVar:GetString() == "mph"
+	return usesMph, usesMph and 2.23694 or 3.6, usesMph and "MPH" or "KM/H"
+end
+
+local function gearLabel(engineState)
+	if not engineState.on then return "-" end
+	if engineState.phase ~= "run" then return "N" end
+	if engineState.gear == -1 then return "R" end
+	if engineState.gear > 0 then return tostring(engineState.gear) end
+	return "N"
+end
+
+--[[
+	The cluster's own lights, ready for PERP: nothing on the car itself is lit or networked, only
+	the lamps on the cluster follow the controls. Left click = left indicator, right click = right
+	indicator (pressed again, or the other one, it goes off / over), both together (within
+	BOTH_CLICK_WINDOW) = hazards, F = headlights; the handbrake lamp is Space. Where the PERP
+	gamemode's own vehicle methods are there (IsIndicating, GetIndicatorDirection (true = left),
+	HasHazardLights, GetHeadlights, GetFuel 0..10000, IsHandBraking) they're shown instead, and the
+	audio_engine/cluster-lights hook (vehicle, lights) can fill in `lights` { left, right, hazards,
+	headlights, fuel (0..1), handbrake } for any other source.
+]]
+local BOTH_CLICK_WINDOW = 0.15   -- s between the two clicks that make the hazards
+local BLINK_PERIOD = 0.8         -- s, on for half of it
+local ownLights = setmetatable({}, { __mode = "k" })   -- vehicle -> { indicator = "left" | "right" | nil, hazards, headlights }
+local clickState = { left = false, right = false, pendingSide = nil, pendingAt = 0, f = false }
+
+local function lightsOf(vehicle)
+	local lights = ownLights[vehicle]
+	if not lights then lights = {}; ownLights[vehicle] = lights end
+	return lights
+end
+
+local function toggleIndicator(lights, side)
+	lights.hazards = false
+	lights.indicator = lights.indicator ~= side and side or nil
+end
+
+local function controlsAllowed(player)
+	return not player:IsTyping() and not gui.IsGameUIVisible() and not vgui.CursorVisible() and system.HasFocus()
+end
+
+hook.Add("Think", "audio_engine_cluster_lights", function()
+	local player = LocalPlayer()
+	local vehicle = IsValid(player) and player:GetVehicle()
+	if not IsValid(vehicle) or not AudioEngine.GetClientCar or not AudioEngine.GetClientCar(vehicle) then
+		clickState.left, clickState.right, clickState.pendingSide, clickState.f = false, false, nil, false
+		return
+	end
+	local allowed = controlsAllowed(player)
+	local leftDown = allowed and input.IsMouseDown(MOUSE_LEFT)
+	local rightDown = allowed and input.IsMouseDown(MOUSE_RIGHT)
+	local fDown = allowed and input.IsKeyDown(KEY_F)
+	local lights = lightsOf(vehicle)
+	local now = RealTime()
+	local leftPressed, rightPressed = leftDown and not clickState.left, rightDown and not clickState.right
+	clickState.left, clickState.right = leftDown, rightDown
+
+	if (leftPressed and (rightDown or clickState.pendingSide == "right")) or (rightPressed and (leftDown or clickState.pendingSide == "left")) then
+		-- both: the hazards (a single click still waiting is taken back into them)
+		clickState.pendingSide = nil
+		lights.hazards = not lights.hazards
+		lights.indicator = nil
+	elseif leftPressed or rightPressed then
+		clickState.pendingSide, clickState.pendingAt = leftPressed and "left" or "right", now
+	elseif clickState.pendingSide and now - clickState.pendingAt >= BOTH_CLICK_WINDOW then
+		toggleIndicator(lights, clickState.pendingSide)
+		clickState.pendingSide = nil
+	end
+
+	if fDown and not clickState.f then lights.headlights = not lights.headlights end
+	clickState.f = fDown
+end)
+
+local hookLights = {}
+--[[
+	The needles and read-outs move like a stepper-motor gauge, not with every wobble of the
+	measured speed and revs (position samples, the limiter trimming the power, the converter): the
+	value is filtered over `filter` s, the needle stays put until that is `band` away, then
+	travels to it (eased, at `slowest`..`fastest` per s: a gear change's drop is still quick) and
+	stops there. Digits show the needle's value (rpm in steps of RPM_DIGIT_STEP)
+]]
+local SPEED_GAUGE = { filter = 0.25, band = 0.8, slowest = 4, fastest = 150, follow = 8 }        -- mph or km/h
+local RPM_GAUGE = { filter = 0.15, band = 120, slowest = 700, fastest = 16000, follow = 14 }      -- rpm
+local RPM_DIGIT_STEP = 50
+local speedNeedle, rpmNeedle = {}, {}
+
+local function stepGauge(needle, spec, target, deltaTime)
+	if not needle.value then needle.value, needle.filtered, needle.moving = target, target, false end
+	needle.filtered = needle.filtered + (target - needle.filtered) * min(1, deltaTime / spec.filter)
+	local gap = needle.filtered - needle.value
+	if not needle.moving and abs(gap) > spec.band then needle.moving = true end
+	if needle.moving then
+		local step = clamp(abs(gap) * spec.follow, spec.slowest, spec.fastest) * deltaTime
+		if abs(gap) <= step then
+			needle.value, needle.moving = needle.filtered, false
+		else
+			needle.value = needle.value + (gap > 0 and step or -step)
+		end
+	end
+	return needle.value
+end
+
+local function readState(player, vehicle, car, deltaTime)
+	local config, engineState = car.config, car.engineState
+	state.rpm = max(0, stepGauge(rpmNeedle, RPM_GAUGE, engineState.rpm, deltaTime))
+	state.rpmDigits = string.Comma(floor(state.rpm / RPM_DIGIT_STEP + 0.5) * RPM_DIGIT_STEP)
+	state.redline = config.redline
+	state.majorRpm = (config.redline + 500 > 12000) and 2000 or 1000
+	state.dialRpm = math.ceil((config.redline + 500) / state.majorRpm) * state.majorRpm
+	state.share = state.rpm / config.redline
+	state.limiter = engineState.limiterHoldTimer > 0 or state.share > 0.985
+	local usesMph, factor, unitLabel = speedUnits()
+	state.unitLabel, state.usesMph = unitLabel, usesMph
+	local measured = abs(car.speedAlongNose) * factor
+	if state.speedUnits ~= unitLabel then state.speedUnits, speedNeedle.value = unitLabel, nil end
+	state.speed = max(0, stepGauge(speedNeedle, SPEED_GAUGE, measured, deltaTime))
+	state.speedDigits = floor(state.speed + 0.5)
+	local topSpeed = (tonumber(config.topSpeed) or 200) / 3.6 * factor
+	state.speedMajor = topSpeed > 190 and 40 or 20
+	state.dialSpeed = clamp(math.ceil(topSpeed * 1.1 / state.speedMajor) * state.speedMajor, usesMph and 80 or 120, usesMph and 260 or 400)
+	state.gear = gearLabel(engineState)
+	-- the lights: the cluster's own (the controls above), PERP's where it has them, then the hook
+	local own = lightsOf(vehicle)
+	local left, right, hazards = own.indicator == "left", own.indicator == "right", own.hazards or false
+	local headlights, fuel = own.headlights or false, nil
+	local handbrake = player:KeyDown(IN_JUMP)
+	if vehicle.IsIndicating and vehicle.GetIndicatorDirection then
+		local indicating, leftward = vehicle:IsIndicating(), vehicle:GetIndicatorDirection()
+		left, right = indicating and leftward or false, indicating and not leftward or false
+	end
+	if vehicle.HasHazardLights then hazards = vehicle:HasHazardLights() end
+	if vehicle.GetHeadlights then headlights = vehicle:GetHeadlights() end
+	if vehicle.GetFuel then fuel = tonumber(vehicle:GetFuel()); fuel = fuel and fuel / 10000 end
+	if vehicle.IsHandBraking and vehicle:IsHandBraking() then handbrake = true end
+	hookLights.left, hookLights.right, hookLights.hazards, hookLights.headlights, hookLights.fuel, hookLights.handbrake =
+		left, right, hazards, headlights, fuel, handbrake
+	hook.Run("audio_engine/cluster-lights", vehicle, hookLights)
+
+	state.fuel = hookLights.fuel and clamp(hookLights.fuel, 0, 1) or 1
+	state.lowFuel = hookLights.fuel ~= nil and hookLights.fuel < 0.1
+	state.fuelShown = state.fuelShown + (state.fuel - state.fuelShown) * min(1, deltaTime * 2)
+	-- (PERP keeps the flash in step with its own lamps and tick sound)
+	local blinkOn = vehicle.indicatorOn
+	if blinkOn == nil then blinkOn = RealTime() % BLINK_PERIOD < BLINK_PERIOD / 2 end
+	state.left = blinkOn and (hookLights.hazards or hookLights.left) or false
+	state.right = blinkOn and (hookLights.hazards or hookLights.right) or false
+	state.headlights = hookLights.headlights or false
+	state.handbrake = hookLights.handbrake or false
+	return state
+end
+
+---------------------------------------------------------------------------
+-- A: classic dials (and A2's police panel on top)
+---------------------------------------------------------------------------
+local A = {
+	backlight = rgb("ff4a36"), needle = rgb("ff5a2e"), red = rgb("c81e14"), redNumber = rgb("ff7a66"),
+	green = rgb("4fe07a"), redLamp = rgb("ff4b3a"), amber = rgb("ffb53a"), off = rgb("18191b"),
+	bezel = rgb("0b0c0d"), trim = rgb("6f7276"), trimLight = rgb("c8cacd"), wall = rgb("141517"), face = rgb("0a0b0c"),
+	cap = rgb("1e1f21"), capLight = rgb("3a3c3f"),
+}
+A.core = mix(A.backlight, WHITE, 0.38)
+A.glow = faded(A.backlight, 170)
+A.dimLabel = mix(A.backlight, WHITE, 0.2, 179)
+A.needleGlow = faded(A.needle, 70)
+-- the content's box in the design (the 1000 x 460 artboard): centred at the bottom of the screen
+A.left, A.right, A.top, A.bottom = 88, 915, 30, 411
+
+local function drawDial(centreX, centreY, bezelRadius)
+	local x, y = place(centreX, centreY)
+	disc(x, y, bezelRadius + 6, A.bezel)
+	disc(x, y, bezelRadius + 3, A.trim)
+	band(x, y, bezelRadius, bezelRadius + 3, -80, 10, A.trimLight)
+	disc(x, y, bezelRadius, A.wall)
+	disc(x, y, bezelRadius - 8, A.face)
+	band(x, y, bezelRadius - 16, bezelRadius - 8, 0, 360, Color(0, 0, 0, 90), 8)
+end
+
+-- ticks, numbers and red zone of one dial: `gauge` as in the design's geom()
+local function drawScale(gauge)
+	local x, y = place(gauge.cx, gauge.cy)
+	local faceRadius = gauge.bezel - 8
+	local outer = faceRadius - 6
+	local function angleOf(value) return -gauge.sweep / 2 + value / gauge.max * gauge.sweep end
+	if gauge.redFrom then band(x, y, outer - 3.5, outer, angleOf(gauge.redFrom), angleOf(gauge.redTo), A.red) end
+	local count = math.Round(gauge.max / gauge.minor)
+	for i = 0, count do
+		local value = i * gauge.minor
+		local angle = angleOf(value)
+		local isMajor = abs(value / gauge.major - math.Round(value / gauge.major)) < 1e-6
+		local isHalf = not isMajor and abs(value / gauge.half - math.Round(value / gauge.half)) < 1e-6
+		local length = faceRadius * (isMajor and 0.12 or (isHalf and 0.075 or 0.045))
+		local x0, y0 = polar(x, y, outer - length, angle)
+		local x1, y1 = polar(x, y, outer, angle)
+		local width = (isMajor and 2.4 or (isHalf and 1.5 or 1)) * pixel
+		line(x0, y0, x1, y1, width * 2.2, faded(A.backlight, 50))
+		line(x0, y0, x1, y1, width, isMajor and A.core or faded(A.core, isHalf and 255 or 190))
+		if isMajor then
+			local inRed = gauge.redFrom and value >= gauge.redFrom - 1e-9 and value <= gauge.redTo + 1e-9
+			local numberX, numberY = polar(x, y, faceRadius * gauge.numberRadius, angle)
+			numberX, numberY = floor(numberX + 0.5), floor(numberY + 0.5)
+			local label = gauge.label(value)
+			draw.SimpleText(label, "AudioHud_" .. gauge.font .. "_Glow", numberX, numberY, inRed and Color(255, 42, 26, 170) or A.glow, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			draw.SimpleText(label, "AudioHud_" .. gauge.font, numberX, numberY, inRed and A.redNumber or A.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
+	end
+end
+
+local function drawNeedle(centreX, centreY, length, tail, halfWidth, degrees, capRadius)
+	local x, y = place(centreX, centreY)
+	local tipX, tipY = polar(x, y, length, degrees)
+	local tailX, tailY = polar(x, y, tail, degrees + 180)
+	-- a thin wedge: wide at the tail, a point at the tip
+	local sideX, sideY = cos(rad(degrees)) * halfWidth * pixel, sin(rad(degrees)) * halfWidth * pixel
+	local tipSideX, tipSideY = cos(rad(degrees)) * 0.6 * pixel, sin(rad(degrees)) * 0.6 * pixel
+	line(tailX, tailY, tipX, tipY, halfWidth * 4 * pixel, A.needleGlow)
+	local list = points(4)
+	list[1].x, list[1].y = tailX - sideX, tailY - sideY
+	list[2].x, list[2].y = tailX + sideX, tailY + sideY
+	list[3].x, list[3].y = tipX + tipSideX, tipY + tipSideY
+	list[4].x, list[4].y = tipX - tipSideX, tipY - tipSideY
+	fillPoly(list, 4, A.needle)
+	disc(x + 1.5 * pixel, y + 3 * pixel, capRadius, Color(0, 0, 0, 150))
+	disc(x, y, capRadius, A.cap)
+	disc(x - capRadius * 0.15 * pixel, y - capRadius * 0.2 * pixel, capRadius * 0.55, A.capLight)
+	disc(x, y, capRadius * 0.45, A.cap)
+end
+
+local function lampColor(on, color, offColor) return on and color or (offColor or A.off) end
+
+local function drawClassic(info)
+	local tach = { cx = 219, cy = 230, bezel = 125, sweep = 270, max = info.dialRpm, major = info.majorRpm, half = info.majorRpm / 2,
+		minor = info.majorRpm / 4, redFrom = info.redline, redTo = info.dialRpm, numberRadius = 0.70, font = "A_Tach",
+		label = function(value) return string.format("%d", value / 1000) end }
+	local speedo = { cx = 529, cy = 220, bezel = 165, sweep = 270, max = info.dialSpeed, major = info.speedMajor, half = info.speedMajor / 2,
+		minor = info.speedMajor / 4, numberRadius = 0.71, font = "A_Speed", label = function(value) return string.format("%d", value) end }
+	local fuelGauge = { cx = 814, cy = 240, bezel = 95, sweep = 120, max = 1, major = 0.5, half = 0.25, minor = 0.125, redFrom = 0, redTo = 0.125,
+		numberRadius = 0.58, font = "A_Fuel", label = function(value) return value == 0 and "E" or (value == 1 and "F" or "½") end }
+	for _, gauge in ipairs({ tach, speedo, fuelGauge }) do
+		drawDial(gauge.cx, gauge.cy, gauge.bezel)
+		drawScale(gauge)
+	end
+
+	-- shift light, gear, labels
+	local shiftOn = info.share > 0.92
+	local shiftX, shiftY = place(219, 186)
+	disc(shiftX, shiftY, 5.5, A.cap)
+	disc(shiftX, shiftY, 4, shiftOn and A.redLamp or rgb("1f1210"))
+	text("RPM × 1000", "A_Label", 219, 254, A.dimLabel, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	rectangle(201, 268, 36, 38, rgb("040404"))
+	outline(201, 268, 36, 38, rgb("1f2022"))
+	text(info.gear, "A_Gear", 219, 287, A.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, A.glow)
+	text(info.unitLabel, "A_Unit", 529, 174, A.dimLabel, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+
+	-- lamps
+	ICONS.headlights(507, 282, 24, lampColor(info.headlights, A.green))
+	ICONS.handbrake(551, 282, 26, lampColor(info.handbrake, A.redLamp))
+	ICONS.fuel(814, 282, 19, lampColor(info.lowFuel, A.amber))
+	if info.left then indicatorGlow(395, 82, 15, A.green) end
+	ICONS.arrowA(395, 82, 27, lampColor(info.left, A.green), true)
+	if info.right then indicatorGlow(663, 82, 15, A.green) end
+	ICONS.arrowA(663, 82, 27, lampColor(info.right, A.green), false)
+
+	-- needles over everything
+	drawNeedle(219, 230, 102, 20, 2.2, -135 + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 270, 11)
+	drawNeedle(529, 220, 140, 26, 2.6, -135 + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 270, 14)
+	drawNeedle(814, 240, 72, 15, 1.9, -60 + clamp(info.fuelShown, 0, 1) * 120, 9)
+end
+
+-- A2: the siren tones (WAIL / YELP / PHASER), the light modes (CODE 2 / CODE 3) and the bar's flashes
+local POLICE_RED, POLICE_BLUE, SIREN_AMBER = rgb("ff3b30"), rgb("3d8bff"), rgb("ffb53a")
+
+local BUTTON_HEIGHT = 30
+local function drawButton(x, y, width, label, active, lit, color)
+	rectangle(x, y, width, BUTTON_HEIGHT, lit and mix(color, BLACK, 0.72) or rgb("0b0c0d"))
+	outline(x, y, width, BUTTON_HEIGHT, lit and mix(color, BLACK, 0.3) or (active and mix(color, BLACK, 0.55) or BLACK))
+	text(label, "A_Button", x + width / 2, y + BUTTON_HEIGHT / 2, lit and mix(color, WHITE, 0.45) or (active and mix(color, BLACK, 0.25) or rgb("8a8c90")),
+		TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+end
+
+-- the siren tones over the rev counter, the light modes over the fuel gauge: just the buttons
+local SIREN_BUTTONS = { { "WAIL", SIREN_AMBER }, { "YELP", SIREN_AMBER }, { "PHASER", POLICE_RED } }
+local SIREN_BUTTON_WIDTH, LIGHT_BUTTON_WIDTH, BUTTON_GAP = 80, 100, 6
+
+local function drawPolicePanel(vehicle)
+	local lightMode = vehicle:GetNW2Int("audio_lights", 0)
+	-- the tone, from whoever answers the engine's lights-label hook (the siren module: its tone name, PHASER while the horn plays it)
+	local tone = hook.Run("audio_engine/lights-label", vehicle)
+	tone = isstring(tone) and string.upper(tone) or ""
+	for index, button in ipairs(SIREN_BUTTONS) do
+		local on = tone == button[1]
+		drawButton(100 + (index - 1) * (SIREN_BUTTON_WIDTH + BUTTON_GAP), 50, SIREN_BUTTON_WIDTH, button[1], on, on, button[2])
+	end
+
+	-- the light mode's button flashes with the car's own lights (cl_police: either side lit)
+	local flashing = AudioEngine.PoliceSideLit and (AudioEngine.PoliceSideLit(vehicle, -1) or AudioEngine.PoliceSideLit(vehicle, 1)) or lightMode > 0
+	drawButton(712, 50, LIGHT_BUTTON_WIDTH, "CODE 2", lightMode == 1, lightMode == 1 and flashing, POLICE_BLUE)
+	drawButton(712 + LIGHT_BUTTON_WIDTH + BUTTON_GAP, 50, LIGHT_BUTTON_WIDTH, "CODE 3", lightMode == 2, lightMode == 2 and flashing, POLICE_RED)
+end
+
+---------------------------------------------------------------------------
+-- B: floating arc
+---------------------------------------------------------------------------
+local B = {
+	accent = rgb("ffb21a"), red = rgb("ff3b30"), redNumber = rgb("ff5a4f"), green = rgb("4ade80"), blue = rgb("37a8ff"),
+	track = Color(255, 255, 255, 41), redTrack = Color(255, 59, 48, 115), tick = Color(255, 255, 255, 140),
+	number = Color(255, 255, 255, 204), soft = Color(255, 255, 255, 199), off = Color(255, 255, 255, 36),
+}
+-- in the 400 x 400 dial box (the indicators reach out to -14 and 414)
+B.left, B.right, B.top, B.bottom = -31, 431, 6, 370
+
+local function drawArc(info)
+	local x, y = place(200, 200)
+	local function angleOf(rpm) return -135 + clamp(rpm, 0, info.dialRpm) / info.dialRpm * 270 end
+	local limiterBlink = info.limiter and RealTime() % 0.14 < 0.07
+	band(x, y, 154, 166, -135, 135, B.track)
+	band(x, y, 154, 166, angleOf(info.redline), 135, B.redTrack)
+	local fill = info.rpm > info.redline and B.red or (info.share > 0.827 and B.accent or WHITE)
+	band(x, y, 154, 166, -135, angleOf(info.rpm), fill)
+	for rpm = 0, info.dialRpm, info.majorRpm do
+		local angle = angleOf(rpm)
+		local x0, y0 = polar(x, y, 170, angle)
+		local x1, y1 = polar(x, y, 178, angle)
+		line(x0, y0, x1, y1, 2 * pixel, B.tick)
+		local numberX, numberY = polar(x, y, 194, angle)
+		local label = string.format("%d", rpm / 1000)
+		draw.SimpleText(label, "AudioHud_B_Num", numberX + pixel, numberY + pixel, Color(0, 0, 0, 150), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		draw.SimpleText(label, "AudioHud_B_Num", numberX, numberY, rpm >= info.redline and B.redNumber or B.number, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	end
+	local needleAngle = angleOf(info.rpm)
+	local x0, y0 = polar(x, y, 146, needleAngle)
+	local x1, y1 = polar(x, y, 174, needleAngle)
+	line(x0, y0, x1, y1, 4 * pixel, WHITE)
+
+	-- fuel: four quarters, gaps between
+	local fuelColor = info.lowFuel and B.accent or WHITE
+	for quarter = 0, 3 do
+		local from, to = -150 + quarter * 11.25 + (quarter > 0 and 0.6 or 0), -150 + (quarter + 1) * 11.25 - (quarter < 3 and 0.6 or 0)
+		band(x, y, 133.5, 138.5, from, to, B.track)
+		local filledTo = min(to, -150 + info.fuelShown * 45)
+		if filledTo > from then band(x, y, 133.5, 138.5, from, filledTo, fuelColor) end
+	end
+	local eX, eY = polar(x, y, 118, -152)
+	local fX, fY = polar(x, y, 118, -103)
+	draw.SimpleText("E", "AudioHud_B_Small", eX, eY, B.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	draw.SimpleText("F", "AudioHud_B_Small", fX, fY, B.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	ICONS.fuel(158, 340, 18, info.lowFuel and B.accent or B.off, 2.2)
+
+	-- shift lights
+	local lit = clamp(floor((info.share - 0.8) / 0.0667) + 1, 0, 5)
+	for i = 0, 4 do
+		local color = (i < 2 and B.green) or (i < 4 and B.accent) or B.red
+		if limiterBlink then color = B.blue elseif i >= lit then color = Color(255, 255, 255, 41) end
+		leaningBox(200 - (5 * 22 + 4 * 6) / 2 + i * 28, 112, 22, 6, 20, color)
+	end
+
+	textShadowed(tostring(info.speedDigits), "B_Speed", 200, 132, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	local unitText, rpmText = info.unitLabel, info.rpmDigits .. " RPM"
+	local unitWidth, rpmWidth = textWidth(unitText, "B_Unit"), textWidth(rpmText, "B_Rpm")
+	local rowLeft = 200 - (unitWidth + 14 + rpmWidth) / 2
+	textShadowed(unitText, "B_Unit", rowLeft, 250, B.soft, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+	textShadowed(rpmText, "B_Rpm", rowLeft + unitWidth + 14, 250, B.soft, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+	textShadowed(info.gear, "B_Gear", 200, 292, B.accent, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+
+	ICONS.headlights(262, 314, 24, info.headlights and B.green or B.off, 2.4)
+	ICONS.handbrake(280, 344, 26, info.handbrake and B.red or B.off, 2.2)
+	if info.left then indicatorGlow(-14, 36, 17, B.green) end
+	ICONS.chevrons(-14, 36, 34, info.left and B.green or B.off, true)
+	if info.right then indicatorGlow(414, 36, 17, B.green) end
+	ICONS.chevrons(414, 36, 34, info.right and B.green or B.off, false)
+end
+
+---------------------------------------------------------------------------
+-- C: motorsport strip
+---------------------------------------------------------------------------
+local C = {
+	accent = rgb("ffb21a"), red = rgb("ff3b30"), redNumber = rgb("ff5a4f"), green = rgb("4ade80"), blue = rgb("37a8ff"),
+	light = rgb("eef0f2"), unlit = Color(255, 255, 255, 33), label = Color(255, 255, 255, 184), scale = Color(255, 255, 255, 191),
+	off = Color(255, 255, 255, 36),
+}
+local C_SEGMENTS = 36
+-- the 680 px column (the indicators reach out to -35 and 715)
+C.left, C.right, C.top, C.bottom = -37, 717, 0, 293
+
+local function drawStrip(info)
+	local limiterBlink = info.limiter and RealTime() % 0.14 < 0.07
+	-- scale
+	for rpm = 0, info.dialRpm, info.majorRpm do
+		local x = rpm == 0 and 7 or min(673, rpm / info.dialRpm * C_SEGMENTS * 19 - 2)
+		textShadowed(string.format("%d", rpm / 1000), "C_Scale", x, 0, rpm >= info.redline and C.redNumber or C.scale, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	end
+	-- segments, rising to the right, bottoms in line at y 86
+	for i = 0, C_SEGMENTS - 1 do
+		local value = (i + 1) * info.dialRpm / C_SEGMENTS
+		local on = info.rpm >= value - info.dialRpm / C_SEGMENTS / 2
+		local color = value <= info.redline * 0.8 and C.light or (value <= info.redline and C.accent or C.red)
+		local height = floor(16 + i * (34 / 35) + 0.5)
+		leaningBox(i * 19, 86 - height, 15, height, 14, on and (limiterBlink and C.blue or color) or C.unlit)
+	end
+	if info.left then indicatorGlow(-24, 61, 15, C.green) end
+	ICONS.arrowhead(-24, 61, 22, info.left and C.green or C.off, true)
+	if info.right then indicatorGlow(704, 61, 15, C.green) end
+	ICONS.arrowhead(704, 61, 22, info.right and C.green or C.off, false)
+
+	-- read-outs: bottoms on y 248
+	local baseline = 248
+	textShadowed("SPEED", "C_Label", 0, 114, C.label, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+	local speedText = tostring(info.speedDigits)
+	textShadowed(speedText, "C_Speed", 0, baseline, WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
+	textShadowed(info.usesMph and "mph" or "km/h", "C_Unit", textWidth(speedText, "C_Speed") + 8, baseline - 8, C.label, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
+	textShadowed("GEAR", "C_Label", 340, 114, C.label, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	textShadowed(info.gear, "C_Gear", 340, 128, limiterBlink and C.blue or C.accent, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	textShadowed("ENGINE", "C_Label", 680, 114, C.label, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+	local unitWidth = textWidth("rpm", "C_Unit")
+	textShadowed("rpm", "C_Unit", 680, baseline - 6, C.label, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
+	textShadowed(info.rpmDigits, "C_Rpm", 680 - unitWidth - 8, baseline, WHITE, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
+
+	-- fuel and lamps
+	local rowY = 282
+	ICONS.fuel(10, rowY, 20, info.lowFuel and C.accent or C.off, 2.2)
+	textShadowed("E", "C_Label", 30, rowY, C.label, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	for segment = 0, 9 do
+		local lit = info.fuelShown >= (segment + 0.5) / 10 or (segment == 0 and info.fuelShown > 0.02)
+		leaningBox(48 + segment * 16, rowY - 5, 13, 10, 14, lit and (info.lowFuel and C.accent or C.light) or C.unlit)
+	end
+	textShadowed("F", "C_Label", 212, rowY, C.label, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	ICONS.headlights(623, rowY, 26, info.headlights and C.green or C.off, 2.4)
+	ICONS.handbrake(666, rowY, 28, info.handbrake and C.red or C.off, 2.2)
 end
 
 ---------------------------------------------------------------------------
 -- HUD
 ---------------------------------------------------------------------------
-local displayedRpm, blinkTime, brakeDisplay = 0, 0, 0
+local CLUSTERS = {
+	a = { box = A, draw = drawClassic, fonts = "A" },
+	a2 = { box = A, draw = drawClassic, fonts = "A", police = true },
+	b = { box = B, draw = drawArc, fonts = "B" },
+	c = { box = C, draw = drawStrip, fonts = "C" },
+}
+
+local function isPoliceCar(vehicle)
+	return vehicle:GetNW2String("audio_lightscheme", "") == "police" and IsValid(vehicle:GetNW2Entity("audio_lightbar"))
+end
+
+-- audio_engine_cluster's numbers -> the design's clusters
+local CLUSTER_NUMBERS = { "a", "b", "c", "a2" }
+
+local function clusterFor(vehicle)
+	local wanted = CLUSTER_NUMBERS[clusterConVar:GetInt()]
+	-- 0 (or anything else): the police one in a police car, else the classic
+	if not wanted or wanted == "a2" then return isPoliceCar(vehicle) and "a2" or "a" end
+	return wanted
+end
+
+local statusFontScale
+local function statusFont(scale)
+	if statusFontScale == scale then return end
+	statusFontScale = scale
+	surface.CreateFont("AudioHud_Status", { font = "Roboto Condensed", size = max(MIN_FONT, floor(24 * scale)), weight = 700, antialias = true, extended = true })
+end
 
 hook.Add("HUDPaint", "audio_engine_hud", function()
 	if not hudConVar:GetBool() then return end
@@ -190,28 +784,27 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	local car = AudioEngine.GetClientCar and AudioEngine.GetClientCar(vehicle)
 	if not car then return end
 
-	local config, engineState = car.config, car.engineState
-	local deltaTime = RealFrameTime()
-	displayedRpm = displayedRpm + (engineState.rpm - displayedRpm) * min(1, deltaTime * 18)
-	blinkTime = blinkTime + deltaTime
-
-	local scale = ScrH() / 1080 * scaleConVar:GetFloat()
-	makeFonts(scale)
+	local info = readState(player, vehicle, car, RealFrameTime())
+	local clusterId = clusterFor(vehicle)
+	local cluster = CLUSTERS[clusterId]
+	local box = cluster.box
+	local screenScale = ScrH() / 1080 * scaleConVar:GetFloat()
+	pixel = screenScale * CLUSTER_SIZE[clusterId]
+	fontsFor(cluster.fonts .. "_", pixel)
+	-- the content centred at the bottom of the screen
+	originX = ScrW() / 2 - (box.left + box.right) / 2 * pixel
+	originY = ScrH() - BOTTOM_MARGIN * screenScale - box.bottom * pixel
 	draw.NoTexture()
+	cluster.draw(info)
+	if cluster.police then drawPolicePanel(vehicle) end
 
-	local padding = 18 * scale
-	local tachRadius = 120 * scale
-	local shiftLightHeight = 9 * scale
-	local readoutWidth = 236 * scale
-	local panelWidth = padding + 2 * tachRadius + 22 * scale + readoutWidth + padding
-	local panelHeight = padding + shiftLightHeight + 12 * scale + 2 * tachRadius + padding
-	local panelX = ScrW() - panelWidth - 32 * scale
-	local panelY = ScrH() - panelHeight - 32 * scale
-
-	draw.RoundedBox(floor(14 * scale), panelX - 1, panelY - 1, panelWidth + 2, panelHeight + 2, COLORS.line)
-	draw.RoundedBox(floor(14 * scale), panelX, panelY, panelWidth, panelHeight, COLORS.panel)
-
-	-- ignition prompt
+	-- status above the cluster: the ignition prompt, the speed limiter, the light mode
+	statusFont(screenScale)
+	local _, topY = place(0, box.top)
+	topY = topY - 10 * screenScale
+	local leftX = place(box.left, 0)
+	local rightX = place(box.right, 0)
+	local engineState = car.engineState
 	if not engineState.on or engineState.phase ~= "run" then
 		local message
 		if not engineState.on then
@@ -221,103 +814,22 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		else
 			message = "Starting…"
 		end
-		draw.SimpleText(message, "AudioHud_Num", panelX + panelWidth / 2, panelY - 10 * scale, engineState.on and COLORS.amber or COLORS.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
+		draw.SimpleText(message, "AudioHud_Status", ScrW() / 2, topY, engineState.on and SIREN_AMBER or WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
 	end
-
 	-- speed limiter (sv_cruise.lua): the limit, in the HUD's units
 	local speedLimit = vehicle:GetNW2Float("audio_cruise", 0)
 	if speedLimit > 0 and engineState.on and engineState.phase == "run" then
-		local usesMph = unitsConVar:GetString() == "mph"
-		local limitText = usesMph and string.format("LIMIT %d mph", math.floor(speedLimit + 0.5)) or string.format("LIMIT %d km/h", math.floor(speedLimit * 1.609344 + 0.5))
-		draw.SimpleText(limitText, "AudioHud_Num", panelX + panelWidth - 10 * scale, panelY - 10 * scale, COLORS.green, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
+		local limitText = info.usesMph and string.format("LIMIT %d mph", floor(speedLimit + 0.5)) or string.format("LIMIT %d km/h", floor(speedLimit * 1.609344 + 0.5))
+		draw.SimpleText(limitText, "AudioHud_Status", rightX, topY, B.green, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
 	end
-
-	-- police lights (sv_police.lua). Other addons can add a word after the mode through the
-	-- audio_engine/lights-label hook (the police siren shows its tone)
+	-- police lights (sv_police.lua), with the word other addons add through audio_engine/lights-label
+	-- (the siren's tone); A2 shows them on its own panel
 	local lightLabel = AudioEngine.LIGHT_MODES[vehicle:GetNW2Int("audio_lights", 0)]
-	if lightLabel and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then
+	if not cluster.police and lightLabel and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then
 		local extra = hook.Run("audio_engine/lights-label", vehicle)
 		if isstring(extra) and extra ~= "" then lightLabel = lightLabel .. " · " .. extra end
-		local labelColor = blinkTime % 0.5 < 0.25 and COLORS.red or COLORS.text
-		draw.SimpleText(lightLabel, "AudioHud_Num", panelX + 10 * scale, panelY - 10 * scale, labelColor, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
-	end
-
-	-- shift lights
-	local redlineShare = displayedRpm / config.redline
-	local onLimiter = engineState.limiterHoldTimer > 0 or redlineShare > 0.985
-	local shiftLightWidth, shiftLightGap = 26 * scale, 10 * scale
-	local tachCenterX = panelX + padding + tachRadius
-	local shiftLightsX = tachCenterX - (5 * shiftLightWidth + 4 * shiftLightGap) / 2
-	for i = 1, 5 do
-		local lit = onLimiter and (blinkTime % 0.14 < 0.07) or (redlineShare >= SHIFT_LIGHT_AT[i])
-		draw.RoundedBox(floor(3 * scale), shiftLightsX + (i - 1) * (shiftLightWidth + shiftLightGap), panelY + padding, shiftLightWidth, shiftLightHeight, lit and SHIFT_LIGHT_COLORS[i] or COLORS.line)
-	end
-
-	-- tach
-	local tachCenterY = panelY + padding + shiftLightHeight + 12 * scale + tachRadius
-	drawTachometer(tachCenterX, tachCenterY, tachRadius, scale, displayedRpm, config)
-
-	-- readouts
-	local readoutX = panelX + padding + 2 * tachRadius + 22 * scale
-	local readoutY = panelY + padding
-	local gap = 10 * scale
-	local gearBoxWidth = 92 * scale
-	local topRowHeight = 160 * scale
-
-	-- gear
-	box(readoutX, readoutY, gearBoxWidth, topRowHeight, scale)
-	draw.SimpleText("GEAR", "AudioHud_Label", readoutX + 10 * scale, readoutY + 8 * scale, COLORS.muted)
-	local gearLabel = "N"
-	if not engineState.on then gearLabel = "-"
-	elseif engineState.phase ~= "run" then gearLabel = "N"
-	elseif engineState.gear == -1 then gearLabel = "R"
-	elseif engineState.gear > 0 then gearLabel = tostring(engineState.gear) end
-	draw.SimpleText(gearLabel, "AudioHud_Gear", readoutX + gearBoxWidth / 2, readoutY + topRowHeight / 2 + 8 * scale, COLORS.amber, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-
-	-- speed
-	local speedBoxX = readoutX + gearBoxWidth + gap
-	local speedBoxWidth = readoutWidth - gearBoxWidth - gap
-	local speedBoxHeight = (topRowHeight - gap) / 2
-	local usesMph = unitsConVar:GetString() == "mph"
-	local speed = math.abs(car.speedAlongNose) * (usesMph and 2.23694 or 3.6)
-	box(speedBoxX, readoutY, speedBoxWidth, speedBoxHeight, scale)
-	draw.SimpleText("SPEED", "AudioHud_Label", speedBoxX + 10 * scale, readoutY + 8 * scale, COLORS.muted)
-	surface.SetFont("AudioHud_Big")
-	local speedText = tostring(floor(speed + 0.5))
-	local speedTextWidth = surface.GetTextSize(speedText)
-	draw.SimpleText(speedText, "AudioHud_Big", speedBoxX + 10 * scale, readoutY + speedBoxHeight - 6 * scale, COLORS.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
-	draw.SimpleText(usesMph and "mph" or "km/h", "AudioHud_Unit", speedBoxX + 14 * scale + speedTextWidth, readoutY + speedBoxHeight - 12 * scale, COLORS.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
-
-	-- rpm
-	local engineBoxY = readoutY + speedBoxHeight + gap
-	box(speedBoxX, engineBoxY, speedBoxWidth, speedBoxHeight, scale)
-	draw.SimpleText("ENGINE", "AudioHud_Label", speedBoxX + 10 * scale, engineBoxY + 8 * scale, COLORS.muted)
-	surface.SetFont("AudioHud_Num")
-	local rpmText = formatThousands(displayedRpm)
-	local rpmTextWidth = surface.GetTextSize(rpmText)
-	draw.SimpleText(rpmText, "AudioHud_Num", speedBoxX + 10 * scale, engineBoxY + speedBoxHeight - 6 * scale, redlineShare >= 1 and COLORS.red or COLORS.text, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
-	draw.SimpleText("rpm", "AudioHud_Unit", speedBoxX + 14 * scale + rpmTextWidth, engineBoxY + speedBoxHeight - 10 * scale, COLORS.muted, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
-
-	-- throttle / brake
-	local braking = (player:KeyDown(IN_BACK) and car.speedAlongNose > 0.6) or (player:KeyDown(IN_FORWARD) and car.speedAlongNose < -0.6) or player:KeyDown(IN_JUMP)
-	brakeDisplay = brakeDisplay + math.Clamp((braking and 1 or 0) - brakeDisplay, -deltaTime * 8, deltaTime * 4)
-	local pedalBoxY = readoutY + topRowHeight + gap
-	local pedalBoxHeight = panelY + panelHeight - padding - pedalBoxY
-	box(readoutX, pedalBoxY, readoutWidth, pedalBoxHeight, scale)
-	local barWidth = readoutWidth - 20 * scale
-	local barHeight = 8 * scale
-	local throttlePercent = floor(engineState.throttle * 100 + 0.5)
-	local brakePercent = floor(brakeDisplay * 100 + 0.5)
-	draw.SimpleText("THROTTLE " .. throttlePercent .. "%", "AudioHud_Label", readoutX + 10 * scale, pedalBoxY + 8 * scale, COLORS.muted)
-	draw.RoundedBox(floor(4 * scale), readoutX + 10 * scale, pedalBoxY + 26 * scale, barWidth, barHeight, COLORS.line)
-	if throttlePercent > 0 then
-		draw.RoundedBox(floor(4 * scale), readoutX + 10 * scale, pedalBoxY + 26 * scale, barWidth * engineState.throttle, barHeight, COLORS.amber)
-	end
-	draw.SimpleText("BRAKE " .. brakePercent .. "%", "AudioHud_Label", readoutX + 10 * scale, pedalBoxY + 42 * scale, COLORS.muted)
-	draw.RoundedBox(floor(4 * scale), readoutX + 10 * scale, pedalBoxY + 60 * scale, barWidth, barHeight, COLORS.line)
-	if brakePercent > 0 then
-		draw.RoundedBox(floor(4 * scale), readoutX + 10 * scale, pedalBoxY + 60 * scale, barWidth * brakeDisplay, barHeight, COLORS.red)
+		draw.SimpleText(lightLabel, "AudioHud_Status", leftX, topY, RealTime() % 0.5 < 0.25 and POLICE_RED or WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_BOTTOM)
 	end
 end)
 
-hook.Add("OnScreenSizeChanged", "audio_engine_hud", function() fontScale = nil end)
+hook.Add("OnScreenSizeChanged", "audio_engine_hud", function() fontScales, statusFontScale = {}, nil end)

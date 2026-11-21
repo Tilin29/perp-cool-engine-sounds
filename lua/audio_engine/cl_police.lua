@@ -82,6 +82,17 @@ local function isLit(lamp, mode, phaseTime)
 	return timeInHalf % CODE3.flashPeriod < CODE3.flashOnTime
 end
 
+-- whether a side's outer lamps (-1 driver's / red, 1 passenger's / blue) are lit on a car right now,
+-- in step with its bar (cl_hud's police cluster blinks its CODE 2 / CODE 3 buttons with it)
+local outerLamp = { side = -1, group = "o" }
+function AudioEngine.PoliceSideLit(vehicle, side)
+	local mode = vehicle:GetNW2Int("audio_lights", 0)
+	if mode == 0 then return false end
+	outerLamp.side = side
+
+	return isLit(outerLamp, mode, CurTime() + vehicle:EntIndex() * PHASE_PER_INDEX)
+end
+
 -- cars with lights near enough to matter, refreshed now and then rather than searched every frame
 local emergencyCars = {}
 local nextRefresh = 0
