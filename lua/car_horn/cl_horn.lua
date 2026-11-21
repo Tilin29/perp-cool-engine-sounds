@@ -538,6 +538,8 @@ local function restartHonks()
 end
 concommand.Add("car_horn_restart", restartHonks, nil, "Build the horns again (after stopsound)")
 hook.Add("audio_engine/restart-sounds", "car_horn", restartHonks)
+-- "clean up everything" leaves the generated horns silent too; it's announced: built again at once
+hook.Add("PostCleanupMap", "car_horn_restart", restartHonks)
 hook.Add("PlayerBindPress", "car_horn_stopsound", function(_, bind, pressed)
 	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, restartHonks) end
 end)

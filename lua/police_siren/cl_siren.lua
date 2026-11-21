@@ -508,6 +508,8 @@ local function restartSirens()
 end
 concommand.Add("police_siren_restart", restartSirens, nil, "Build the siren tones again and restart every siren (after stopsound)")
 hook.Add("audio_engine/restart-sounds", "police_siren", restartSirens)
+-- "clean up everything" leaves the generated tones silent too (the user); it's announced: built again at once
+hook.Add("PostCleanupMap", "police_siren_restart", restartSirens)
 hook.Add("PlayerBindPress", "police_siren_stopsound", function(_, bind, pressed)
 	if pressed and string.find(bind, "stopsound", 1, true) then timer.Simple(0.1, restartSirens) end
 end)

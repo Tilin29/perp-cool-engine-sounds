@@ -203,6 +203,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     to drop sound.Generate data (the siren and horn are generated; the engines' WAV files came back). So the siren's and horn's
     restarts build every tone again under a new serial (`police_siren_restart`, `car_horn_restart`, also run by
     audio_engine_restart_sounds). Not yet confirmed in game; if it works, WAV files baked offline would survive a typed stopsound
+    "Clean up everything" (game.CleanUpMap) broke the sirens the same way (the user); it's announced: `PostCleanupMap` restarts the
+    engine (stopAll + `Bank.RebuildAll`, generated banks die too), the siren and the horn (each hooks it itself)
   - each car's update runs in a pcall (`updateCarSafely`, printed once per car): one failing car stopped every car after it.
     Every client `EntityRemoved` hook (cl_engine, cl_handling, cl_siren, cl_horn) ignores `fullUpdate` (entities stay).
     Back from dormancy a car takes the engine state as it is (no shut-down sound for an engine switched off out of view).

@@ -1386,10 +1386,21 @@ end
 	start again on its next update (a short fade in). Other modules (siren, horn) restart theirs on
 	the audio_engine/restart-sounds hook.
 ]]
-function AudioEngine.RestartSounds()
+-- (the banks too: a generated one, a tuned engine's, is as dead as the siren's tones; baked ones
+-- load again from their files at once)
+local function restartEngineSounds()
 	for _, car in pairs(cars) do stopAll(car) end
+	Bank.RebuildAll()
+end
+function AudioEngine.RestartSounds()
+	restartEngineSounds()
 	hook.Run("audio_engine/restart-sounds")
 end
+
+-- "clean up everything" (game.CleanUpMap) leaves generated sounds silent as stopsound does (the
+-- user: the sirens stopped working); unlike stopsound it's announced, so everything restarts at once.
+-- The siren and horn modules hook it themselves (each works without the engine)
+hook.Add("PostCleanupMap", "audio_engine_restart", restartEngineSounds)
 
 concommand.Add("audio_engine_restart_sounds", function() AudioEngine.RestartSounds() end, nil,
 	"Start every car sound again (after stopsound)")
