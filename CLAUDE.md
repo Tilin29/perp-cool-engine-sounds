@@ -59,7 +59,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669: model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
   turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
-  Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
+  Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only; no argument steps the lit modes, off -> CODE 2 <-> CODE 3: a tap of the light key, holding it `LIGHT_HOLD_SECONDS` 0.4 s sends 0 = off, the user's) sets
   off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the bar's LEDs are plain textures, so lit modules get an additive lens
   quad + a glow sprite faded by facing, the nearest 4 cars a dynamic light per side; key `audio_engine_lightkey` (default lshift;
   no police script has a Source boost block, so shift is free). HUD shows the mode, plus whatever the `audio_engine/lights-label`
@@ -443,8 +443,8 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   highpass -> tanh drive -> resonant peak -> lowpass (+ a 4-pole lowpass at cabin.muffle for the inside version). Seamless loops: each
   voice scaled to whole cycles per loop, vibrato/tremolo whole cycles, rendered twice and the second pass kept, peak 0.95.
 - `sh_siren.lua`: `PoliceSiren.SoundingTone(veh)`: the driver's pick (NW2 `siren_tone`, valid while NW2 `siren_at` = the light mode it was
-  picked in), else `lightTones[mode]` of the car's scheme (`PoliceSiren.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle,
-  then off), driver only, lights on.
+  picked in), else `lightTones[mode]` of the car's scheme (`PoliceSiren.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle, round and round; `off` = no tone: a tap of the tone key steps on letting go, held `TONE_HOLD_SECONDS` 0.4 s it sends off, the user's: switching tones without silence between;
+  was: next, then off), driver only, lights on. The siren studio mirrors it (Shift / tone key, tap / hold).
 - `cl_siren.lua`: builds a tone twice (outside / inside) in a coroutine (5 ms/frame; stored as the engine's loops are, one
   pre-roll sample [y_L, y_1 .. y_L] with loopStart 1: the game loops from sample 1, and without it every pass skipped y_1,
   a tick the user heard on the wail) the first time a car near sounds it (a failed one isn't retried); `sound.Generate`

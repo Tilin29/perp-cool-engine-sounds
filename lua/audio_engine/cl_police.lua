@@ -274,16 +274,29 @@ local function keyCodeOf(keyName)
 	end
 	return keyCode or nil
 end
-local lightKeyHeld = false
+--[[
+	The light key: a tap (let go within LIGHT_HOLD_SECONDS) steps CODE 2 <-> CODE 3 (from off: CODE 2),
+	held that long the lights go off (the user's: switching between the two without off in between).
+	The tap acts on letting go, so a hold never steps first
+]]
+local LIGHT_HOLD_SECONDS = 0.4
+local lightPressedAt, lightHoldDone = nil, false
 hook.Add("Think", "audio_engine_lightkey", function()
 	local keyCode = keyCodeOf(lightKeyConVar:GetString())
-	local isDown = keyCode ~= nil and input.IsKeyDown(keyCode)
-	local pressed = isDown and not lightKeyHeld
-	lightKeyHeld = isDown
-	if not pressed then return end
 	local player = LocalPlayer()
 	local vehicle = IsValid(player) and player:GetVehicle()
-	if not IsValid(vehicle) or not IsValid(vehicle:GetNW2Entity("audio_lightbar")) or player:IsTyping() then return end
-	if gui.IsGameUIVisible() or IsValid(vgui.GetKeyboardFocus()) then return end
-	RunConsoleCommand("audio_engine_lights")
+	local usable = keyCode ~= nil and IsValid(vehicle) and IsValid(vehicle:GetNW2Entity("audio_lightbar")) and not player:IsTyping()
+		and not gui.IsGameUIVisible() and not IsValid(vgui.GetKeyboardFocus())
+	local isDown = usable and input.IsKeyDown(keyCode)
+	local now = RealTime()
+	if isDown then
+		if not lightPressedAt then lightPressedAt, lightHoldDone = now, false end
+		if not lightHoldDone and now - lightPressedAt >= LIGHT_HOLD_SECONDS then
+			lightHoldDone = true
+			RunConsoleCommand("audio_engine_lights", "0")
+		end
+	elseif lightPressedAt then
+		if not lightHoldDone and usable then RunConsoleCommand("audio_engine_lights") end
+		lightPressedAt = nil
+	end
 end)

@@ -13,13 +13,15 @@ local function drivenSirenCar(player)
 	return vehicle
 end
 
-concommand.Add("police_siren_tone", function(player)
+-- no argument: the next tone of the scheme's cycle (round and round); "off": no tone (the lights stay)
+concommand.Add("police_siren_tone", function(player, _, args)
 	if not IsValid(player) then return end
 	local vehicle = drivenSirenCar(player)
 	if not vehicle then return end
 	local lightMode = vehicle:GetNW2Int(PoliceSiren.LIGHTS_NW, 0)
 	if lightMode == 0 or (player.sirenToneAllowedAt or 0) > CurTime() then return end
 	player.sirenToneAllowedAt = CurTime() + KEY_COOLDOWN
-	vehicle:SetNW2String("siren_tone", PoliceSiren.NextTone(vehicle, PoliceSiren.ChosenTone(vehicle)))
+	local toneId = args[1] == "off" and "" or PoliceSiren.NextTone(vehicle, PoliceSiren.ChosenTone(vehicle))
+	vehicle:SetNW2String("siren_tone", toneId)
 	vehicle:SetNW2Int("siren_at", lightMode)
-end, nil, "Police siren of the car you're driving: the next tone (with the lights on)")
+end, nil, "Police siren of the car you're driving (lights on): no argument = the next tone, off = no tone")

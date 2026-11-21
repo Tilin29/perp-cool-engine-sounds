@@ -467,15 +467,31 @@ hook.Add("SpawnMenuOpen", "police_siren", function()
 	if PoliceSiren.HasSiren(sirenCar) then return false end
 end)
 
-local toneHeld = false
+--[[
+	The tone key: a tap (let go within TONE_HOLD_SECONDS) steps to the next tone, round and round;
+	held that long the siren goes off (the user's: switching between the tones without turning it
+	off in between). The tap acts on letting go, so a hold never plays the next tone first
+]]
+local TONE_HOLD_SECONDS = 0.4
+local tonePressedAt, toneHoldDone = nil, false
 hook.Add("Think", "police_siren_keys", function()
 	local player = LocalPlayer()
 	local vehicle = IsValid(player) and player:GetVehicle()
 	local usable = IsValid(vehicle) and PoliceSiren.HasSiren(vehicle) and not player:IsTyping()
 		and not gui.IsGameUIVisible() and not IsValid(vgui.GetKeyboardFocus())
 	local toneKeyDown = usable and isKeyDown(toneKeyConVar)
-	if toneKeyDown and not toneHeld then RunConsoleCommand("police_siren_tone") end
-	toneHeld = toneKeyDown
+	local now = RealTime()
+	if toneKeyDown then
+		if not tonePressedAt then tonePressedAt, toneHoldDone = now, false end
+		if not toneHoldDone and now - tonePressedAt >= TONE_HOLD_SECONDS then
+			toneHoldDone = true
+			RunConsoleCommand("police_siren_tone", "off")
+		end
+	elseif tonePressedAt then
+		-- (let go: a tap, unless it was a hold or the key stopped counting: out of the car, typing)
+		if not toneHoldDone and usable then RunConsoleCommand("police_siren_tone") end
+		tonePressedAt = nil
+	end
 end)
 
 -- after stopsound: the generated tones stay silent even started again (stopsound seems to drop the
