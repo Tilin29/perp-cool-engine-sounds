@@ -455,6 +455,22 @@ local function fittedSpeed(vehicle)
 	return math.sqrt(slopeX * slopeX + slopeY * slopeY + slopeZ * slopeZ) / timeSquares * 0.0254
 end
 
+--[[
+	The revs for the arc (B) and the strip (C): their rev bar and LED segments stepped with the
+	stepper-style needle value (held, then a jump every RPM_GAUGE.band), which a needle hides and a
+	filled bar doesn't. They follow the revs smoothly over RPM_SMOOTH_TIME s instead; the digits
+	change once the value is RPM_DIGIT_HOLD past them (idle's wobble otherwise flickered them)
+]]
+local RPM_SMOOTH_TIME = 0.05
+local RPM_DIGIT_HOLD = 75
+local smoothRpm = {}
+local function smoothRpmValue(target, deltaTime)
+	if not smoothRpm.value then smoothRpm.value, smoothRpm.digits = target, target end
+	smoothRpm.value = smoothRpm.value + (target - smoothRpm.value) * min(1, deltaTime / RPM_SMOOTH_TIME)
+	if abs(smoothRpm.value - smoothRpm.digits) > RPM_DIGIT_HOLD then smoothRpm.digits = smoothRpm.value end
+	return smoothRpm.value, smoothRpm.digits
+end
+
 local function smoothSpeedNeedle(target, deltaTime)
 	if not speedNeedle.value then speedNeedle.value, speedNeedle.digits = target, floor(target + 0.5) end
 	speedNeedle.value = speedNeedle.value + (target - speedNeedle.value) * min(1, deltaTime / SPEED_NEEDLE_TIME)
@@ -482,6 +498,9 @@ local function readState(player, vehicle, car, deltaTime)
 	local config, engineState = car.config, car.engineState
 	state.rpm = max(0, stepGauge(rpmNeedle, RPM_GAUGE, engineState.rpm, deltaTime))
 	state.rpmDigits = string.Comma(floor(state.rpm / RPM_DIGIT_STEP + 0.5) * RPM_DIGIT_STEP)
+	local rpmSmooth, rpmSmoothDigits = smoothRpmValue(max(0, engineState.rpm), deltaTime)
+	state.rpmSmooth = rpmSmooth
+	state.rpmSmoothDigits = string.Comma(floor(rpmSmoothDigits / RPM_DIGIT_STEP + 0.5) * RPM_DIGIT_STEP)
 	state.redline = config.redline
 	state.majorRpm = (config.redline + 500 > 12000) and 2000 or 1000
 	state.dialRpm = math.ceil((config.redline + 500) / state.majorRpm) * state.majorRpm
@@ -809,11 +828,12 @@ end
 ---------------------------------------------------------------------------
 -- HUD
 ---------------------------------------------------------------------------
+-- smoothRevs: the cluster shows the revs as a bar / segments (smoothRpmValue), not a needle
 local CLUSTERS = {
 	a = { box = A, draw = drawClassic, fonts = "A" },
 	a2 = { box = A, draw = drawClassic, fonts = "A", police = true },
-	b = { box = B, draw = drawArc, fonts = "B" },
-	c = { box = C, draw = drawStrip, fonts = "C" },
+	b = { box = B, draw = drawArc, fonts = "B", smoothRevs = true },
+	c = { box = C, draw = drawStrip, fonts = "C", smoothRevs = true },
 }
 
 local function isPoliceCar(vehicle)
@@ -850,6 +870,10 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	local clusterId = clusterFor(vehicle)
 	local cluster = CLUSTERS[clusterId]
 	local box = cluster.box
+	if cluster.smoothRevs then
+		info.rpm, info.rpmDigits = info.rpmSmooth, info.rpmSmoothDigits
+		info.share = info.rpm / info.redline
+	end
 	local screenScale = ScrH() / 1080 * scaleConVar:GetFloat()
 	pixel = screenScale * CLUSTER_SIZE[clusterId]
 	fontsFor(cluster.fonts .. "_", pixel)
