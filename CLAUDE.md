@@ -196,6 +196,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     it is caught (`PlayerBindPress`, 0.1 s later), typed in the console it needs `audio_engine_restart_sounds` (`AudioEngine.RestartSounds`:
     stopAll on every car, groups start again next update). The siren and horn restart theirs on the generic `audio_engine/restart-sounds`
     hook and catch the bind themselves too (each works without the engine)
+    A typed stopsound (sirens stayed dead, the user): a volume change on a sound whose channel is gone starts it again (Source's
+    S_StartSound falls through to starting it), so loops whose volume moves came back alone and steady ones didn't. Once a second
+    every playing loop gets a volume change (`KEEPALIVE_SHARE` 0.002 under its level, alternating, ~0.02 dB): engine groups
+    (`car.keepAliveLow`), sirens, held honks. Not yet confirmed in game
   - each car's update runs in a pcall (`updateCarSafely`, printed once per car): one failing car stopped every car after it.
     Every client `EntityRemoved` hook (cl_engine, cl_handling, cl_siren, cl_horn) ignores `fullUpdate` (entities stay).
     Back from dormancy a car takes the engine state as it is (no shut-down sound for an engine switched off out of view).
