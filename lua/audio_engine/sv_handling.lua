@@ -436,6 +436,7 @@ local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
 	body.vx, body.vy, body.vz = velocity.x, velocity.y, velocity.z
 	Handling.SetAxes(body, vehicle:GetAngles())
 	body.yawRate = physics:GetAngleVelocity().z     -- local, deg/s: the car's up
+	vehicle.audioLogMeasuredYaw = body.yawRate      -- (accel_log: the turn the car really made, before the model's)
 	body.groundShare = groundShareOf(vehicle)
 	local contactAt = vehicle.audioContactAt
 	body.touching = contactAt ~= nil and now - contactAt < spec.settings.contactHold
@@ -493,7 +494,7 @@ concommand.Add("audio_engine_accel_log", function(player, _, args)
 	-- (mph: the body's full speed; nose: along the car's nose, what the HUD shows; Source: GetOperatingParams' own speed,
 	-- raw, what its speed governor compares with maxSpeed. Top speed short of the script's: these tell a HUD, a model or
 	-- a Source cause apart)
-	printLine("[Audio Engine] accel log: t | mph | nose mph | Source speed | Source gear, rpm | steer | yaw asked, yaw deg/s | slip angle deg | ground, control")
+	printLine("[Audio Engine] accel log: t | mph | nose mph | Source speed | Source gear, rpm | steer | yaw asked, set, measured deg/s | obstructed, touching | Source wheel deg at mph | slip angle deg | ground, control")
 	printLine(string.format("[Audio Engine] script maxSpeed %.1f mph, handling model %s", (AudioEngine.CarTopSpeed(vehicle, AudioEngine.GetCarConfig(vehicle)) or 0) / 1.609344,
 		(driveModelConVar:GetBool() and modelAllowed(vehicle, AudioEngine.GetCarConfig(vehicle))) and "on" or "off"))
 	local timerId = "audio_engine_accel_log_" .. vehicle:EntIndex()
@@ -541,9 +542,15 @@ concommand.Add("audio_engine_accel_log", function(player, _, args)
 			noseMph = math.abs(forwardSpeed) / HU_PER_MPH
 			if forwardSpeed * forwardSpeed + sideSpeed * sideSpeed > 400 then slipAngle = math.deg(math.atan2(sideSpeed, math.abs(forwardSpeed))) end
 		end
-		printLine(string.format("  %5.2fs | %5.1f | %5.1f | %6.1f | G%s %5.0f | %5.2f | %6.1f %6.1f | %5.1f | %.2f %.2f", CurTime() - startTime, mph,
+		-- (Source's front wheels at speed: the matched override, else the script's)
+		local steerOverride = vehicle.audioSteerOverride
+		local baseSteering = vehicle.audioBase and vehicle.audioBase.steering or {}
+		local wheelDegrees = steerOverride and steerOverride.degreesFast or baseSteering.degreesFast or 0
+		local wheelMph = steerOverride and steerOverride.speedFast or baseSteering.speedFast or 0
+		printLine(string.format("  %5.2fs | %5.1f | %5.1f | %6.1f | G%s %5.0f | %5.2f | %6.1f %6.1f %6.1f | %s %s | %4.1f at %3.0f | %5.1f | %.2f %.2f", CurTime() - startTime, mph,
 			noseMph, tonumber(operatingParams.speed) or -1, tostring(operatingParams.gear or "?"), operatingParams.RPM or 0, state and state.steer or 0, vehicle.audioLogAsked or 0,
-			body and body.yawRate or 0, slipAngle, body and body.groundShare or 0, body and body.controlShare or 0))
+			body and body.yawRate or 0, vehicle.audioLogMeasuredYaw or 0, (state and (state.blockedFor or 0) > 0) and "yes" or "no",
+			(body and body.touching) and "yes" or "no", wheelDegrees, wheelMph, slipAngle, body and body.groundShare or 0, body and body.controlShare or 0))
 	end)
 end, nil, "Log speed, Source gear/rpm, steering and rotation of the car you drive (admins)")
 
