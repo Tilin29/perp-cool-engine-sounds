@@ -201,11 +201,14 @@ end
 local listener = {}
 local listenerPosition, listenerVelocity = Vector(0, 0, 0), Vector(0, 0, 0)
 --[[
-	Each siren car's velocity, tracked while it's silent too (the Think hook, every siren car): a tone
-	started with an empty track and at the plain pitch, the car's speed showed up a few samples later
-	and the pitch swept to the Doppler one at DOPPLER_RATE as it faded in, a "water drop" blip each
-	time a passing siren started (lights on, or back inside police_siren_maxcars; the user, 30 cars)
+	Each siren car's velocity, tracked while it's silent too once it's near enough to be heard (the
+	Think hook: within TRACK_MARGIN x the audible range, so the track is warm before it's audible): a
+	tone started with an empty track and at the plain pitch, the car's speed showed up a few samples
+	later and the pitch swept to the Doppler one at DOPPLER_RATE as it faded in, a "water drop" blip
+	each time a passing siren started (lights on, or back inside police_siren_maxcars; the user, 30 cars)
 ]]
+local DEFAULT_RANGE = 250   -- m: the engine's audible range for an 85 dB sound when audio_engine_range isn't there (or 0)
+local TRACK_MARGIN = 1.2
 local velocityTracks = setmetatable({}, { __mode = "k" })
 local function velocityOf(vehicle)
 	local track = velocityTracks[vehicle]
@@ -214,6 +217,21 @@ local function velocityOf(vehicle)
 		velocityTracks[vehicle] = track
 	end
 	return trackVelocity(track, vehicle:GetPos(), RealTime())
+end
+
+-- (squared, units) where a car's track starts: the engine's audible range (audio_engine_range, read
+-- by name as the horn does, for an 85 dB sound; Source's falloff scales with 20 / (level - 50)) at
+-- this car's siren level, x TRACK_MARGIN
+local rangeConVar
+local function trackRangeSqr(vehicle)
+	rangeConVar = rangeConVar or GetConVar("audio_engine_range")
+	local meters = rangeConVar and rangeConVar:GetFloat() or 0
+	if meters <= 0 then meters = DEFAULT_RANGE end
+	local config = PoliceSiren.CONFIG
+	local level = config.soundLevels[string.lower(vehicle:GetModel() or "")] or config.soundLevel or 85
+	local range = meters / 0.0254 * math.max(level - 50, 1) / 35 * TRACK_MARGIN
+
+	return range * range
 end
 
 -- the listener: the camera entity when the view is on one, else the player's eyes (EyePos()
@@ -424,7 +442,12 @@ hook.Add("Think", "police_siren", function()
 	end
 	for _, vehicle in ipairs(sirenCars) do
 		if IsValid(vehicle) then
-			velocityOf(vehicle)
+			-- (out of reach the track is dropped: back in, it starts fresh rather than from a stale one)
+			if cars[vehicle] or vehicle:GetPos():DistToSqr(listenerPosition) < trackRangeSqr(vehicle) then
+				velocityOf(vehicle)
+			else
+				velocityTracks[vehicle] = nil
+			end
 			update(vehicle)
 		end
 	end
