@@ -78,9 +78,9 @@ local FONTS = {
 	V_Tach = { 25, 500 }, V_Speed = { 26, 500 }, V_Fuel = { 21, 500 }, V_Label = { 11, 400 }, V_Unit = { 12, 400 }, V_Gear = { 20, 500 },
 	-- A4 (F): 80s digital (VFD)
 	F_Scale = { 21, 400, false, 3 }, F_Label = { 11, 400 }, F_Unit = { 16, 400, false, 3 }, F_Fuel = { 13, 400 },
-	-- D2 (W): wide-screen (Roboto for the design's Inter Tight, Roboto Condensed for its Barlow digits)
-	W_Label = { 13, 600, false, nil, "Roboto" }, W_Big = { 58, 600 }, W_Gear = { 13, 600, false, nil, "Roboto" },
-	W_GearOn = { 17, 600, false, 3, "Roboto" }, W_PanelGear = { 26, 600 }, W_Percent = { 15, 600, false, nil, "Roboto" },
+	-- D2 (W): wide-screen (Roboto for the design's Inter Tight and Barlow: rounder digits than Roboto Condensed, the user's)
+	W_Label = { 13, 600, false, nil, "Roboto" }, W_Big = { 58, 600, false, nil, "Roboto" }, W_Gear = { 13, 600, false, nil, "Roboto" },
+	W_GearOn = { 17, 600, false, 3, "Roboto" }, W_PanelGear = { 26, 600, false, nil, "Roboto" }, W_Percent = { 15, 600, false, nil, "Roboto" },
 	W_Tiny = { 11, 600, false, nil, "Roboto" }, W_Mode = { 20, 600, false, nil, "Roboto" }, W_Message = { 13, 500, false, nil, "Roboto" },
 }
 local fontScales = {}
@@ -1482,6 +1482,8 @@ local W = {
 }
 -- the faces' radial gradient (light in the middle, dark at the rim) as layered discs: the lit middle's alpha
 local W_FACE_LIGHT = 110
+-- the centre panel's corners (the design's 12; rounder, the user's), its inner box's follow them 12 in
+local W_PANEL_RADIUS = 28
 W.panelFace = mix(W.face, W.faceIn, 0.25)
 W.blueDim = mix(W.blue, rgb("05070a"), 0.8)
 W.orangeDim = mix(W.orange, rgb("05070a"), 0.8)
@@ -1544,9 +1546,9 @@ local function drawWide(info, vehicle, police)
 		band(x, y, 149, 150, 0, 360, W.rim, 6)
 		band(x, y, 79.5, 80.5, 0, 360, W.innerRing, 6)
 	end
-	roundedBox(12, 420, 114, 160, 236, Color(0, 0, 0, 80))
-	roundedBox(12, 420, 104, 160, 236, W.rim)
-	roundedBox(11, 421, 105, 158, 234, W.panelFace)
+	roundedBox(W_PANEL_RADIUS, 420, 114, 160, 236, Color(0, 0, 0, 80))
+	roundedBox(W_PANEL_RADIUS, 420, 104, 160, 236, W.rim)
+	roundedBox(W_PANEL_RADIUS - 1, 421, 105, 158, 234, W.panelFace)
 
 	-- revs (left) and speed (right) as bars, the fuel's bars under the speed
 	wideBars(W_SPEED_X, clamp(info.speed / info.dialSpeed, 0, 1), W.blue, W.blueDim)
@@ -1609,7 +1611,7 @@ local function drawWide(info, vehicle, police)
 	local percent = string.format("%d%%", floor(info.fuelShown * 100 + 0.5))
 	text(percent, "W_Percent", 568, 129, info.lowFuel and W.amber or WHITE, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 	ICONS.fuel(568 - textWidth(percent, "W_Percent") - 13, 129, 14, W.white, 2.4)
-	roundedBox(6, 432, 152, 136, 176, W.inner)
+	roundedBox(W_PANEL_RADIUS - 12, 432, 152, 136, 176, W.inner)
 
 	local message = info.engine and "Check engine" or (info.lowFuel and "Low fuel" or "")
 	-- (the rows' heights, centred in the inner box like the design's flex column)
