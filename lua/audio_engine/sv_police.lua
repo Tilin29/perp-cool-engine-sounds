@@ -71,8 +71,11 @@ for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do setupPolice(v
 if AudioEngine.LIGHTBAR_MODEL == AudioEngine.LIGHTBAR_LED_MODEL then
 	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (lenses lit by its skins)")
 else
-	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (", AudioEngine.LIGHTBAR_LED_MODEL,
-		" isn't mounted: install the police_lightbar addon for lit lenses)")
+	-- (not on disk = the addon isn't mounted; on disk but not valid = the game couldn't load the model)
+	local reason = file.Exists(AudioEngine.LIGHTBAR_LED_MODEL, "GAME")
+		and " is there but the game won't load it"
+		or " isn't mounted: install the police_lightbar addon (dev/police_lightbar/install.cmd) and restart"
+	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (", AudioEngine.LIGHTBAR_LED_MODEL, reason, ")")
 end
 
 -- a car's light mode (0 off, 1 CODE 2, 2 CODE 3) and, on the LED bar, its skin: the flashing itself

@@ -420,8 +420,9 @@ The core never names it. The dev harnesses still use it as their test car: they 
 
 ## Police lightbar (separate addon)
 `addons/police_lightbar/`: its own GMod addon like the SL65, not part of the engine. GMod doesn't load addons nested in an addon: on the
-user's machine `garrysmod/addons/police_lightbar` is a directory junction to it (made 2026-11-22; always the repo's files, restart GMod
-to mount changes to new files); without it the cars get PERP's original bar, unlit.
+user's machine `garrysmod/addons/police_lightbar` is a copy of it: `dev/police_lightbar/install.cmd` (robocopy /MIR) refreshes it, then
+restart GMod. A directory junction there wasn't mounted (the server reported the model missing). Without it the cars get PERP's original
+bar, unlit; sv_police's load message says whether the LED model is missing from disk or there but not loadable.
 - The rebuild `models/perpheads/props/police_lightbar_leds.mdl`: PERP's bar (workshop 2897742669) body only, every LED lens on its own
   material `materials/police_lightbar/lens_<face>_<side>_<inner|outer>` / `lens_rear_centre` / `lens_corner_<side>_<front|side|rear>`
   (15; the front face has no centre lens), so each lens can be lit by itself. In the original all lenses shared 2 materials (`LEDs` /
