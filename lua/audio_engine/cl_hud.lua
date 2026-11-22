@@ -1489,7 +1489,7 @@ W.blueDim = mix(W.blue, rgb("05070a"), 0.8)
 W.orangeDim = mix(W.orange, rgb("05070a"), 0.8)
 local W_CENTRE_Y, W_BARS = 226, 64
 -- the rev ring on the left, the speed (and fuel) on the right
-local W_RPM_X, W_SPEED_X = 230, 770
+local W_RPM_X, W_SPEED_X = 262, 738   -- (the faces 8 px from the centre panel: compact, the user's; were 230, 770)
 -- design px: a LIGHTS / SIREN row, the warning row (its divider + 8 + the icon), "Systems OK", the gap between rows
 local W_BLOCK, W_MESSAGE, W_READY, W_GAP = 36, 29, 16, 8
 
@@ -1591,20 +1591,20 @@ local function drawWide(info, vehicle, police)
 		end
 	end
 
-	-- lamps: indicators over the panel's corners, handbrake / headlights bottom left, engine / low fuel
+	-- lamps: indicators over the panel, handbrake / headlights bottom left, engine / low fuel
 	-- bottom right, each on its dark pod
-	lampPod(372, 96, 40, 40)
-	lampPod(628, 96, 40, 40)
-	lampPod(78.5, 341, 40, 72)
-	lampPod(923, 340.5, 40, 72)
-	if info.left then indicatorGlow(372, 96, 13, W.green) end
-	ICONS.arrowA(372, 96, 24, info.left and W.green or W.off, true)
-	if info.right then indicatorGlow(628, 96, 13, W.green) end
-	ICONS.arrowA(628, 96, 24, info.right and W.green or W.off, false)
-	ICONS.handbrake(79, 326, 26, info.handbrake and W.red or W.off, 2.2)
-	ICONS.headlights(78, 355.5, 24, info.headlights and W.green or W.off, 2.4)
-	ICONS.engine(921.5, 325.5, 27, info.engine and W.amber or W.off, 2.2)
-	ICONS.fuel(925, 355, 20, info.lowFuel and W.amber or W.off, 2.2)
+	lampPod(470, 82, 40, 40)
+	lampPod(530, 82, 40, 40)
+	lampPod(100.5, 341, 40, 72)
+	lampPod(901, 340.5, 40, 72)
+	if info.left then indicatorGlow(470, 82, 13, W.green) end
+	ICONS.arrowA(470, 82, 24, info.left and W.green or W.off, true)
+	if info.right then indicatorGlow(530, 82, 13, W.green) end
+	ICONS.arrowA(530, 82, 24, info.right and W.green or W.off, false)
+	ICONS.handbrake(101, 326, 26, info.handbrake and W.red or W.off, 2.2)
+	ICONS.headlights(100, 355.5, 24, info.headlights and W.green or W.off, 2.4)
+	ICONS.engine(899.5, 325.5, 27, info.engine and W.amber or W.off, 2.2)
+	ICONS.fuel(903, 355, 20, info.lowFuel and W.amber or W.off, 2.2)
 
 	-- the centre panel: gear and fuel on top, then LIGHTS / SIREN, the warning or "Systems OK"
 	text(info.gear, "W_PanelGear", 432, 129, WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
