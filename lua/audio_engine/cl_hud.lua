@@ -1480,10 +1480,8 @@ local W = {
 	label = Color(255, 255, 255, 140), faint = Color(255, 255, 255, 102), divider = Color(255, 255, 255, 20),
 	rim = Color(255, 255, 255, 26), innerRing = Color(255, 255, 255, 13),
 }
--- the faces' radial gradient (light in the middle, dark at the rim) as layered discs: the lit middle's
--- alpha, and the colour it gives (the outlined digits' inside, which sits in it)
+-- the faces' radial gradient (light in the middle, dark at the rim) as layered discs: the lit middle's alpha
 local W_FACE_LIGHT = 110
-W.faceLit = mix(W.face, W.faceIn, W_FACE_LIGHT / 255)
 W.panelFace = mix(W.face, W.faceIn, 0.25)
 W.blueDim = mix(W.blue, rgb("05070a"), 0.8)
 W.orangeDim = mix(W.orange, rgb("05070a"), 0.8)
@@ -1500,19 +1498,13 @@ local function roundedBox(radius, x, y, width, height, color)
 	draw.NoTexture()
 end
 
--- the design's outlined digits (text-stroke, no fill): the outline drawn round, the inside in the face's colour
-local function hollowText(value, font, x, y, color, alignX, alignY)
-	local screenX, screenY = place(x, y)
-	screenX, screenY = floor(screenX + 0.5), floor(screenY + 0.5)
-	local width = max(1, floor(2 * pixel + 0.5))
-	for offsetX = -width, width, width do
-		for offsetY = -width, width, width do
-			if offsetX ~= 0 or offsetY ~= 0 then
-				draw.SimpleText(value, "AudioHud_" .. font, screenX + offsetX, screenY + offsetY, color, alignX, alignY)
-			end
-		end
-	end
-	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, W.faceLit, alignX, alignY)
+-- a dark pod behind the lamps outside the faces, a box with round ends (`width` x `height`, centred):
+-- the lamps' grey unlit colour was lost against bright scenery (the user)
+local function lampPod(centreX, centreY, width, height)
+	local radius = min(width, height) / 2
+	roundedBox(radius, centreX - width / 2, centreY - height / 2 + 4, width, height, Color(0, 0, 0, 80))
+	roundedBox(radius, centreX - width / 2, centreY - height / 2, width, height, W.rim)
+	roundedBox(radius - 1, centreX - width / 2 + 1, centreY - height / 2 + 1, width - 2, height - 2, W.face)
 end
 
 -- a ring of W_BARS bars from -135 to 135 degrees, lit up to `share` (red from `redFrom`, a share too)
@@ -1575,9 +1567,10 @@ local function drawWide(info, vehicle, police)
 
 	-- read-outs
 	text(info.unitLabel, "W_Label", W_SPEED_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	hollowText(tostring(info.speedDigits), "W_Big", W_SPEED_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	-- (solid digits: the design's outlined ones, the user wasn't fond of)
+	textShadowed(tostring(info.speedDigits), "W_Big", W_SPEED_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	text("×1000rpm", "W_Label", W_RPM_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	hollowText(info.rpmSmoothThousands, "W_Big", W_RPM_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	textShadowed(info.rpmSmoothThousands, "W_Big", W_RPM_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
 	-- the gears round the bottom of the rev ring (N, 1.. the car's top gear; R in N's place reversing)
 	local gearCount = clamp(info.gearCount, 1, 8)
@@ -1596,7 +1589,12 @@ local function drawWide(info, vehicle, police)
 		end
 	end
 
-	-- lamps: indicators over the panel's corners, handbrake / headlights bottom left, engine / low fuel bottom right
+	-- lamps: indicators over the panel's corners, handbrake / headlights bottom left, engine / low fuel
+	-- bottom right, each on its dark pod
+	lampPod(372, 96, 40, 40)
+	lampPod(628, 96, 40, 40)
+	lampPod(78.5, 341, 40, 72)
+	lampPod(923, 340.5, 40, 72)
 	if info.left then indicatorGlow(372, 96, 13, W.green) end
 	ICONS.arrowA(372, 96, 24, info.left and W.green or W.off, true)
 	if info.right then indicatorGlow(628, 96, 13, W.green) end
