@@ -47,11 +47,14 @@ local LENS_MATERIAL = CreateMaterial("audio_engine_lightbar_lens", "UnlitGeneric
 	["$vertexcolor"] = "1",
 	["$vertexalpha"] = "1",
 })
+-- the glow's colours: the LED bar's lit lenses' own (the average of the user's led_large_<colour>.png
+-- LEDs, scaled to full brightness; the blue was 25, 70, 255, deeper than the lenses' azure, which
+-- showed in the dark, the user; the yellow was orange)
 local COLORS = {
-	red = Color(255, 25, 15),
-	white = Color(255, 255, 255),
-	blue = Color(25, 70, 255),
-	yellow = Color(255, 170, 10),
+	red = Color(255, 40, 23),
+	white = Color(247, 250, 255),
+	blue = Color(45, 139, 255),
+	yellow = Color(255, 227, 40),
 }
 -- the bar's colour per side (-1 driver's, 0 centre, 1 passenger's) by scheme
 local SCHEME_SIDE_NAMES = {

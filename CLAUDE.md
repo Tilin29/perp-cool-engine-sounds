@@ -66,7 +66,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   VMTs); nothing is drawn over a bar any more, PERP's original included (the user: no overlaid colours); built-in lamps still get a drawn
   additive lens quad per lit module; sv_police prints which bar model is in use at load; the glow
   is one dynamic light per car (the nearest `MAX_DLIGHT_CARS` 8) in the colour flashing then, over the side it flashes on (the user:
-  `BAR_LIGHT_OFFSETS` x -22 driver's / +22 passenger's / front centre; built-in lamps: that side's lamps' middle) (the user: one light source,
+  `BAR_LIGHT_OFFSETS` x -22 driver's / +22 passenger's / front centre; built-in lamps: that side's lamps' middle), colours `COLORS` = the lit
+  lens PNGs' average, at full brightness (blue 45, 139, 255: the old 25, 70, 255 looked wrong in the dark, the user) (the user: one light source,
   not a sprite per lens + a light per side); key `audio_engine_lightkey` (default lshift;
   no police script has a Source boost block, so shift is free). HUD shows the mode, plus whatever the `audio_engine/lights-label`
   hook returns (veh) after a dot: the police siren module (below) answers with its tone.
