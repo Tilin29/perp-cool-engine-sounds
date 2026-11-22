@@ -10,7 +10,7 @@
 	  5   80s digital (A4): a VFD rev arc of blocks, seven-segment speed and gear
 	  6   floating arc (B): one rev arc with the speed and gear in its middle
 	  7   motorsport strip (C): a bar of rev segments over speed / gear / rpm read-outs
-	In a police car (scheme "police" with a light bar) the ones with emergency-light controls show
+	In an emergency car (a light bar or built-in lights: police, fire, medical) the ones with emergency-light controls show
 	them: the classic turns into A2 (its police look, siren tones and CODE 2 / CODE 3 buttons), D
 	shows LIGHTS / SIREN in its centre panel, A5 buttons under its LCD.
 	Drawn after the "Speedometer HUD" design canvas (artboards A, A2, A3, A4, A5, B, C, D): the
@@ -715,7 +715,7 @@ A.redWidth, A.tickGlow = 3.5, 50
 -- Every 1000 x 460 cluster (A, A3, A4, A5, D) uses it, so they all sit in the same place
 A.left, A.right, A.top, A.bottom = 88, 915, 30, 411
 
--- A2: the classic in a police car (artboard A2): a hotter, flatter backlight, lighter trim
+-- A2: the classic in an emergency car (artboard A2): a hotter, flatter backlight, lighter trim
 local A2 = setmetatable({
 	backlight = rgb("ff5533"), needle = rgb("ff5a1e"), red = rgb("ff3b2a"), redNumber = rgb("ff5533"), off = rgb("3a3c3f"),
 	trim = rgb("9a9da1"), trimLight = rgb("e4e6e8"), redWidth = 5, tickGlow = 16,
@@ -725,7 +725,7 @@ A2.glow = faded(A2.backlight, 85)
 A2.dimLabel = mix(A2.backlight, WHITE, 0.2, 179)
 A2.needleGlow = faded(A2.needle, 70)
 
--- the palette the classic is being drawn with (A, or A2 in a police car)
+-- the palette the classic is being drawn with (A, or A2 in an emergency car)
 local classic = A
 
 local function drawDial(centreX, centreY, bezelRadius)
@@ -833,7 +833,7 @@ local function drawClassic(info, vehicle, police)
 	drawNeedle(219, 230, 102, 20, 2.2, -135 + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 270, 11)
 	drawNeedle(529, 220, 140, 26, 2.6, -135 + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 270, 14)
 	drawNeedle(814, 240, 72, 15, 1.9, -60 + clamp(info.fuelShown, 0, 1) * 120, 9)
-	if police then drawPolicePanel(vehicle) end
+	if police then drawPolicePanel(vehicle, police) end
 end
 
 -- A2: the siren tones (WAIL / YELP / PHASER), the light modes (CODE 2 / CODE 3) and the bar's flashes
@@ -847,8 +847,21 @@ local function drawButton(x, y, width, label, active, lit, color)
 		TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 end
 
+--[[
+	Emergency cars by light scheme (NW2 audio_lightscheme): police, fire and medical cars all get the
+	light / siren controls. `tones` = the siren buttons { label, the tone's name as the siren module
+	reports it through audio_engine/lights-label (upper case) }: the third is the horn key's tone;
+	`second` = the light bar's passenger-side colour (cl_police), CODE 2's button and D's dot.
+]]
+local EMERGENCY_SCHEMES = {
+	police = { tones = { { "WAIL", "WAIL" }, { "YELP", "YELP" }, { "PHASER", "PHASER" } }, second = POLICE_BLUE },
+	fire = { tones = { { "WAIL", "FIRE WAIL" }, { "YELP", "FIRE YELP" }, { "PHASER", "FIRE PHASER" } }, second = rgb("ffc23a") },
+	medical = { tones = { { "WAIL", "EMS WAIL" }, { "HI-LO", "HI-LO" }, { "YELP", "EMS YELP" } }, second = rgb("e8ecf0") },
+}
+
 -- the siren tones over the rev counter, the light modes over the fuel gauge: just the buttons
-local SIREN_BUTTONS = { { "WAIL", SIREN_AMBER }, { "YELP", SIREN_AMBER }, { "PHASER", POLICE_RED } }
+-- (the horn key's tone red, the user's)
+local SIREN_BUTTON_COLORS = { SIREN_AMBER, SIREN_AMBER, POLICE_RED }
 local SIREN_BUTTON_WIDTH, LIGHT_BUTTON_WIDTH, BUTTON_GAP = 80, 100, 6
 
 -- the tone, from whoever answers the engine's lights-label hook (the siren module: its tone name, PHASER while the horn plays it)
@@ -863,17 +876,17 @@ local function lightsFlashing(vehicle, lightMode)
 	return lightMode > 0
 end
 
-function drawPolicePanel(vehicle)
+function drawPolicePanel(vehicle, scheme)
 	local lightMode = vehicle:GetNW2Int("audio_lights", 0)
 	local tone = sirenTone(vehicle)
-	for index, button in ipairs(SIREN_BUTTONS) do
-		local on = tone == button[1]
-		drawButton(100 + (index - 1) * (SIREN_BUTTON_WIDTH + BUTTON_GAP), 50, SIREN_BUTTON_WIDTH, button[1], on, on, button[2])
+	for index, button in ipairs(scheme.tones) do
+		local on = tone == button[2]
+		drawButton(100 + (index - 1) * (SIREN_BUTTON_WIDTH + BUTTON_GAP), 50, SIREN_BUTTON_WIDTH, button[1], on, on, SIREN_BUTTON_COLORS[index])
 	end
 
 	-- the light mode's button flashes with the car's own lights (cl_police: either side lit)
 	local flashing = lightsFlashing(vehicle, lightMode)
-	drawButton(712, 50, LIGHT_BUTTON_WIDTH, "CODE 2", lightMode == 1, lightMode == 1 and flashing, POLICE_BLUE)
+	drawButton(712, 50, LIGHT_BUTTON_WIDTH, "CODE 2", lightMode == 1, lightMode == 1 and flashing, scheme.second)
 	drawButton(712 + LIGHT_BUTTON_WIDTH + BUTTON_GAP, 50, LIGHT_BUTTON_WIDTH, "CODE 3", lightMode == 2, lightMode == 2 and flashing, POLICE_RED)
 end
 
@@ -1010,7 +1023,7 @@ local function drawStrip(info)
 end
 
 ---------------------------------------------------------------------------
--- D: modern digital (two lit dials, a centre panel: LIGHTS / SIREN in a police car, fuel)
+-- D: modern digital (two lit dials, a centre panel: LIGHTS / SIREN in an emergency car, fuel)
 ---------------------------------------------------------------------------
 local D = {
 	accent = rgb("4cc3ff"), face = rgb("0e1013"), faceIn = rgb("1c1e21"), red = rgb("ff3b30"), redNumber = rgb("ff5a4f"),
@@ -1096,21 +1109,23 @@ local function drawModern(info, vehicle, police)
 	if info.right then indicatorGlow(528, 120, 14, D.green) end
 	ICONS.arrowA(528, 120, 28, info.right and D.green or D.off, false)
 
-	-- the centre panel: LIGHTS / SIREN in a police car, then fuel
+	-- the centre panel: LIGHTS / SIREN in an emergency car, then fuel
 	local rowY = police and 158.5 or 207.5
 	if police then
 		local lightMode = vehicle:GetNW2Int("audio_lights", 0)
+		-- (police blue is D's own lighter blue)
+		local second = police.second == POLICE_BLUE and D.policeBlue or police.second
 		local dotColor = D.dotOff
 		if lightMode > 0 then
 			-- red while the driver's side is lit, blue the passenger's (cl_police's timing)
 			if AudioEngine.PoliceSideLit then
-				dotColor = AudioEngine.PoliceSideLit(vehicle, -1) and D.policeRed or (AudioEngine.PoliceSideLit(vehicle, 1) and D.policeBlue or D.dotOff)
+				dotColor = AudioEngine.PoliceSideLit(vehicle, -1) and D.policeRed or (AudioEngine.PoliceSideLit(vehicle, 1) and second or D.dotOff)
 			else
-				dotColor = RealTime() % 0.25 < 0.125 and D.policeRed or D.policeBlue
+				dotColor = RealTime() % 0.25 < 0.125 and D.policeRed or second
 			end
 		end
 		local modeText = lightMode == 1 and "CODE 2" or (lightMode == 2 and "CODE 3" or "OFF")
-		modernStatus(rowY, "LIGHTS", dotColor, modeText, lightMode == 1 and D.policeBlue or (lightMode == 2 and D.policeRed or D.grey))
+		modernStatus(rowY, "LIGHTS", dotColor, modeText, lightMode == 1 and second or (lightMode == 2 and D.policeRed or D.grey))
 		rowY = rowY + 42
 		rectangle(430, rowY, 140, 1, D.divider)
 		rowY = rowY + 7
@@ -1238,11 +1253,11 @@ local function drawGerman(info, vehicle, police)
 	if police then
 		local lightMode = vehicle:GetNW2Int("audio_lights", 0)
 		local flashing = lightsFlashing(vehicle, lightMode)
-		germanButton(436, 318, 62, "CODE 2", lightMode == 1, lightMode == 1 and flashing, G.policeBlue)
+		germanButton(436, 318, 62, "CODE 2", lightMode == 1, lightMode == 1 and flashing, police.second == POLICE_BLUE and G.policeBlue or police.second)
 		germanButton(502, 318, 62, "CODE 3", lightMode == 2, lightMode == 2 and flashing, G.policeRed)
 		local tone = sirenTone(vehicle)
-		for index, name in ipairs({ "WAIL", "YELP", "PHASER" }) do
-			germanButton(415 + (index - 1) * 58, 350, 54, name, tone == name, tone == name, G.amber)
+		for index, button in ipairs(police.tones) do
+			germanButton(415 + (index - 1) * 58, 350, 54, button[1], tone == button[2], tone == button[2], G.amber)
 		end
 	end
 
@@ -1437,7 +1452,7 @@ end
 -- HUD
 ---------------------------------------------------------------------------
 -- smoothRevs: the cluster shows the revs as a bar / segments (smoothRpmValue), not a needle alone.
--- police: it has emergency-light controls, shown in a police car
+-- police: it has emergency-light controls, shown in an emergency car
 local CLUSTERS = {
 	a = { box = A, draw = drawClassic, fonts = "A", police = true },
 	d = { box = A, draw = drawModern, fonts = "D", police = true, smoothRevs = true },
@@ -1448,8 +1463,10 @@ local CLUSTERS = {
 	c = { box = C, draw = drawStrip, fonts = "C", smoothRevs = true },
 }
 
-local function isPoliceCar(vehicle)
-	return vehicle:GetNW2String("audio_lightscheme", "") == "police" and IsValid(vehicle:GetNW2Entity("audio_lightbar"))
+-- the car's emergency scheme (EMERGENCY_SCHEMES) when it has lights, else nil
+local function emergencySchemeOf(vehicle)
+	if not IsValid(vehicle:GetNW2Entity("audio_lightbar")) then return nil end
+	return EMERGENCY_SCHEMES[vehicle:GetNW2String("audio_lightscheme", "police")]
 end
 
 -- audio_engine_cluster's numbers (the user's order) -> the design's clusters; 0 or anything else = the classic
@@ -1479,7 +1496,8 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	local clusterId = clusterFor()
 	local cluster = CLUSTERS[clusterId]
 	local box = cluster.box
-	local police = cluster.police and isPoliceCar(vehicle) or false
+	-- (`police`: the emergency scheme of a car with lights, for a cluster with light controls)
+	local police = cluster.police and emergencySchemeOf(vehicle) or false
 	if cluster.smoothRevs then
 		info.rpm, info.rpmDigits = info.rpmSmooth, info.rpmSmoothDigits
 		info.share = info.rpm / info.redline
@@ -1518,7 +1536,7 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		draw.SimpleText(limitText, "AudioHud_Status", rightX, topY, B.green, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
 	end
 	-- police lights (sv_police.lua), with the word other addons add through audio_engine/lights-label
-	-- (the siren's tone); a cluster with light controls shows them itself in a police car
+	-- (the siren's tone); a cluster with light controls shows them itself in an emergency car
 	local lightLabel = AudioEngine.LIGHT_MODES[vehicle:GetNW2Int("audio_lights", 0)]
 	if not police and lightLabel and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then
 		local extra = hook.Run("audio_engine/lights-label", vehicle)

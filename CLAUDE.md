@@ -265,8 +265,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   floating arc, C motorsport strip, A2 classic + police, A3 60s vintage, A4 80s digital, A5 German hatch, D modern digital; positions are its pixels x `CLUSTER_SIZE` x screen height / 1080 x
   `audio_engine_hud_scale`; the 1000 x 460 ones all use A's box, so they sit in the same place). `audio_engine_cluster` 0..7 (the user's order: 1 = A, 2 = D,
   3 = A5, 4 = A3, 5 = A4, 6 = B, 7 = C; 0 = automatic = A; client, NOT archived: every load starts on 0).
-  Clusters with emergency-light controls (`CLUSTERS[id].police`: A, D, A5) show them in a police car (NW2 `audio_lightscheme` "police" + a light bar: the 9 marked ones, not unmarked
-  cars): A becomes A2 (its palette `A2`, a metatable over `A`, + the panel), D shows LIGHTS (dot red/blue with the car's sides) / SIREN in its centre panel (other cars: the panel shrinks to just round the fuel),
+  Clusters with emergency-light controls (`CLUSTERS[id].police`: A, D, A5) show them in any emergency car (a light bar or built-in lights, NW2 `audio_lightbar`:
+  police, fire and medical, `EMERGENCY_SCHEMES` by `audio_lightscheme`; not unmarked cars): each scheme's siren buttons are named for its tones
+  (police WAIL / YELP / PHASER, fire WAIL / YELP / PHASER matching FIRE WAIL ..., EMS WAIL / HI-LO / YELP matching EMS WAIL, HI-LO, EMS YELP: the
+  siren module's tone names through `audio_engine/lights-label`; the third = the horn key's tone), CODE 2 / D's dot in the bar's second colour
+  (blue, fire yellow, medical white). A becomes A2 (its palette `A2`, a metatable over `A`, + the panel), D shows LIGHTS (dot red/blue with the car's sides) / SIREN in its centre panel (other cars: the panel shrinks to just round the fuel),
   A5 CODE 2 / CODE 3 and WAIL / YELP / PHASER buttons (LED strip, flashing with the lights) under its LCD; elsewhere the light mode stays in the status line.
   Every cluster has a check-engine lamp (the user added it to the design): lit while the engine isn't running (off / starting), `engine` in the cluster-lights hook.
   New clusters' dial numbers are ~3 px over the design's (as A's). A2's panel: WAIL / YELP / PHASER lit by the
