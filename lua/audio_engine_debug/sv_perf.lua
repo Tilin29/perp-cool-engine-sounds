@@ -512,7 +512,7 @@ concommand.Add("audio_engine_perf_spawn", function(requester, _, args)
 			timer.Simple(0.5 + i * 0.05, function()
 				if not IsValid(vehicle) then return end
 				if AudioEngine.SetEngine then AudioEngine.SetEngine(vehicle, true) end
-				if lights and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then vehicle:SetNW2Int("audio_lights", 2) end
+				if lights and IsValid(vehicle:GetNW2Entity("audio_lightbar")) then AudioEngine.SetLights(vehicle, 2) end
 				if driveMph > 0 then
 					if race then
 						startDriving(vehicle, driveMph, requester, RACE.acceleration, raceGoAt)

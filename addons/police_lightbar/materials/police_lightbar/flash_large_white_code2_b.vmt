@@ -1,0 +1,20 @@
+// a lit lens: white, code2 b (made by dev/police_lightbar/make_vmts.py)
+"VertexlitGeneric"
+{
+	"$basetexture" "police_lightbar/leds_large"
+	"$selfillum" "1"
+	"$frame" "0"
+	"$lit" "2"
+	"$off" "0"
+	"$time" "0"
+	"$offset" "0.6000"
+	"$phase" "0"
+	"$ontime" "0.4"
+	"Proxies"
+	{
+		"CurrentTime" { "resultVar" "$time" }
+		"Add" { "srcVar1" "$time" "srcVar2" "$offset" "resultVar" "$time" }
+		"WrapMinMax" { "srcVar1" "$time" "minVal" "0" "maxVal" "1.2" "resultVar" "$phase" }
+		"LessOrEqual" { "srcVar1" "$phase" "srcVar2" "$ontime" "lessEqualVar" "$lit" "greaterVar" "$off" "resultVar" "$frame" }
+	}
+}

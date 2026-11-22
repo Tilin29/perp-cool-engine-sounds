@@ -56,12 +56,19 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   the model's own lamps `AudioEngine.BUILTIN_LIGHTS[model]` { bone, lamps { pos, n, w, h, color, side, group } } in the body bone's space
   (GTA IV ports turn car.body 90 deg; drawn through `GetBoneMatrix`), picked from the lens material's vertices and texture colours
   with an MDL/VVD reader (headlights, tail lights, indicators left out); such a car is its own NW2 `audio_lightbar`; `AudioEngine.POLICE_BY_SCRIPT` from `AudioEngine.JOB_VEHICLES`; `AudioEngine.LIGHTBAR_MODULES` = the LED
-  lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669: model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
+  lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669 (its textures live in that item's content.gma under
+  materials/models/jarheads/props/police_lightbar/; copies of the 6 the bar uses and an LED rebuild of it are the separate
+  addon `addons/police_lightbar/` (see "Police lightbar" below)): model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
   turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
   Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
-  off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the bar's LEDs are plain textures, so lit modules get an additive lens
-  quad + a glow sprite faded by facing, the nearest 4 cars a dynamic light per side; key `audio_engine_lightkey` (default lshift;
+  off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the LED bar (addons/police_lightbar) lights its own lenses (its skin's
+  VMTs); nothing is drawn over a bar any more, PERP's original included (the user: no overlaid colours); built-in lamps still get a drawn
+  additive lens quad per lit module; sv_police prints which bar model is in use at load; the glow
+  is one dynamic light per car (the nearest `MAX_DLIGHT_CARS` 8) in the colour flashing then, over the side it flashes on (the user:
+  `BAR_LIGHT_OFFSETS` x -22 driver's / +22 passenger's / front centre; built-in lamps: that side's lamps' middle), colours `COLORS` = the lit
+  lens PNGs' average, at full brightness (blue 45, 139, 255: the old 25, 70, 255 looked wrong in the dark, the user) (the user: one light source,
+  not a sprite per lens + a light per side); key `audio_engine_lightkey` (default lshift;
   no police script has a Source boost block, so shift is free). HUD shows the mode, plus whatever the `audio_engine/lights-label`
   hook returns (veh) after a dot: the police siren module (below) answers with its tone.
 - Passenger seats: `sv_seats.lua` (`audio_engine_seats`, default 1). PERP's own: `AudioEngine.PERP_SEATS[name]` { seats { x, y, z, p, y, r }
@@ -281,7 +288,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   PERP's own vehicle methods win where they exist (IsIndicating / GetIndicatorDirection true = left / HasHazardLights /
   GetHeadlights / GetFuel 0..10000, low under 1000 / IsHandBraking; `vehicle.indicatorOn` = PERP's flash phase, read from PERP's
   cached client Lua), and the `audio_engine/cluster-lights` hook (vehicle, lights { left, right, hazards, headlights, fuel 0..1,
-  handbrake, engine }) can fill them in. No PERP: fuel shows full. Lamps just light up (the user: no circles round them); only the indicators keep a soft glow disc (`indicatorGlow`). A's dial numbers are 25/25/21 design px (the user: the design's 19/18/16 were small); A2's panel is buttons only (the user took the siren icon and LED strip off): WAIL / YELP / PHASER 80 x 30, CODE 2 / CODE 3 100 x 30, 16 px plain text (the design's 10 px with a blurred glow came out smeared); PHASER red like CODE 3; the active CODE button flashes with the car's own lights (`AudioEngine.PoliceSideLit(vehicle, side)` in cl_police, its isLit timing, either side), dim between flashes; text drawn on whole pixels. Needles move like a stepper-motor gauge (`stepGauge`; the user: jittery on the speed limiter, then "should move robotically and not sway"): the value filtered (`SPEED_GAUGE` 0.25 s / `RPM_GAUGE` 0.15 s), the needle holds until that is `band` away (0.8 mph-or-km/h / 120 rpm), then travels to it eased at slowest..fastest per s and stops; digits show the needle (rpm in 50s). Offline: a cruise wobbling +-1 mph / +-150 rpm moves the needles ~0-2% of frames; pulling 10 mph/s the needle trails ~3.5 mph; a 6500 -> 4000 gear change lands in ~0.7 s. The speed needle no longer steps (the user: clunky, moved in steps, fast cars fluctuated a lot): its speed is the server's physics (`AudioEngine.ServerSpeed`, the driver's drive state, cl_handling), else a least squares line through the last `SPEED_FIT_SECONDS` 0.3 s of positions on CurTime (`fittedSpeed`: single player, listen host, prediction off; the frame-to-frame position speed jittered more the faster the car); the needle follows smoothly over `SPEED_NEEDLE_TIME` 0.15 s, the digits move once it is `SPEED_DIGIT_HOLD` 0.6 past them. The rpm needle (A, A2) keeps `stepGauge`, but once caught up it follows while the revs keep moving one way faster than `drift` 40 rpm/s (rate over `rateTime` 0.3 s; the user: at top speed it went up in steps; offline a 50 rpm/s climb is followed within the band, a +-150 rpm cruise wobble and limiter bounce still hold it); B's rev bar, C's LED segments, D's lit arcs and A4's blocks follow `smoothRpmValue` (`RPM_SMOOTH_TIME` 0.05 s, digits held `RPM_DIGIT_HOLD` 75 rpm; `CLUSTERS[id].smoothRevs`): with the stepper value they moved in steps (the user: A fine, the other two buggy). Not yet seen in game. Engine-off prompt, LIMIT and (unless the cluster shows the police controls) the light mode sit above it.
+  handbrake, engine }) can fill them in. No PERP: fuel shows full. Lamps just light up (the user: no circles round them); only the indicators keep a soft glow disc (`indicatorGlow`). A's dial numbers are 25/25/21 design px (the user: the design's 19/18/16 were small); A2's panel is buttons only (the user took the siren icon and LED strip off): WAIL / YELP / PHASER 80 x 30, CODE 2 / CODE 3 100 x 30, 16 px plain text (the design's 10 px with a blurred glow came out smeared); PHASER red like CODE 3; the active CODE button flashes with the car's own lights (`AudioEngine.PoliceSideLit(vehicle, side)` in cl_police, its isLit timing, either side), dim between flashes;
+  on the classic CODE 3 blinks once a second instead (`CODE3_BUTTON_BLINK` 1 s, lit the first half, on `AudioEngine.LightPhaseTime`; the quick flashes flickered it, then 0.5 s was still too fast, the user); text drawn on whole pixels. Needles move like a stepper-motor gauge (`stepGauge`; the user: jittery on the speed limiter, then "should move robotically and not sway"): the value filtered (`SPEED_GAUGE` 0.25 s / `RPM_GAUGE` 0.15 s), the needle holds until that is `band` away (0.8 mph-or-km/h / 120 rpm), then travels to it eased at slowest..fastest per s and stops; digits show the needle (rpm in 50s). Offline: a cruise wobbling +-1 mph / +-150 rpm moves the needles ~0-2% of frames; pulling 10 mph/s the needle trails ~3.5 mph; a 6500 -> 4000 gear change lands in ~0.7 s. The speed needle no longer steps (the user: clunky, moved in steps, fast cars fluctuated a lot): its speed is the server's physics (`AudioEngine.ServerSpeed`, the driver's drive state, cl_handling), else a least squares line through the last `SPEED_FIT_SECONDS` 0.3 s of positions on CurTime (`fittedSpeed`: single player, listen host, prediction off; the frame-to-frame position speed jittered more the faster the car); the needle follows smoothly over `SPEED_NEEDLE_TIME` 0.15 s, the digits move once it is `SPEED_DIGIT_HOLD` 0.6 past them. The rpm needle (A, A2) keeps `stepGauge`, but once caught up it follows while the revs keep moving one way faster than `drift` 40 rpm/s (rate over `rateTime` 0.3 s; the user: at top speed it went up in steps; offline a 50 rpm/s climb is followed within the band, a +-150 rpm cruise wobble and limiter bounce still hold it); B's rev bar, C's LED segments, D's lit arcs and A4's blocks follow `smoothRpmValue` (`RPM_SMOOTH_TIME` 0.05 s, digits held `RPM_DIGIT_HOLD` 75 rpm; `CLUSTERS[id].smoothRevs`): with the stepper value they moved in steps (the user: A fine, the other two buggy). Not yet seen in game. Engine-off prompt, LIMIT and (unless the cluster shows the police controls) the light mode sit above it.
   Offline render check (mocked GMod -> SVG -> headless Chrome) lives in the scratchpad, not the repo.
 - `sv_engine.lua`: ignition, run by the server.
   - Engine off on entry; start key `audio_engine_startkey` (default R; polled by cl_engine, which sends `audio_engine_toggle`: the server's
@@ -413,6 +421,34 @@ once `AUDIO_ENGINE.RegisterCar` exists (autorun goes in name order, else at Init
 The core never names it. The dev harnesses still use it as their test car: they dofile sh_car.lua after sh_config (dev/build.py inlines it too).
 `dev/baker/check_syntax.js` also compiles `addons/*/lua`.
 
+## Police lightbar (separate addon)
+`addons/police_lightbar/`: its own GMod addon like the SL65, not part of the engine. GMod doesn't load addons nested in an addon: on the
+user's machine `garrysmod/addons/police_lightbar` is a copy of it: `dev/police_lightbar/install.cmd` (robocopy /MIR) refreshes it, then
+restart GMod. A directory junction there wasn't mounted (the server reported the model missing). Without it the cars get PERP's original
+bar, unlit; sv_police's load message says whether the LED model is missing from disk or there but not loadable.
+- The rebuild `models/perpheads/props/police_lightbar_leds.mdl`: PERP's bar (workshop 2897742669) body only, every LED lens on its own
+  material `materials/police_lightbar/lens_<face>_<side>_<inner|outer>` / `lens_front_centre` / `lens_corner_<side>_<front|side|rear>`
+  (15; only the front face has a centre lens), so each lens can be lit by itself. In the original all lenses shared 2 materials (`LEDs` /
+  `LEDs2`) and every lens quad mapped the whole texture (UV 0..1): no texture could light them separately. Made by our own decompiler
+  (`dev/police_lightbar/`, README there; no Crowbar): SMD = the mesh as stored, which studiomdl's `$staticprop` turns +90: model = mesh (x, y) ->
+  (-y, x), front +Y like the cars. The first build was turned -90 (as the original seemed to be drawn: its message board at the rear) and
+  sat back to front on the cars in game (the user), so PERP's original bar (the fallback) may sit back to front too; wound for studiomdl; checked against the original's mesh turned +90 (`verify.py`): all 608 triangles in place,
+  same winding, same uvs, every lens within 0.5 of sh_police's module table (written in model space now). Left out (unused by us): screen bodygroups, 11 message skins, the screen bone, screenflip.
+  `AudioEngine.LIGHTBAR_MODEL` = it when `util.IsValidModel`, else the original (`LIGHTBAR_ORIGINAL_MODEL`).
+- The lenses light themselves, in VMTs (the user: not Lua; a Lua material proxy was tried first): `materials/police_lightbar/leds_large.vtf`
+  (faces) / `leds_small.vtf` (corners) have 5 frames (0 unlit, 1 red, 2 white, 3 blue, 4 yellow; the user's PNGs, `dev/police_lightbar/make_vtf.py`),
+  lit frames' alpha = the `$selfillum` mask. The model's 13 skins (`$texturegroup`, `make_vmts.py`): 0 unlit, then police / fire / medical x
+  CODE 2 / CODE 3 x phase 0 / 1, each lens on a `flash_<size>_<colour>_<code>_<a|b|c>` VMT whose Source proxies (CurrentTime, Add, WrapMinMax,
+  LessOrEqual) run its pattern into `$frame`. The server sets the skin with the mode: `AudioEngine.SetLights(vehicle, mode)` (sv_police; every
+  `audio_lights` change goes through it), `AudioEngine.LightbarSkin` (sh_police). Phase = EntIndex % 2, half a period later
+  (`AudioEngine.LightPhaseTime`, which cl_police's drawn lights, glow and the HUD's `PoliceSideLit` use too): neighbours alternate. It was 4
+  offsets of 0.37 s, but studiomdl caps a model at 64 materials (4 needed 121; 2 = a/b swapped, 51). `check_vmts.py` simulates the proxies
+  against cl_police's `isLit`: 0 differences. Nothing is drawn over this bar.
+- Copies of the bar's 6 VTFs at their original path `materials/models/jarheads/props/police_lightbar/` (housing, housing_nrm, housing_exp,
+  led_small, led_large, plastic) for the user to repaint: they replace the workshop's by path (the lens VMTs use led_small / led_large).
+  Not yet confirmed in game that the addon's copy wins over the workshop item's.
+- Players need the addon downloaded (workshop upload or resource.AddFile) to see any of it.
+
 ## Police siren (separate module, may not stay)
 Own loader `lua/autorun/police_siren_init.lua`, files in `lua/police_siren/`, studio in `dev/siren_studio/`: delete those three
 to drop it. Never referenced by the audio engine and never calls it (the user wants them kept apart); it only reads the lights'
@@ -453,11 +489,15 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   voice scaled to whole cycles per loop, vibrato/tremolo whole cycles, rendered twice and the second pass kept, peak 0.95.
 - `sh_siren.lua`: `PoliceSiren.SoundingTone(veh)`: the driver's pick (NW2 `siren_tone`, valid while NW2 `siren_at` = the light mode it was
   picked in), else `lightTones[mode]` of the car's scheme (`PoliceSiren.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle,
-  then off), driver only, lights on.
+  then off), driver only, lights on. The driver getting out silences it, lights left on (the user): siren_tone "" at the current mode
+  (`PlayerLeaveVehicle` on the car itself; passengers' pods have no lightbar), so it stays off back in until the tone key or a new mode.
 - `cl_siren.lua`: builds a tone twice (outside / inside) in a coroutine (5 ms/frame; stored as the engine's loops are, one
   pre-roll sample [y_L, y_1 .. y_L] with loopStart 1: the game loops from sample 1, and without it every pass skipped y_1,
   a tick the user heard on the wail) the first time a car near sounds it (a failed one isn't retried); `sound.Generate`
   names carry `PoliceSiren.Serial` (lua refresh); one CSoundPatch per car (fade-in a frame after PlayEx; once a second it's checked with IsPlaying and restarted at full volume if the game dropped it; only the nearest `police_siren_maxcars` (12, 0 = all) sounding cars are heard, others released, back at 2 places inside: with many cars driving, the engines' loops took the channels and a siren, starting at volume 0, stayed silent), swapped in 0.15 s on getting in/out
+  (without restarting the loop, the user: a car you sit in, or within `PARTNER_RANGE` ~30 m when its tone starts, plays both versions from
+  the same moment, the unheard one at `PARTNER_VOLUME` 0.001 and the same pitch, so the swap is a cross-fade and the tone carries on;
+  dropped past `PARTNER_DROP_RANGE` when you're not in it or if the game drops it; a car got into without one still restarts the tone)
   (driver or a seat parented to the car, and the view on the player: watching through a camera = outside, as the engine). Doppler from its own speed sampling (every siren car within `TRACK_MARGIN` 1.2 x the audible range, audio_engine_range at its siren level, tracked while silent too, `velocityTracks`, and a tone starts at its Doppler pitch: started at the plain pitch with an empty track, it swept to the Doppler one as it faded in, a "water drop" each time a passing siren started, the user, 30-car race; positions >= 0.05 s apart, gaps > 0.3 s and teleports
   dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on

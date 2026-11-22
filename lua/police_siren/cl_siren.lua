@@ -42,6 +42,17 @@ local LIST_REFRESH = 0.5
 local SIREN_BUDGET_MARGIN = 2
 local BUILD_BUDGET = 0.005
 local SWAP_FADE = 0.15
+--[[
+	Getting in or out swaps the tone's version (inside / outside), and a sound always starts at the top
+	of its loop: the siren restarted (the user). So a car you sit in, or one within PARTNER_RANGE when
+	its tone starts, plays both versions from the same moment, the one not heard at PARTNER_VOLUME
+	(near silent, still advancing; at the same pitch, so they stay in step): the swap is a cross-fade
+	and the tone carries on. The partner goes once the car is past PARTNER_DROP_RANGE and you're not
+	in it. A car you get into without one (its tone started far from you) still starts its tone again.
+]]
+local PARTNER_RANGE = 1200          -- units (~30 m)
+local PARTNER_DROP_RANGE = 2400
+local PARTNER_VOLUME = 0.001
 -- Doppler: speeds from positions sampled at least SPEED_SAMPLE s apart (a frame-to-frame
 -- reading jumps on every stutter), gaps over SPEED_GAP or speeds over SPEED_MAX (a teleport)
 -- dropped, smoothed by SPEED_SMOOTH; the pitch follows its target at DOPPLER_RATE per second
@@ -296,32 +307,65 @@ local function airGain(vehicle, state, now)
 	return 10 ^ (air.depth * reach * waver / 20)
 end
 
-local function startTone(vehicle, toneId, inside, fadeTime)
+local function versionName(toneId, inside)
+	return inside and soundNames[toneId].inside or soundNames[toneId].out
+end
+
+local function baseVolumeOf(toneId, inside)
 	local config = PoliceSiren.CONFIG
-	local name = inside and soundNames[toneId].inside or soundNames[toneId].out
-	-- the game knows a playing sound by entity + name: a fading one of this name on this car would take
-	-- the new one down with it when it stops (a tone back right after the honk override): cut it now
+	return config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
+end
+
+-- the game knows a playing sound by entity + name: a fading one of this name on this car would take
+-- the new one down with it when it stops (a tone back right after the honk override): cut it now
+local function cutFading(vehicle, name)
 	for i = #fading, 1, -1 do
 		if fading[i].vehicle == vehicle and fading[i].name == name then
 			fading[i].patch:Stop()
 			table.remove(fading, i)
 		end
 	end
+end
+
+local function newPatch(vehicle, name)
+	local config = PoliceSiren.CONFIG
+	cutFading(vehicle, name)
 	local patch = CreateSound(vehicle, name)
 	patch:SetSoundLevel(config.soundLevels[string.lower(vehicle:GetModel() or "")] or config.soundLevel)
+	return patch
+end
+
+local function startTone(vehicle, toneId, inside, fadeTime)
+	local name = versionName(toneId, inside)
+	local patch = newPatch(vehicle, name)
 	-- (at the pitch it's heard at now, not swept to it: see velocityTracks)
 	local ratio = inside and 1 or dopplerRatio(vehicle:GetPos(), velocityOf(vehicle))
 	local pitch = math.Clamp(math.Round(BASE_PITCH * ratio), PITCH_MIN, PITCH_MAX)
+	-- the other version alongside, started the same moment (see PARTNER_RANGE)
+	local partner, partnerName
+	if inside or vehicle:GetPos():DistToSqr(listenerPosition) < PARTNER_RANGE * PARTNER_RANGE then
+		partnerName = versionName(toneId, not inside)
+		partner = newPatch(vehicle, partnerName)
+	end
 	patch:PlayEx(0, pitch)
-	local baseVolume = config.volume * (config.tones[toneId].level or 1) * volumeConVar:GetFloat() * (inside and config.cabin.volume or 1)
+	if partner then partner:PlayEx(PARTNER_VOLUME, pitch) end
+	local baseVolume = baseVolumeOf(toneId, inside)
 	local volume = baseVolume * (inside and 1 or distanceGain(vehicle))
 
 	return {
 		toneId = toneId, name = name, vehicle = vehicle, inside = inside, patch = patch, baseVolume = baseVolume,
+		partner = partner, partnerName = partnerName,
 		airPhase = math.random() * 2 * math.pi, airPhase2 = math.random() * 2 * math.pi,
 		volume = volume, fadeInVolume = volume, fadeTime = fadeTime,
 		pitch = pitch, dopplerRatio = ratio, nextReviveCheck = RealTime() + REVIVE_EVERY,
 	}
+end
+
+local function dropPartner(state, fadeTime)
+	if not state.partner then return end
+	state.partner:ChangeVolume(0, fadeTime)
+	table.insert(fading, { vehicle = state.vehicle, name = state.partnerName, patch = state.partner, stopAt = RealTime() + fadeTime })
+	state.partner, state.partnerName = nil, nil
 end
 
 local function stopTone(state, fadeTime, pitchDrop)
@@ -329,6 +373,19 @@ local function stopTone(state, fadeTime, pitchDrop)
 	patch:ChangeVolume(0, fadeTime)
 	if pitchDrop and PoliceSiren.CONFIG.stopPitch < 1 then patch:ChangePitch(state.pitch * PoliceSiren.CONFIG.stopPitch, fadeTime) end
 	table.insert(fading, { vehicle = state.vehicle, name = state.name, patch = patch, stopAt = RealTime() + fadeTime })
+	dropPartner(state, fadeTime)
+end
+
+-- getting in or out with the other version already playing in step: cross-fade to it, no restart
+local function swapToPartner(state, vehicle, inside)
+	state.patch:ChangeVolume(PARTNER_VOLUME, SWAP_FADE)
+	state.patch, state.partner = state.partner, state.patch
+	state.name, state.partnerName = state.partnerName, state.name
+	state.inside = inside
+	state.baseVolume = baseVolumeOf(state.toneId, inside)
+	state.volume = state.baseVolume * (inside and 1 or distanceGain(vehicle))
+	state.patch:ChangeVolume(state.volume, SWAP_FADE)
+	state.nextReviveCheck = RealTime() + REVIVE_EVERY
 end
 
 local function update(vehicle)
@@ -357,6 +414,12 @@ local function update(vehicle)
 		local now = RealTime()
 		if now >= state.nextReviveCheck then
 			state.nextReviveCheck = now + REVIVE_EVERY
+			-- (a partner the game dropped can't be put back in step: let it go; and once you're well
+			-- away from a car you're not in, it isn't needed)
+			if state.partner and (not state.partner:IsPlaying()
+				or (not listenerInside and vehicle:GetPos():DistToSqr(listenerPosition) > PARTNER_DROP_RANGE * PARTNER_DROP_RANGE)) then
+				dropPartner(state, SWAP_FADE)
+			end
 			if not state.patch:IsPlaying() then
 				state.patch:Stop()
 				state.patch:PlayEx(state.volume, state.pitch)
@@ -376,8 +439,14 @@ local function update(vehicle)
 		local pitch = math.Clamp(math.Round(BASE_PITCH * state.dopplerRatio), PITCH_MIN, PITCH_MAX)
 		if pitch ~= state.pitch then
 			state.patch:ChangePitch(pitch, PITCH_GLIDE)
+			-- (the partner keeps the same pitch: at another, it would drift out of step)
+			if state.partner then state.partner:ChangePitch(pitch, PITCH_GLIDE) end
 			state.pitch = pitch
 		end
+		return
+	end
+	if state and state.toneId == wantedTone and state.partner then
+		swapToPartner(state, vehicle, listenerInside)
 		return
 	end
 	-- getting in or out: the same tone swaps version quickly; a new tone or none fades as set
@@ -474,6 +543,7 @@ hook.Add("EntityRemoved", "police_siren", function(entity, fullUpdate)
 	local state = cars[entity]
 	if not state then return end
 	state.patch:Stop()
+	if state.partner then state.partner:Stop() end
 	cars[entity] = nil
 end)
 
@@ -529,6 +599,7 @@ end)
 local function restartSirens()
 	for vehicle, state in pairs(cars) do
 		state.patch:Stop()
+		if state.partner then state.partner:Stop() end
 		cars[vehicle] = nil
 	end
 	PoliceSiren.Serial = PoliceSiren.Serial + 1

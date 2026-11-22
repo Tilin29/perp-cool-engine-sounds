@@ -1,0 +1,7 @@
+// a bar lens, unlit (skin 0); the lit skins swap in flash_* materials
+"VertexlitGeneric"
+{
+	"$basetexture" "police_lightbar/leds_large"
+	"$selfillum" "1"
+	"$frame" "0"
+}

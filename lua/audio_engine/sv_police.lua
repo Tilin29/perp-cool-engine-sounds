@@ -67,6 +67,27 @@ end)
 -- lua refresh: cars already out there
 for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do setupPolice(vehicle) end
 
+-- which bar the cars get: the LED one only with the police_lightbar addon installed in garrysmod/addons
+if AudioEngine.LIGHTBAR_MODEL == AudioEngine.LIGHTBAR_LED_MODEL then
+	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (lenses lit by its skins)")
+else
+	-- (not on disk = the addon isn't mounted; on disk but not valid = the game couldn't load the model)
+	local reason = file.Exists(AudioEngine.LIGHTBAR_LED_MODEL, "GAME")
+		and " is there but the game won't load it"
+		or " isn't mounted: install the police_lightbar addon (dev/police_lightbar/install.cmd) and restart"
+	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (", AudioEngine.LIGHTBAR_LED_MODEL, reason, ")")
+end
+
+-- a car's light mode (0 off, 1 CODE 2, 2 CODE 3) and, on the LED bar, its skin: the flashing itself
+-- runs in the skin's materials (sh_police's AudioEngine.LightbarSkin)
+function AudioEngine.SetLights(vehicle, mode)
+	vehicle:SetNW2Int("audio_lights", mode)
+	local lightbar = vehicle.audioLightbar
+	if IsValid(lightbar) and lightbar ~= vehicle and string.lower(lightbar:GetModel() or "") == AudioEngine.LIGHTBAR_LED_MODEL then
+		lightbar:SetSkin(AudioEngine.LightbarSkin(vehicle, mode))
+	end
+end
+
 -- no argument: the next mode; 0 = off, 1 = CODE 2, 2 = CODE 3
 concommand.Add("audio_engine_lights", function(player, _, args)
 	if not IsValid(player) then return end
@@ -81,5 +102,5 @@ concommand.Add("audio_engine_lights", function(player, _, args)
 	else
 		mode = (vehicle:GetNW2Int("audio_lights", 0) + 1) % (modeCount + 1)
 	end
-	vehicle:SetNW2Int("audio_lights", mode)
+	AudioEngine.SetLights(vehicle, mode)
 end, nil, "Emergency lights of the car you're driving: no argument = next mode, 0 = off, 1 = CODE 2, 2 = CODE 3")
