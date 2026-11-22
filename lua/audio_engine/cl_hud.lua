@@ -1067,7 +1067,7 @@ local function drawModern(info, vehicle, police)
 		disc(x, y, 186, faded(D.face, 235))
 		disc(x, y - 12 * pixel, 140, faded(D.faceIn, 70))
 		band(x, y, 185, 186, 0, 360, D.rim, 6)
-		band(x, y, 115.5, 116.5, 0, 360, D.innerRim, 6)
+		band(x, y, 103.5, 104.5, 0, 360, D.innerRim, 6)   -- (the design's 116 ran through the bigger numbers)
 	end
 	-- the centre panel: the design's 168 x 166 with LIGHTS / SIREN, else as wide but only as tall as
 	-- the fuel block (8 px above and below it)
@@ -1089,7 +1089,7 @@ local function drawModern(info, vehicle, police)
 	text(info.usesMph and "mph" or "km/h", "D_Unit", 220, 254, D.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	text(info.gear, "D_Gear", 780, 166, D.accent, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, faded(D.accent, 102))
 	text(info.rpmDigits .. " rpm", "D_Unit", 780, 254, D.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	text("×1000 rpm", "D_Small", 780, 318, D.faint, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text("×1000 rpm", "D_Small", 780, 310, D.faint, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
 	if info.left then indicatorGlow(472, 120, 14, D.green) end
 	ICONS.arrowA(472, 120, 28, info.left and D.green or D.off, true)
