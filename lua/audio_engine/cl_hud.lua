@@ -1069,12 +1069,17 @@ local function drawModern(info, vehicle, police)
 		band(x, y, 185, 186, 0, 360, D.rim, 6)
 		band(x, y, 115.5, 116.5, 0, 360, D.innerRim, 6)
 	end
-	-- the centre panel: full height with LIGHTS / SIREN, else just round the fuel block (207.5..252.5)
-	local panelTop, panelHeight = 147, 166
-	if not police then panelTop, panelHeight = 192, 76 end
-	local panelX, panelY = place(416, panelTop)
-	draw.RoundedBox(max(1, floor(12 * pixel)), panelX, panelY + 10 * pixel, 168 * pixel, panelHeight * pixel, Color(0, 0, 0, 70))
-	draw.RoundedBox(max(1, floor(12 * pixel)), panelX, panelY, 168 * pixel, panelHeight * pixel, faded(D.face, 235))
+	-- the centre panel: the design's 168 x 166 with LIGHTS / SIREN, else a small box just round the
+	-- fuel block (narrower, 8 px round it)
+	local contentLeft, contentRight = 430, 570
+	local panelLeft, panelTop, panelWidth, panelHeight = 416, 147, 168, 166
+	if not police then
+		contentLeft, contentRight = 448, 552
+		panelLeft, panelTop, panelWidth, panelHeight = 438, 199.5, 124, 61
+	end
+	local panelX, panelY = place(panelLeft, panelTop)
+	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY + 8 * pixel, panelWidth * pixel, panelHeight * pixel, Color(0, 0, 0, 70))
+	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY, panelWidth * pixel, panelHeight * pixel, faded(D.face, 235))
 	draw.NoTexture()
 
 	local revColor = info.rpm >= info.redline and D.red or D.accent
@@ -1119,13 +1124,14 @@ local function drawModern(info, vehicle, police)
 		rectangle(430, rowY, 140, 1, D.divider)
 		rowY = rowY + 7
 	end
-	ICONS.fuel(438.5, rowY + 8.5, 17, info.lowFuel and D.amber or D.off, 2.2)
-	text(string.format("%d%%", floor(info.fuelShown * 100 + 0.5)), "D_Small", 570, rowY + 8.5,
+	local contentWidth = contentRight - contentLeft
+	ICONS.fuel(contentLeft + 8.5, rowY + 8.5, 17, info.lowFuel and D.amber or D.off, 2.2)
+	text(string.format("%d%%", floor(info.fuelShown * 100 + 0.5)), "D_Small", contentRight, rowY + 8.5,
 		info.lowFuel and D.amber or Color(255, 255, 255, 179), TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
-	rectangle(430, rowY + 22, 140, 5, D.off)
-	if info.fuelShown > 0.005 then rectangle(430, rowY + 22, 140 * clamp(info.fuelShown, 0, 1), 5, info.lowFuel and D.amber or WHITE) end
-	text("E", "D_Tiny", 430, rowY + 32, D.faint, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
-	text("F", "D_Tiny", 570, rowY + 32, D.faint, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+	rectangle(contentLeft, rowY + 22, contentWidth, 5, D.off)
+	if info.fuelShown > 0.005 then rectangle(contentLeft, rowY + 22, contentWidth * clamp(info.fuelShown, 0, 1), 5, info.lowFuel and D.amber or WHITE) end
+	text("E", "D_Tiny", contentLeft, rowY + 32, D.faint, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+	text("F", "D_Tiny", contentRight, rowY + 32, D.faint, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
 
 	-- lamps under the panel
 	ICONS.headlights(456.5, 336, 26, info.headlights and D.green or D.off, 2.4)
