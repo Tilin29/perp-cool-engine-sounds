@@ -24,4 +24,16 @@ the screen bone and the screenflip animation.
 (unlit) and `led_<large|small>_<red|white|blue|yellow>.png` (the user's lit versions): 5 frames, 0 unlit, 1 red,
 2 white, 3 blue, 4 yellow; uncompressed BGRA8888 with mipmaps (no image library: `imageio.py` reads PNG / BMP).
 The lit frames' alpha is 255, the unlit frame's 0: the lens VMTs' `$selfillum` mask, so a lit lens glows in the dark.
-cl_police's `AudioLightbarLens` material proxy picks each lens's frame as the bar is drawn.
+
+## The flashing (VMTs and skins, no Lua)
+
+`python -I make_vmts.py <addons/police_lightbar/materials/police_lightbar> police_lightbar_leds.qc` writes the lens
+materials and the QC's `$texturegroup`, then recompile (step 3 above). Skin 0 = unlit (`lens_*`); then police, fire,
+medical x CODE 2, CODE 3 x phase 0, 1 (13 skins), each lens on a `flash_<size>_<colour>_<code>_<a|b|c>` material whose
+proxies (CurrentTime, Add, WrapMinMax, LessOrEqual) run its pattern and set `$frame`: a / b the two wig-wag halves
+(b = half a period later), c the centre's double flash. Phase 1 = half a period later, i.e. a and b swapped, so it
+costs almost nothing: studiomdl allows 64 materials per model (this one has 51). The server sets the skin
+(`AudioEngine.SetLights` / `LightbarSkin`).
+
+`python -I check_vmts.py <materials dir> <the .mdl>` runs every skin's materials as Source's proxies do and compares each
+lens's frame with cl_police's pattern (which the glow and HUD follow) every 5 ms: must report 0 differences.

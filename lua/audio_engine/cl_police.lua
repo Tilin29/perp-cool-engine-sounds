@@ -2,7 +2,8 @@
 	Emergency lights (sh_police.lua, sv_police.lua): the flashing. The light key
 	(audio_engine_lightkey, default left shift) steps the driver's lights off -> CODE 2 -> CODE 3 -> off.
 
-	Patterns (each car offset in time, so a row of cars doesn't flash in step):
+	Patterns (half the cars run half a period later, AudioEngine.LightPhaseTime, so cars side by
+	side alternate rather than flash in step):
 	  CODE 2: slow wig-wag, the driver's outer modules and corners with the passenger's inner ones,
 	          then the other way round
 	  CODE 3: the same split as quad flashes, twice as fast, plus double flashes in the middle
@@ -12,9 +13,9 @@
 
 	How a lit module shows:
 	  - the LED bar (AudioEngine.LIGHTBAR_LED_MODEL, addons/police_lightbar): its lenses light
-	    themselves. Each lens's material has 5 frames (0 unlit, 1 red, 2 white, 3 blue, 4 yellow,
-	    police_lightbar/leds_large / leds_small) and the AudioLightbarLens material proxy below picks
-	    the frame as the bar is drawn, from its car's pattern and scheme. Nothing is drawn over it.
+	    themselves, all in its materials: the server sets the bar's skin for the car's scheme and
+	    mode (sv_police's AudioEngine.SetLights), whose lens materials run the pattern with Source's
+	    own VMT proxies. No Lua here; nothing is drawn over it.
 	  - PERP's original bar (the addon not installed) and the built-in lamps (AudioEngine.BUILTIN_LIGHTS,
 	    a car whose audio_lightbar is itself, placed by its body bone): their lenses are plain
 	    textures, so a lit one gets a drawn glowing quad.
@@ -35,7 +36,6 @@ local DLIGHT_DIST = 2500
 local MAX_DLIGHT_CARS = 8
 local DLIGHT_BASE = 0x40000
 local LENS_HEIGHT = 1.7
-local PHASE_PER_INDEX = 0.37
 local DLIGHT = { brightness = 2, decay = 4000, size = 360, life = 0.05 }
 -- the glow's place on the bar: over its middle
 local BAR_LIGHT_OFFSET = Vector(0, 0, 14)
@@ -52,8 +52,6 @@ local COLORS = {
 	blue = Color(25, 70, 255),
 	yellow = Color(255, 170, 10),
 }
--- the LED bar's lens texture frame per colour (police_lightbar/leds_*.vtf)
-local LENS_FRAMES = { red = 1, white = 2, blue = 3, yellow = 4 }
 -- the bar's colour per side (-1 driver's, 0 centre, 1 passenger's) by scheme
 local SCHEME_SIDE_NAMES = {
 	police = { [-1] = "red", [0] = "white", [1] = "blue" },
@@ -97,8 +95,9 @@ local function isLit(lamp, mode, phaseTime)
 	return timeInHalf % CODE3.flashPeriod < CODE3.flashOnTime
 end
 
-local function phaseTimeOf(vehicle)
-	return CurTime() + vehicle:EntIndex() * PHASE_PER_INDEX
+-- (the same phase as the LED bar's skins: sh_police)
+local function phaseTimeOf(vehicle, mode)
+	return AudioEngine.LightPhaseTime(vehicle, mode)
 end
 
 -- whether a side's outer lamps (-1 driver's / red, 1 passenger's / blue) are lit on a car right now,
@@ -109,38 +108,8 @@ function AudioEngine.PoliceSideLit(vehicle, side)
 	if mode == 0 then return false end
 	outerLamp.side = side
 
-	return isLit(outerLamp, mode, phaseTimeOf(vehicle))
+	return isLit(outerLamp, mode, phaseTimeOf(vehicle, mode))
 end
-
---[[
-	The LED bar's lenses: its lens materials name this proxy with their lens ("lens" "front_driver_outer",
-	AudioEngine.LIGHTBAR_MODULES[i].lens). As the bar is drawn it sets the lens's texture frame: unlit,
-	or the colour of its side while its module is lit. The bar is parented to its car.
-]]
-local lampByLens = {}
-for _, lamp in ipairs(AudioEngine.LIGHTBAR_MODULES) do
-	if lamp.lens then lampByLens[lamp.lens] = lamp end
-end
-
-local function lensFrame(lightbar, lamp)
-	if not lamp or not IsValid(lightbar) then return 0 end
-	local vehicle = lightbar:GetParent()
-	if not IsValid(vehicle) then return 0 end
-	local mode = vehicle:GetNW2Int("audio_lights", 0)
-	if mode == 0 or not isLit(lamp, mode, phaseTimeOf(vehicle)) then return 0 end
-
-	return LENS_FRAMES[SCHEME_SIDE_NAMES[schemeOf(vehicle)][lamp.side]] or 0
-end
-
-matproxy.Add({
-	name = "AudioLightbarLens",
-	init = function(self, material, values)
-		self.lamp = lampByLens[string.lower(values.lens or "")]
-	end,
-	bind = function(self, material, entity)
-		material:SetInt("$frame", lensFrame(entity, self.lamp))
-	end,
-})
 
 -- cars with lights near enough to matter, refreshed now and then rather than searched every frame
 local emergencyCars = {}
@@ -220,7 +189,7 @@ hook.Add("PostDrawTranslucentRenderables", "audio_engine_police", function(drawi
 		if not entry.lensesLightThemselves then
 			local mode = lightModeOf(entry)
 			if mode > 0 and entry.lightbar:GetPos():DistToSqr(eyePosition) < DRAW_DIST * DRAW_DIST then
-				local phaseTime = phaseTimeOf(entry.vehicle)
+				local phaseTime = phaseTimeOf(entry.vehicle, mode)
 				if entry.lamps then drawBuiltin(entry, mode, phaseTime) else drawBar(entry, mode, phaseTime) end
 			end
 		end
@@ -298,7 +267,8 @@ hook.Add("Think", "audio_engine_police", function()
 	table.sort(litCarsByDistance, function(first, second) return first.distanceSqr < second.distanceSqr end)
 	for i = 1, math.min(#litCarsByDistance, MAX_DLIGHT_CARS) do
 		local entry = litCarsByDistance[i]
-		lightSurroundings(entry, lightModeOf(entry), phaseTimeOf(entry.vehicle))
+		local mode = lightModeOf(entry)
+		lightSurroundings(entry, mode, phaseTimeOf(entry.vehicle, mode))
 	end
 end)
 

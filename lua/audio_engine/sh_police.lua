@@ -16,7 +16,8 @@
 
 	With the police_lightbar addon (addons/police_lightbar in this repo) the bar is its rebuild,
 	models/perpheads/props/police_lightbar_leds.mdl: the same body, every LED lens on its own
-	material (police_lightbar/lens_*), so cl_police can light each lens itself (SetSubMaterial).
+	material, and the flashing done by its materials: the bar's skin (AudioEngine.LightbarSkin, set
+	by the server) swaps each lens to a material whose VMT proxies run its CODE 2 / CODE 3 pattern.
 ]]
 local AudioEngine = AUDIO_ENGINE
 
@@ -175,6 +176,37 @@ for _, job in ipairs(AudioEngine.JOB_VEHICLES) do
 end
 
 AudioEngine.LIGHT_MODES = { "CODE 2", "CODE 3" }
+
+--[[
+	The LED bar's skins (dev/police_lightbar/make_vmts.py writes them): 0 = unlit, then per scheme in
+	LIGHTBAR_SKIN_SCHEMES, per light mode (CODE 2, CODE 3), per phase (0, 1). Phase 1 runs the pattern
+	half a period later (cars side by side alternate instead of flashing together): the car's
+	EntIndex picks it, and cl_police's drawn lights and glow follow the same (AudioEngine.LightPhaseTime).
+]]
+AudioEngine.LIGHTBAR_SKIN_SCHEMES = { "police", "fire", "medical" }
+AudioEngine.LIGHT_PERIODS = { 1.2, 0.5 }   -- CODE 2, CODE 3 (cl_police's CODE2 / CODE3, the VMTs' timings)
+
+function AudioEngine.LightPhase(vehicle)
+	return vehicle:EntIndex() % 2
+end
+
+-- the time a car's light pattern is at (its phase offset added)
+function AudioEngine.LightPhaseTime(vehicle, mode)
+	local period = AudioEngine.LIGHT_PERIODS[mode]
+	if not period or AudioEngine.LightPhase(vehicle) == 0 then return CurTime() end
+	return CurTime() + period / 2
+end
+
+function AudioEngine.LightbarSkin(vehicle, mode)
+	if mode < 1 or mode > #AudioEngine.LIGHT_MODES then return 0 end
+	local schemeIndex = 1
+	local scheme = vehicle:GetNW2String("audio_lightscheme", "police")
+	for index, name in ipairs(AudioEngine.LIGHTBAR_SKIN_SCHEMES) do
+		if name == scheme then schemeIndex = index end
+	end
+
+	return 1 + ((schemeIndex - 1) * #AudioEngine.LIGHT_MODES + (mode - 1)) * 2 + AudioEngine.LightPhase(vehicle)
+end
 
 --[[
 	LED modules of the bar: pos = lens centre, n = outward normal, w = width.

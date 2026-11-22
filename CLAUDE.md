@@ -62,8 +62,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
   Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
-  off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the LED bar (addons/police_lightbar) lights its own lenses (texture frames
-  picked by the `AudioLightbarLens` material proxy); PERP's original bar and built-in lamps get a drawn additive lens quad per lit module; the glow
+  off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the LED bar (addons/police_lightbar) lights its own lenses (its skin's
+  VMTs); PERP's original bar and built-in lamps get a drawn additive lens quad per lit module; the glow
   is one dynamic light per car (the nearest `MAX_DLIGHT_CARS` 8) over the bar's middle in the colour flashing then (the user: one light source,
   not a sprite per lens + a light per side); key `audio_engine_lightkey` (default lshift;
   no police script has a Source boost block, so shift is free). HUD shows the mode, plus whatever the `audio_engine/lights-label`
@@ -427,11 +427,15 @@ The core never names it. The dev harnesses still use it as their test car: they 
   turned for `$staticprop` (studiomdl turns it +90) and wound for studiomdl; checked against the original: all 608 triangles in place,
   same winding, same uvs. Left out (unused by us): screen bodygroups, 11 message skins, the screen bone, screenflip.
   `AudioEngine.LIGHTBAR_MODEL` = it when `util.IsValidModel`, else the original (`LIGHTBAR_ORIGINAL_MODEL`).
-- The lenses light themselves: `materials/police_lightbar/leds_large.vtf` (faces) / `leds_small.vtf` (corners) have 5 frames (0 unlit,
-  1 red, 2 white, 3 blue, 4 yellow; the user's PNGs, `dev/police_lightbar/make_vtf.py`), lit frames' alpha = the `$selfillum` mask. Each
-  lens VMT names cl_police's Lua material proxy `AudioLightbarLens` with its lens; as the bar is drawn the proxy sets `$frame` from its
-  parent car's light mode, scheme and pattern (`isLit`, the car's phase offset kept). Police / EMS / fire, CODE 2 / CODE 3: all from the
-  same frames (not baked animations: those run on global time, every car in step, and 90 materials). Nothing is drawn over this bar.
+- The lenses light themselves, in VMTs (the user: not Lua; a Lua material proxy was tried first): `materials/police_lightbar/leds_large.vtf`
+  (faces) / `leds_small.vtf` (corners) have 5 frames (0 unlit, 1 red, 2 white, 3 blue, 4 yellow; the user's PNGs, `dev/police_lightbar/make_vtf.py`),
+  lit frames' alpha = the `$selfillum` mask. The model's 13 skins (`$texturegroup`, `make_vmts.py`): 0 unlit, then police / fire / medical x
+  CODE 2 / CODE 3 x phase 0 / 1, each lens on a `flash_<size>_<colour>_<code>_<a|b|c>` VMT whose Source proxies (CurrentTime, Add, WrapMinMax,
+  LessOrEqual) run its pattern into `$frame`. The server sets the skin with the mode: `AudioEngine.SetLights(vehicle, mode)` (sv_police; every
+  `audio_lights` change goes through it), `AudioEngine.LightbarSkin` (sh_police). Phase = EntIndex % 2, half a period later
+  (`AudioEngine.LightPhaseTime`, which cl_police's drawn lights, glow and the HUD's `PoliceSideLit` use too): neighbours alternate. It was 4
+  offsets of 0.37 s, but studiomdl caps a model at 64 materials (4 needed 121; 2 = a/b swapped, 51). `check_vmts.py` simulates the proxies
+  against cl_police's `isLit`: 0 differences. Nothing is drawn over this bar.
 - Copies of the bar's 6 VTFs at their original path `materials/models/jarheads/props/police_lightbar/` (housing, housing_nrm, housing_exp,
   led_small, led_large, plastic) for the user to repaint: they replace the workshop's by path (the lens VMTs use led_small / led_large).
   Not yet confirmed in game that the addon's copy wins over the workshop item's.

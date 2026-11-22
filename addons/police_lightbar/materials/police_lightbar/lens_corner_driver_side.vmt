@@ -1,15 +1,7 @@
-// one LED lens of the bar: frames 0 unlit, 1 red, 2 white, 3 blue, 4 yellow (lit frames' alpha = self-illumination);
-// the frame is picked by the audio engine's AudioLightbarLens proxy (cl_police.lua) from the car's light pattern
+// a bar lens, unlit (skin 0); the lit skins swap in flash_* materials
 "VertexlitGeneric"
 {
 	"$basetexture" "police_lightbar/leds_small"
 	"$selfillum" "1"
 	"$frame" "0"
-	"Proxies"
-	{
-		"AudioLightbarLens"
-		{
-			"lens" "corner_driver_side"
-		}
-	}
 }
