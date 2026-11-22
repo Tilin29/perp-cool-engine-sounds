@@ -5,7 +5,7 @@
 # the pattern half a period later, so cars side by side alternate rather than flash together. That is
 # the other wig-wag half's material, so it costs almost no materials: studiomdl allows 64 per model.
 # Keep SCHEMES and the timings in step with sh_police.lua / cl_police.lua.
-# Usage: python -I make_vmts.py <addons/police_lightbar/materials/police_lightbar> <qc to update>
+# Usage: python -I make_vmts.py <materials/police_lightbar> <qc to update>
 import sys, re
 OUT, QC = sys.argv[1], sys.argv[2]
 FRAMES = {'red': 1, 'white': 2, 'blue': 3, 'yellow': 4}

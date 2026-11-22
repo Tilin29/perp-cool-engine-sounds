@@ -12,7 +12,7 @@
 	medical red / white, per side of the bar; built-in lamps keep their lens's own colour.
 
 	How a lit module shows:
-	  - the LED bar (AudioEngine.LIGHTBAR_LED_MODEL, addons/police_lightbar): its lenses light
+	  - the LED bar (AudioEngine.LIGHTBAR_LED_MODEL, in this addon): its lenses light
 	    themselves, all in its materials: the server sets the bar's skin for the car's scheme and
 	    mode (sv_police's AudioEngine.SetLights), whose lens materials run the pattern with Source's
 	    own VMT proxies. No Lua here; nothing is drawn over it.

@@ -31,7 +31,7 @@ def read(name):
     o, s = index[name]; gma.seek(o); return gma.read(s)
 b = 'models/perpheads/props/police_lightbar'
 oMats, _, orig = load(read(b + '.mdl'), read(b + '.vvd'), read(b + '.dx90.vtx'))
-n = 'X:/SteamLibrary/steamapps/common/GarrysMod/garrysmod/addons/cool_engine_sounds_perpcars/addons/police_lightbar/models/perpheads/props/police_lightbar_leds'
+n = 'X:/SteamLibrary/steamapps/common/GarrysMod/garrysmod/addons/cool_engine_sounds_perpcars/models/perpheads/props/police_lightbar_leds'
 nMats, nRot, new = load(open(n + '.mdl', 'rb').read(), open(n + '.vvd', 'rb').read(), open(n + '.dx90.vtx', 'rb').read())
 import math
 oRot = (0, 0, math.pi / 2)   # the rebuild is the original's mesh turned +90 (mesh (x, y) -> (-y, x))

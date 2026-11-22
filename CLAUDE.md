@@ -57,12 +57,12 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   (GTA IV ports turn car.body 90 deg; drawn through `GetBoneMatrix`), picked from the lens material's vertices and texture colours
   with an MDL/VVD reader (headlights, tail lights, indicators left out); such a car is its own NW2 `audio_lightbar`; `AudioEngine.POLICE_BY_SCRIPT` from `AudioEngine.JOB_VEHICLES`; `AudioEngine.LIGHTBAR_MODULES` = the LED
   lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669 (its textures live in that item's content.gma under
-  materials/models/jarheads/props/police_lightbar/; copies of the 6 the bar uses and an LED rebuild of it are the separate
-  addon `addons/police_lightbar/` (see "Police lightbar" below)): model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
+  materials/models/jarheads/props/police_lightbar/; copies of the 6 the bar uses and an LED rebuild of it are in this
+  addon (see "Police lightbar" below)): model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
   turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
   Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
-  off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the LED bar (addons/police_lightbar) lights its own lenses (its skin's
+  off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the LED bar (this addon's) lights its own lenses (its skin's
   VMTs); nothing is drawn over a bar any more, PERP's original included (the user: no overlaid colours); built-in lamps still get a drawn
   additive lens quad per lit module; sv_police prints which bar model is in use at load; the glow
   is one dynamic light per car (the nearest `MAX_DLIGHT_CARS` 8) in the colour flashing then, over the side it flashes on (the user:
@@ -421,11 +421,10 @@ once `AUDIO_ENGINE.RegisterCar` exists (autorun goes in name order, else at Init
 The core never names it. The dev harnesses still use it as their test car: they dofile sh_car.lua after sh_config (dev/build.py inlines it too).
 `dev/baker/check_syntax.js` also compiles `addons/*/lua`.
 
-## Police lightbar (separate addon)
-`addons/police_lightbar/`: its own GMod addon like the SL65, not part of the engine. GMod doesn't load addons nested in an addon: on the
-user's machine `garrysmod/addons/police_lightbar` is a copy of it: `dev/police_lightbar/install.cmd` (robocopy /MIR) refreshes it, then
-restart GMod. A directory junction there wasn't mounted (the server reported the model missing). Without it the cars get PERP's original
-bar, unlit; sv_police's load message says whether the LED model is missing from disk or there but not loadable.
+## Police lightbar (in this addon)
+The light bar's files are part of this addon (`models/`, `materials/`; the user: no separate addon, no install step), mounted with it:
+`models/perpheads/props/police_lightbar_leds.mdl`, `materials/police_lightbar/` (lens / flash VMTs, `leds_large` / `leds_small` VTFs) and
+`materials/models/jarheads/props/police_lightbar/` (the repaintable copies). Tools: `dev/police_lightbar/` (README there).
 - The rebuild `models/perpheads/props/police_lightbar_leds.mdl`: PERP's bar (workshop 2897742669) body only, every LED lens on its own
   material `materials/police_lightbar/lens_<face>_<side>_<inner|outer>` / `lens_front_centre` / `lens_corner_<side>_<front|side|rear>`
   (15; only the front face has a centre lens), so each lens can be lit by itself. In the original all lenses shared 2 materials (`LEDs` /
@@ -447,7 +446,7 @@ bar, unlit; sv_police's load message says whether the LED model is missing from 
 - Copies of the bar's 6 VTFs at their original path `materials/models/jarheads/props/police_lightbar/` (housing, housing_nrm, housing_exp,
   led_small, led_large, plastic) for the user to repaint: they replace the workshop's by path (the lens VMTs use led_small / led_large).
   Not yet confirmed in game that the addon's copy wins over the workshop item's.
-- Players need the addon downloaded (workshop upload or resource.AddFile) to see any of it.
+- Players need this addon's content (workshop) to see any of it; without the model the cars get PERP's original bar, unlit.
 
 ## Police siren (separate module, may not stay)
 Own loader `lua/autorun/police_siren_init.lua`, files in `lua/police_siren/`, studio in `dev/siren_studio/`: delete those three

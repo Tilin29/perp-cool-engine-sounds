@@ -14,8 +14,8 @@
 	base at z 0, lenses z 3.3..5.0: the same way round as the TDM cars (nose +Y, -X the
 	driver's side), so it mounts unturned.
 
-	With the police_lightbar addon (addons/police_lightbar in this repo) the bar is its rebuild,
-	models/perpheads/props/police_lightbar_leds.mdl: the same body, every LED lens on its own
+	The bar is this addon's rebuild of it, models/perpheads/props/police_lightbar_leds.mdl
+	(materials/police_lightbar, dev/police_lightbar): the same body, every LED lens on its own
 	material, and the flashing done by its materials: the bar's skin (AudioEngine.LightbarSkin, set
 	by the server) swaps each lens to a material whose VMT proxies run its CODE 2 / CODE 3 pattern.
 ]]
