@@ -30,10 +30,12 @@ index = {n: (o, s) for n, o, s in json.load(open('index.json'))}
 def read(name):
     o, s = index[name]; gma.seek(o); return gma.read(s)
 b = 'models/perpheads/props/police_lightbar'
-oMats, oRot, orig = load(read(b + '.mdl'), read(b + '.vvd'), read(b + '.dx90.vtx'))
+oMats, _, orig = load(read(b + '.mdl'), read(b + '.vvd'), read(b + '.dx90.vtx'))
 n = 'X:/SteamLibrary/steamapps/common/GarrysMod/garrysmod/addons/cool_engine_sounds_perpcars/addons/police_lightbar/models/perpheads/props/police_lightbar_leds'
 nMats, nRot, new = load(open(n + '.mdl', 'rb').read(), open(n + '.vvd', 'rb').read(), open(n + '.dx90.vtx', 'rb').read())
-print('original root rotation', [round(r, 4) for r in oRot], ' new', [round(r, 4) for r in nRot])
+import math
+oRot = (0, 0, math.pi / 2)   # the original is drawn turned +90 (mesh (x, y) -> (-y, x))
+print('new root rotation', [round(r, 4) for r in nRot])
 print('new materials', nMats)
 import math
 def draw(p, rot):   # yaw only
@@ -47,8 +49,23 @@ flipped = collections.Counter(canon([draw(p, nRot) for p in reversed(t)]) for _,
 print('triangles', sum(o.values()), sum(nw.values()), ' same winding', sum((o & nw).values()), ' reversed', sum((o & flipped).values()))
 lens = collections.Counter(m for m, _ in new if m.startswith('lens'))
 print('lens materials with 2 triangles each:', len(lens), set(lens.values()))
-for extra in (0, 90, 180, -90):
-    r = math.radians(extra)
-    nw2 = collections.Counter(canon([draw(draw(p, nRot), (0, 0, r)) for p in t]) for _, t in new)
-    fl2 = collections.Counter(canon([draw(draw(p, nRot), (0, 0, r)) for p in reversed(t)]) for _, t in new)
-    print('new turned', extra, 'deg: same', sum((o & nw2).values()), 'reversed', sum((o & fl2).values()))
+
+# every lens where sh_police's module table says (model space: front +Y, driver's side -X)
+table = {}
+for face_side in (1, -1):
+    face = 'front' if face_side > 0 else 'rear'
+    if face_side > 0: table['lens_front_centre'] = (0, 7.6)
+    for side, name in ((-1, 'driver'), (1, 'passenger')):
+        table[f'lens_{face}_{name}_inner'] = (10 * side, 7.6 * face_side)
+        table[f'lens_{face}_{name}_outer'] = (19.35 * side, 7.6 * face_side)
+for side, name in ((-1, 'driver'), (1, 'passenger')):
+    table[f'lens_corner_{name}_front'] = (26.7 * side, 5.2)
+    table[f'lens_corner_{name}_side'] = (29.6 * side, -1)
+    table[f'lens_corner_{name}_rear'] = (26.6 * side, -6.2)
+worst = 0
+for material in sorted(table):
+    pts = [p for m, t in new if m == material for p in t]
+    cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+    dist = math.hypot(cx - table[material][0], cy - table[material][1]); worst = max(worst, dist)
+    if dist > 1.5: print('  far from the table:', material, (round(cx, 1), round(cy, 1)), table[material])
+print('lens centres vs the module table: worst', round(worst, 2), 'units')

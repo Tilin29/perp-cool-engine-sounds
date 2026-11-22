@@ -424,12 +424,13 @@ user's machine `garrysmod/addons/police_lightbar` is a copy of it: `dev/police_l
 restart GMod. A directory junction there wasn't mounted (the server reported the model missing). Without it the cars get PERP's original
 bar, unlit; sv_police's load message says whether the LED model is missing from disk or there but not loadable.
 - The rebuild `models/perpheads/props/police_lightbar_leds.mdl`: PERP's bar (workshop 2897742669) body only, every LED lens on its own
-  material `materials/police_lightbar/lens_<face>_<side>_<inner|outer>` / `lens_rear_centre` / `lens_corner_<side>_<front|side|rear>`
-  (15; the front face has no centre lens), so each lens can be lit by itself. In the original all lenses shared 2 materials (`LEDs` /
+  material `materials/police_lightbar/lens_<face>_<side>_<inner|outer>` / `lens_front_centre` / `lens_corner_<side>_<front|side|rear>`
+  (15; only the front face has a centre lens), so each lens can be lit by itself. In the original all lenses shared 2 materials (`LEDs` /
   `LEDs2`) and every lens quad mapped the whole texture (UV 0..1): no texture could light them separately. Made by our own decompiler
-  (`dev/police_lightbar/`, README there; no Crowbar): SMD in the pose the game draws (the original's root bone turns its mesh -90 deg),
-  turned for `$staticprop` (studiomdl turns it +90) and wound for studiomdl; checked against the original: all 608 triangles in place,
-  same winding, same uvs. Left out (unused by us): screen bodygroups, 11 message skins, the screen bone, screenflip.
+  (`dev/police_lightbar/`, README there; no Crowbar): SMD = the mesh as stored (the game draws the original's mesh turned +90 deg:
+  (x, y) -> (-y, x), its idle pose with poseToBone; -90 was assumed first and the bar came out back to front in game, the user), which
+  studiomdl's `$staticprop` turns +90 itself; wound for studiomdl; checked against the original (`verify.py`): all 608 triangles in place,
+  same winding, same uvs, every lens within 0.5 of sh_police's module table (written in model space now). Left out (unused by us): screen bodygroups, 11 message skins, the screen bone, screenflip.
   `AudioEngine.LIGHTBAR_MODEL` = it when `util.IsValidModel`, else the original (`LIGHTBAR_ORIGINAL_MODEL`).
 - The lenses light themselves, in VMTs (the user: not Lua; a Lua material proxy was tried first): `materials/police_lightbar/leds_large.vtf`
   (faces) / `leds_small.vtf` (corners) have 5 frames (0 unlit, 1 red, 2 white, 3 blue, 4 yellow; the user's PNGs, `dev/police_lightbar/make_vtf.py`),

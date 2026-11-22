@@ -10,7 +10,7 @@
 	scheme: the colours and the siren's tones: "police" (red / white / blue, the default),
 	"fire" (red / yellow), "medical" (red / white). Networked as NW2 audio_lightscheme.
 
-	Lightbar model space: long axis X (-29.7..29.7), front +Y, the message board at the rear,
+	Lightbar model space: long axis X (-29.7..29.7), front +Y,
 	base at z 0, lenses z 3.3..5.0: the same way round as the TDM cars (nose +Y, -X the
 	driver's side), so it mounts unturned.
 
@@ -173,6 +173,71 @@ for _, job in ipairs(AudioEngine.JOB_VEHICLES) do
 		police.skin = job[4]
 		AudioEngine.POLICE_BY_SCRIPT[job[3]] = police
 	end
+end
+
+AudioEngine.LIGHT_MODES = { "CODE 2", "CODE 3" }
+
+--[[
+	The LED bar's skins (dev/police_lightbar/make_vmts.py writes them): 0 = unlit, then per scheme in
+	LIGHTBAR_SKIN_SCHEMES, per light mode (CODE 2, CODE 3), per phase (0, 1). Phase 1 runs the pattern
+	half a period later (cars side by side alternate instead of flashing together): the car's
+	EntIndex picks it, and cl_police's drawn lights and glow follow the same (AudioEngine.LightPhaseTime).
+]]
+AudioEngine.LIGHTBAR_SKIN_SCHEMES = { "police", "fire", "medical" }
+AudioEngine.LIGHT_PERIODS = { 1.2, 0.5 }   -- CODE 2, CODE 3 (cl_police's CODE2 / CODE3, the VMTs' timings)
+
+function AudioEngine.LightPhase(vehicle)
+	return vehicle:EntIndex() % 2
+end
+
+-- the time a car's light pattern is at (its phase offset added)
+function AudioEngine.LightPhaseTime(vehicle, mode)
+	local period = AudioEngine.LIGHT_PERIODS[mode]
+	if not period or AudioEngine.LightPhase(vehicle) == 0 then return CurTime() end
+	return CurTime() + period / 2
+end
+
+function AudioEngine.LightbarSkin(vehicle, mode)
+	if mode < 1 or mode > #AudioEngine.LIGHT_MODES then return 0 end
+	local schemeIndex = 1
+	local scheme = vehicle:GetNW2String("audio_lightscheme", "police")
+	for index, name in ipairs(AudioEngine.LIGHTBAR_SKIN_SCHEMES) do
+		if name == scheme then schemeIndex = index end
+	end
+
+	return 1 + ((schemeIndex - 1) * #AudioEngine.LIGHT_MODES + (mode - 1)) * 2 + AudioEngine.LightPhase(vehicle)
+end
+
+--[[
+	LED modules of the bar, in its model space (front +Y, -X the driver's side): position = lens
+	centre, normal = outward, width. group: o outer, i inner, c centre, k corner; side -1 = driver's
+	side (red), 1 = passenger's side (blue), 0 = centre (white). lens = the module's own material on
+	the LED model (police_lightbar/lens_<lens>); only the front face has a centre lens (the rear's
+	centre module has none: nil).
+	(The original's mesh is drawn turned +90 deg about Z by its idle pose: mesh (x, y) -> model (-y, x).
+	This table was first written assuming -90 and the LED rebuild came out back to front, the user.)
+]]
+local MODULE_HEIGHT = 4.15
+local function lightbarModule(x, y, normalX, normalY, width, group, side, lens)
+	return { position = Vector(x, y, MODULE_HEIGHT), normal = Vector(normalX, normalY, 0), width = width, group = group, side = side, lens = lens }
+end
+
+local SIDE_NAMES = { [-1] = "driver", [1] = "passenger" }
+AudioEngine.LIGHTBAR_MODULES = {}
+for _, faceSide in ipairs({ 1, -1 }) do
+	local faceY = 7.6 * faceSide
+	local face = faceSide > 0 and "front" or "rear"
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(0, faceY, 0, faceSide, 10, "c", 0, faceSide > 0 and "front_centre" or nil))
+	for _, side in ipairs({ -1, 1 }) do
+		table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(10 * side, faceY, 0, faceSide, 9.5, "i", side, face .. "_" .. SIDE_NAMES[side] .. "_inner"))
+		table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(19.35 * side, faceY, 0, faceSide, 9, "o", side, face .. "_" .. SIDE_NAMES[side] .. "_outer"))
+	end
+end
+for _, side in ipairs({ -1, 1 }) do
+	local corner = "corner_" .. SIDE_NAMES[side]
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(26.7 * side, 5.2, 0.7 * side, 0.71, 4.9, "k", side, corner .. "_front"))
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(29.6 * side, -1, side, 0.05, 5, "k", side, corner .. "_side"))
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(26.6 * side, -6.2, 0.48 * side, -0.88, 4.8, "k", side, corner .. "_rear"))
 end
 
 AudioEngine.LIGHT_MODES = { "CODE 2", "CODE 3" }

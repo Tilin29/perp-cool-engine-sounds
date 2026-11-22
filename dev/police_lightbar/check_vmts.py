@@ -7,7 +7,7 @@ FRAMES = {'red': 1, 'white': 2, 'blue': 3, 'yellow': 4}
 SCHEMES = [('police', {-1: 'red', 0: 'white', 1: 'blue'}), ('fire', {-1: 'red', 0: 'yellow', 1: 'yellow'}), ('medical', {-1: 'red', 0: 'white', 1: 'white'})]
 CODE2, CODE3, PERIODS = dict(period=1.2, onTime=0.4), dict(period=0.5, flashPeriod=0.0625, flashOnTime=0.04, centre=0.035), [1.2, 0.5]
 def lens_info(name):
-    if name == 'rear_centre': return 0, 0
+    if name == 'front_centre': return 0, 0
     side = -1 if '_driver_' in name else 1
     return side, (-side if name.endswith('_inner') else side)
 def is_lit(side, half, mode, t):   # cl_police isLit

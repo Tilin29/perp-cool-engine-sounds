@@ -36,19 +36,20 @@ for k in range(I(vtx, lod)):
         for t in range(0, ni, 3):
             triangles.append((materials[meshMaterial[k]], [meshStart[k] + ids[idx[t + q]] for q in range(3)]))
 
-# the game draws the mesh turned -90 deg about Z by its root bone: (x, y) -> (y, -x). studiomdl turns a
-# $staticprop's SMD +90 deg, so the SMD is written turned -180 from the mesh: (x, y) -> (-x, -y)
-def toModel(x, y, z): return (-x, -y, z)
+# the game draws the original's mesh turned +90 deg about Z: (x, y) -> (-y, x) (its idle pose and poseToBone
+# together; -90 was the first guess and came out back to front in game, the user). studiomdl turns a
+# $staticprop's SMD +90 deg itself, so the SMD is the mesh as it is
+def toModel(x, y, z): return (x, y, z)
 
 def lensName(material, centre):
-    x, y, _ = centre            # mesh frame: x < 0 front, y < 0 driver's side
-    side = 'driver' if y < 0 else 'passenger'
+    x, y, _ = centre            # mesh frame, drawn as model (-y, x): x > 0 front (+Y), y > 0 driver's side (-X)
+    side = 'driver' if y > 0 else 'passenger'
     if material == 'LEDs2':
-        if abs(y) < 5: return 'lens_rear_centre'
-        face = 'front' if x < 0 else 'rear'
+        if abs(y) < 5: return 'lens_front_centre'
+        face = 'front' if x > 0 else 'rear'
         return f'lens_{face}_{side}_' + ('inner' if abs(y) < 14.8 else 'outer')
-    if x < -4: return f'lens_corner_{side}_front'
-    if x > 3: return f'lens_corner_{side}_rear'
+    if x > 3: return f'lens_corner_{side}_front'
+    if x < -4: return f'lens_corner_{side}_rear'
     return f'lens_corner_{side}_side'
 
 # lens quads: the two triangles sharing an edge, named by their centre

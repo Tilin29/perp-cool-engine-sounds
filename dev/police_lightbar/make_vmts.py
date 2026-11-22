@@ -22,7 +22,7 @@ for face in ('front', 'rear'):
         for ring in ('inner', 'outer'):
             s = SIDE[side]
             lenses.append((f'{face}_{side}_{ring}', 'large', s, -s if ring == 'inner' else s))
-lenses.append(('rear_centre', 'large', 0, 0))
+lenses.append(('front_centre', 'large', 0, 0))
 for side in ('driver', 'passenger'):
     for spot in ('front', 'side', 'rear'):
         lenses.append((f'corner_{side}_{spot}', 'small', SIDE[side], SIDE[side]))
