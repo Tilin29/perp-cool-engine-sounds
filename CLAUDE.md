@@ -266,7 +266,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   `audio_engine_hud_scale`; the 1000 x 460 ones all use A's box, so they sit in the same place). `audio_engine_cluster` 0..7 (the user's order: 1 = A, 2 = D,
   3 = A5, 4 = A3, 5 = A4, 6 = B, 7 = C; 0 = automatic = A; client, NOT archived: every load starts on 0).
   Clusters with emergency-light controls (`CLUSTERS[id].police`: A, D, A5) show them in a police car (NW2 `audio_lightscheme` "police" + a light bar: the 9 marked ones, not unmarked
-  cars): A becomes A2 (its palette `A2`, a metatable over `A`, + the panel), D shows LIGHTS (dot red/blue with the car's sides) / SIREN in its centre panel,
+  cars): A becomes A2 (its palette `A2`, a metatable over `A`, + the panel), D shows LIGHTS (dot red/blue with the car's sides) / SIREN in its centre panel (other cars: the panel shrinks to just round the fuel),
   A5 CODE 2 / CODE 3 and WAIL / YELP / PHASER buttons (LED strip, flashing with the lights) under its LCD; elsewhere the light mode stays in the status line.
   Every cluster has a check-engine lamp (the user added it to the design): lit while the engine isn't running (off / starting), `engine` in the cluster-lights hook.
   New clusters' dial numbers are ~3 px over the design's (as A's). A2's panel: WAIL / YELP / PHASER lit by the

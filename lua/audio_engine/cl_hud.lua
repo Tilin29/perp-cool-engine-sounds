@@ -1069,9 +1069,12 @@ local function drawModern(info, vehicle, police)
 		band(x, y, 185, 186, 0, 360, D.rim, 6)
 		band(x, y, 115.5, 116.5, 0, 360, D.innerRim, 6)
 	end
-	local panelX, panelY = place(416, 147)
-	draw.RoundedBox(max(1, floor(12 * pixel)), panelX, panelY + 10 * pixel, 168 * pixel, 166 * pixel, Color(0, 0, 0, 70))
-	draw.RoundedBox(max(1, floor(12 * pixel)), panelX, panelY, 168 * pixel, 166 * pixel, faded(D.face, 235))
+	-- the centre panel: full height with LIGHTS / SIREN, else just round the fuel block (207.5..252.5)
+	local panelTop, panelHeight = 147, 166
+	if not police then panelTop, panelHeight = 192, 76 end
+	local panelX, panelY = place(416, panelTop)
+	draw.RoundedBox(max(1, floor(12 * pixel)), panelX, panelY + 10 * pixel, 168 * pixel, panelHeight * pixel, Color(0, 0, 0, 70))
+	draw.RoundedBox(max(1, floor(12 * pixel)), panelX, panelY, 168 * pixel, panelHeight * pixel, faded(D.face, 235))
 	draw.NoTexture()
 
 	local revColor = info.rpm >= info.redline and D.red or D.accent
