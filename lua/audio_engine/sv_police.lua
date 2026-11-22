@@ -67,14 +67,14 @@ end)
 -- lua refresh: cars already out there
 for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do setupPolice(vehicle) end
 
--- which bar the cars get: the LED one only with the police_lightbar addon installed in garrysmod/addons
+-- which bar the cars get: the LED one (this addon's models/ and materials/), PERP's original if it's missing
 if AudioEngine.LIGHTBAR_MODEL == AudioEngine.LIGHTBAR_LED_MODEL then
 	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (lenses lit by its skins)")
 else
 	-- (not on disk = the addon isn't mounted; on disk but not valid = the game couldn't load the model)
 	local reason = file.Exists(AudioEngine.LIGHTBAR_LED_MODEL, "GAME")
 		and " is there but the game won't load it"
-		or " isn't mounted: install the police_lightbar addon (dev/police_lightbar/install.cmd) and restart"
+		or " isn't mounted: this addon's models/ folder is missing"
 	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (", AudioEngine.LIGHTBAR_LED_MODEL, reason, ")")
 end
 
