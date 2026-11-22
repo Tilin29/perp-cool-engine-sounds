@@ -39,7 +39,7 @@ AUDIO_ENGINE.PLAYER_SETTINGS = {
 	"audio_engine_hud", "audio_engine_units", "audio_engine_hud_scale", "audio_engine_cluster",
 	"audio_engine_predict", "audio_engine_predict_amount", "audio_engine_predict_others", "audio_engine_predict_debug",
 	"audio_engine_samplerate", "audio_engine_genbudget", "audio_engine_maxsounds", "audio_engine_baked",
-	"audio_engine_lightkey",
+	"audio_engine_lightkey", "audio_engine_indicator_volume",
 }
 AUDIO_ENGINE.SERVER_SETTINGS = {
 	"audio_engine_editor", "audio_engine_tuneaccess", "audio_engine_tunecooldown",

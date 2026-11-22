@@ -284,6 +284,25 @@ end)
 for _, entity in ipairs(ents.GetAll()) do track(entity) end
 
 ---------------------------------------------------------------------------
+-- the indicators (cl_hud's cluster lights): the driver's client sends them, NW2 audio_indicator
+-- (0 off, 1 left, 2 right, 3 hazards) and audio_indicator_at (CurTime it went on: the flash's start)
+-- let everyone in the car hear the tick in step
+---------------------------------------------------------------------------
+util.AddNetworkString("audio_engine_indicator")
+
+net.Receive("audio_engine_indicator", function(_, player)
+	local mode = net.ReadUInt(2)
+	local vehicle = player:GetVehicle()
+	if not IsValid(vehicle) or vehicle:GetClass() ~= "prop_vehicle_jeep" or vehicle:GetDriver() ~= player then return end
+	-- (only changes are sent; dropping one would leave the passengers' tick out of step)
+	if vehicle:GetNW2Int("audio_indicator", 0) == mode then return end
+	local now = CurTime()
+	vehicle:SetNW2Int("audio_indicator", mode)
+	-- (half the sender's ping back: the flash then starts when it did on the driver's screen)
+	vehicle:SetNW2Float("audio_indicator_at", now - player:Ping() / 2000)
+end)
+
+---------------------------------------------------------------------------
 -- engine tuning (the in-game Rev Bench menu)
 ---------------------------------------------------------------------------
 util.AddNetworkString("audio_engine_set")

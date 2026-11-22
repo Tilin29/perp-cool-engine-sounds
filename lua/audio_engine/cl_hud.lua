@@ -462,8 +462,10 @@ local function gearLabel(engineState)
 end
 
 --[[
-	The cluster's own lights, ready for PERP: nothing on the car itself is lit or networked, only
-	the lamps on the cluster follow the controls. Left click = left indicator, right click = right
+	The cluster's own lights, ready for PERP: nothing on the car itself is lit, only the lamps on the
+	cluster follow the controls. The indicators are networked (the driver's client sends them, the
+	server sets NW2 audio_indicator / audio_indicator_at) so that everyone in the car hears their tick
+	(below), on the same flash timing. Left click = left indicator, right click = right
 	indicator (pressed again, or the other one, it goes off / over), both together (within
 	BOTH_CLICK_WINDOW) = hazards, F = headlights; the handbrake lamp is Space. Where the PERP
 	gamemode's own vehicle methods are there (IsIndicating, GetIndicatorDirection (true = left),
@@ -477,10 +479,37 @@ local BLINK_PERIOD = 0.8         -- s, on for half of it
 local ownLights = setmetatable({}, { __mode = "k" })   -- vehicle -> { indicator = "left" | "right" | nil, hazards, headlights }
 local clickState = { left = false, right = false, pendingSide = nil, pendingAt = 0, f = false }
 
+-- AudioEngine.INDICATOR_MODES (sh_config): 0 off, 1 left, 2 right, 3 hazards
+local INDICATOR_LEFT, INDICATOR_RIGHT, INDICATOR_HAZARDS = 1, 2, 3
+
 local function lightsOf(vehicle)
 	local lights = ownLights[vehicle]
-	if not lights then lights = {}; ownLights[vehicle] = lights end
+	if not lights then
+		-- (a car got into with its indicators already on, by someone else or before a Lua refresh)
+		local mode = vehicle:GetNW2Int("audio_indicator", 0)
+		lights = { hazards = mode == INDICATOR_HAZARDS, sentMode = mode, since = vehicle:GetNW2Float("audio_indicator_at", 0) }
+		if mode == INDICATOR_LEFT then lights.indicator = "left" elseif mode == INDICATOR_RIGHT then lights.indicator = "right" end
+		ownLights[vehicle] = lights
+	end
 	return lights
+end
+
+local function indicatorModeOf(lights)
+	if lights.hazards then return INDICATOR_HAZARDS end
+	if lights.indicator == "left" then return INDICATOR_LEFT end
+	if lights.indicator == "right" then return INDICATOR_RIGHT end
+	return 0
+end
+
+-- lit now? Every indicator starts its flash lit when switched on (`since`, CurTime), and everyone
+-- in the car times it from that same moment
+local function indicatorLit(since)
+	return (CurTime() - since) % BLINK_PERIOD < BLINK_PERIOD / 2
+end
+
+-- the car's own indicator lamps (PERP's): they come with their own tick
+local function hasPerpIndicators(vehicle)
+	return vehicle.IsIndicating ~= nil or vehicle.HasHazardLights ~= nil
 end
 
 local function toggleIndicator(lights, side)
@@ -522,7 +551,111 @@ hook.Add("Think", "audio_engine_cluster_lights", function()
 
 	if fDown and not clickState.f then lights.headlights = not lights.headlights end
 	clickState.f = fDown
+
+	-- the indicators to the server, on a change (the flash starts lit now, on the driver's clock)
+	local mode = indicatorModeOf(lights)
+	if mode ~= lights.sentMode then
+		lights.sentMode = mode
+		lights.since = CurTime()
+		net.Start("audio_engine_indicator")
+		net.WriteUInt(mode, 2)
+		net.SendToServer()
+	end
 end)
+
+--[[
+	The indicators' tick: a relay's click as the lamps come on and a softer one as they go off, only
+	for whoever sits in the car (driver or passenger, a 2D sound on the listener: nobody outside hears
+	it). Generated here (sound.Generate) like every sound of the addon. Cars with PERP's own
+	indicators keep PERP's tick.
+]]
+local indicatorVolumeConVar = CreateClientConVar("audio_engine_indicator_volume", "0.5", true, false,
+	"Volume of the indicators' tick, heard by whoever sits in the car (0 = off)", 0, 1)
+local TICK_RATE = 44100
+local TICK_SECONDS = 0.06
+-- a relay's click: a few ms of noise ringing the case (damped sines { Hz, decay s, level }) and a thump
+local TICK_RESONANCES = { { 2300, 0.006, 1 }, { 3500, 0.004, 0.6 }, { 950, 0.010, 0.5 }, { 190, 0.008, 0.7 } }
+local TOCK_PITCH, TOCK_LEVEL = 0.8, 0.65      -- the release click: lower, softer
+AudioEngine.IndicatorSerial = (AudioEngine.IndicatorSerial or 0) + 1
+local tickSounds   -- { on = name, off = name } once generated
+
+local function renderClick(pitch, level)
+	local count = floor(TICK_SECONDS * TICK_RATE)
+	local samples, peak, seed = {}, 0, 12345
+	for index = 1, count do
+		local time = (index - 1) / TICK_RATE
+		-- the strike: a short decaying noise burst (a fixed LCG: every client renders the same click)
+		seed = (seed * 1103515245 + 12345) % 2147483648
+		local value = (seed / 1073741824 - 1) * math.exp(-time / 0.0004) * 0.6
+		for _, resonance in ipairs(TICK_RESONANCES) do
+			value = value + resonance[3] * math.exp(-time / resonance[2]) * sin(2 * math.pi * resonance[1] * pitch * time)
+		end
+		-- (a 0.2 ms fade in: no step at the start)
+		value = value * min(1, time / 0.0002)
+		samples[index] = value
+		peak = max(peak, abs(value))
+	end
+	for index = 1, count do samples[index] = samples[index] / peak * 0.9 * level end
+	return samples, count
+end
+
+local function buildTickSounds()
+	tickSounds = {}
+	for _, version in ipairs({ { "on", 1, 1 }, { "off", TOCK_PITCH, TOCK_LEVEL } }) do
+		local samples, count = renderClick(version[2], version[3])
+		local name = string.format("audio_engine_indicator_%d_%s", AudioEngine.IndicatorSerial, version[1])
+		sound.Generate(name, TICK_RATE, count / TICK_RATE, function(sampleIndex) return samples[sampleIndex + 1] or 0 end)
+		tickSounds[version[1]] = name
+	end
+end
+
+local tickPatches = {}
+local tickState = { car = nil, lit = false }
+local function playTick(which)
+	local player = LocalPlayer()
+	local volume = indicatorVolumeConVar:GetFloat()
+	if volume <= 0 then return end
+	if not tickSounds then buildTickSounds() end
+	local patch = tickPatches[which]
+	if not patch or patch.owner ~= player then
+		patch = { owner = player, sound = CreateSound(player, tickSounds[which]) }
+		patch.sound:SetSoundLevel(0)
+		tickPatches[which] = patch
+	end
+	patch.sound:Stop()
+	patch.sound:PlayEx(volume, 100)
+end
+
+hook.Add("Think", "audio_engine_indicator_tick", function()
+	local player = LocalPlayer()
+	local car = IsValid(player) and AudioEngine.RiddenCar and AudioEngine.RiddenCar(player)
+	if not IsValid(car) or hasPerpIndicators(car) then tickState.car = nil; return end
+	-- the driver's own state at once, passengers the server's
+	local mode, since
+	local own = player:GetVehicle() == car and ownLights[car]
+	if own then
+		mode, since = own.sentMode or 0, own.since or 0
+	else
+		mode, since = car:GetNW2Int("audio_indicator", 0), car:GetNW2Float("audio_indicator_at", 0)
+	end
+	local lit = mode ~= 0 and indicatorLit(since)
+	-- (getting in: no click for a flash already showing)
+	if tickState.car ~= car then tickState.car, tickState.lit = car, lit; return end
+	if lit ~= tickState.lit then
+		tickState.lit = lit
+		playTick(lit and "on" or "off")
+	end
+end)
+
+-- "clean up everything" and a typed stopsound lose sound.Generate data: built again under a new
+-- serial (the names can't be reused), as the siren and horn do
+local function rebuildTicks()
+	for _, patch in pairs(tickPatches) do patch.sound:Stop() end
+	AudioEngine.IndicatorSerial = AudioEngine.IndicatorSerial + 1
+	tickSounds, tickPatches = nil, {}
+end
+hook.Add("PostCleanupMap", "audio_engine_indicator_tick", rebuildTicks)
+hook.Add("audio_engine/restart-sounds", "audio_engine_indicator_tick", rebuildTicks)
 
 local hookLights = {}
 --[[
@@ -693,9 +826,9 @@ local function readState(player, vehicle, car, deltaTime)
 	state.fuel = hookLights.fuel and clamp(hookLights.fuel, 0, 1) or 1
 	state.lowFuel = hookLights.fuel ~= nil and hookLights.fuel < 0.1
 	state.fuelShown = state.fuelShown + (state.fuel - state.fuelShown) * min(1, deltaTime * 2)
-	-- (PERP keeps the flash in step with its own lamps and tick sound)
+	-- (PERP keeps the flash in step with its own lamps and tick sound; ours runs from when it went on)
 	local blinkOn = vehicle.indicatorOn
-	if blinkOn == nil then blinkOn = RealTime() % BLINK_PERIOD < BLINK_PERIOD / 2 end
+	if blinkOn == nil then blinkOn = indicatorLit(own.since or 0) end
 	state.left = blinkOn and (hookLights.hazards or hookLights.left) or false
 	state.right = blinkOn and (hookLights.hazards or hookLights.right) or false
 	state.headlights = hookLights.headlights or false
