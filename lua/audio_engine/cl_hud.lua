@@ -80,7 +80,7 @@ local FONTS = {
 	F_Scale = { 21, 400, false, 3 }, F_Label = { 11, 400 }, F_Unit = { 16, 400, false, 3 }, F_Fuel = { 13, 400 },
 	-- D2 (W): wide-screen (Roboto for the design's Inter Tight and Barlow: rounder digits than Roboto Condensed, the user's)
 	W_Label = { 13, 600, false, nil, "Roboto" }, W_Big = { 58, 600, false, nil, "Roboto" }, W_Gear = { 13, 600, false, nil, "Roboto" },
-	W_GearOn = { 17, 600, false, 3, "Roboto" }, W_PanelGear = { 26, 600, false, nil, "Roboto" }, W_Percent = { 15, 600, false, nil, "Roboto" },
+	W_GearOn = { 17, 600, false, 3, "Roboto" }, W_PanelGear = { 24, 600, false, nil, "Roboto" }, W_Percent = { 15, 600, false, nil, "Roboto" },
 	W_Tiny = { 11, 600, false, nil, "Roboto" }, W_Mode = { 20, 600, false, nil, "Roboto" }, W_Message = { 13, 500, false, nil, "Roboto" },
 }
 local fontScales = {}
@@ -1469,8 +1469,8 @@ local function drawDigital(info)
 end
 
 ---------------------------------------------------------------------------
--- D2: wide-screen (two round dark faces, speed and revs as rings of bars, a centre panel between
--- them: gear, fuel, LIGHTS / SIREN in an emergency car, warnings)
+-- D2: wide-screen (two round dark faces, revs and speed as rings of bars, a centre panel between
+-- them with every lamp: indicators, gear, fuel, LIGHTS / SIREN in an emergency car, warnings, lamp row)
 ---------------------------------------------------------------------------
 local W = {
 	blue = rgb("4aa8ff"), orange = rgb("ff8a4a"), red = rgb("ff3b30"), green = rgb("4ade80"), amber = rgb("ffb53a"),
@@ -1492,21 +1492,14 @@ local W_CENTRE_Y, W_BARS = 226, 64
 local W_RPM_X, W_SPEED_X = 262, 738   -- (the faces 8 px from the centre panel: compact, the user's; were 230, 770)
 -- design px: a LIGHTS / SIREN row, the warning row (its divider + 8 + the icon), "Systems OK", the gap between rows
 local W_BLOCK, W_MESSAGE, W_READY, W_GAP = 36, 29, 16, 8
+-- design px: the centre panel's inner box, between its top row (to 140) and its lamp row (from 311), 8 from each
+local W_BOX_TOP, W_BOX_BOTTOM = 148, 303
 
 -- a rounded box in design px (draw.RoundedBox leaves its corner texture set)
 local function roundedBox(radius, x, y, width, height, color)
 	local screenX, screenY = place(x, y)
 	draw.RoundedBox(max(1, floor(radius * pixel + 0.5)), screenX, screenY, width * pixel, height * pixel, color)
 	draw.NoTexture()
-end
-
--- a dark pod behind the lamps outside the faces, a box with round ends (`width` x `height`, centred):
--- the lamps' grey unlit colour was lost against bright scenery (the user)
-local function lampPod(centreX, centreY, width, height)
-	local radius = min(width, height) / 2
-	roundedBox(radius, centreX - width / 2, centreY - height / 2 + 4, width, height, Color(0, 0, 0, 80))
-	roundedBox(radius, centreX - width / 2, centreY - height / 2, width, height, W.rim)
-	roundedBox(radius - 1, centreX - width / 2 + 1, centreY - height / 2 + 1, width - 2, height - 2, W.face)
 end
 
 -- a ring of W_BARS bars from -135 to 135 degrees, lit up to `share` (red from `redFrom`, a share too)
@@ -1591,28 +1584,31 @@ local function drawWide(info, vehicle, police)
 		end
 	end
 
-	-- lamps: indicators over the panel, handbrake / headlights bottom left, engine / low fuel
-	-- bottom right, each on its dark pod
-	lampPod(470, 82, 40, 40)
-	lampPod(530, 82, 40, 40)
-	lampPod(100.5, 341, 40, 72)
-	lampPod(901, 340.5, 40, 72)
-	if info.left then indicatorGlow(470, 82, 13, W.green) end
-	ICONS.arrowA(470, 82, 24, info.left and W.green or W.off, true)
-	if info.right then indicatorGlow(530, 82, 13, W.green) end
-	ICONS.arrowA(530, 82, 24, info.right and W.green or W.off, false)
-	ICONS.handbrake(101, 326, 26, info.handbrake and W.red or W.off, 2.2)
-	ICONS.headlights(100, 355.5, 24, info.headlights and W.green or W.off, 2.4)
-	ICONS.engine(899.5, 325.5, 27, info.engine and W.amber or W.off, 2.2)
-	ICONS.fuel(903, 355, 20, info.lowFuel and W.amber or W.off, 2.2)
-
-	-- the centre panel: gear and fuel on top, then LIGHTS / SIREN, the warning or "Systems OK"
-	text(info.gear, "W_PanelGear", 432, 129, WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	-- the centre panel (every lamp is in it now, the user's design): the top row spread across it,
+	-- left indicator / gear / fuel icon and % / right indicator; the warning box; the lamp row
 	local percent = string.format("%d%%", floor(info.fuelShown * 100 + 0.5))
-	text(percent, "W_Percent", 568, 129, info.lowFuel and W.amber or WHITE, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
-	ICONS.fuel(568 - textWidth(percent, "W_Percent") - 13, 129, 14, W.white, 2.4)
-	roundedBox(W_PANEL_RADIUS - 12, 432, 152, 136, 176, W.inner)
+	local gearWidth, percentWidth = textWidth(info.gear, "W_PanelGear"), textWidth(percent, "W_Percent")
+	local fuelWidth = 14 + 4 + percentWidth
+	local spread = max(0, (136 - 20 - gearWidth - fuelWidth - 20) / 3)
+	local topY = 128
+	if info.left then indicatorGlow(442, topY, 11, W.green) end
+	ICONS.arrowA(442, topY, 20, info.left and W.green or W.off, true)
+	local x = 452 + spread
+	text(info.gear, "W_PanelGear", x, topY, WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	x = x + gearWidth + spread
+	ICONS.fuel(x + 7, topY, 14, info.lowFuel and W.amber or W.white, 2.4)
+	text(percent, "W_Percent", x + 18, topY, info.lowFuel and W.amber or WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	if info.right then indicatorGlow(558, topY, 11, W.green) end
+	ICONS.arrowA(558, topY, 20, info.right and W.green or W.off, false)
 
+	-- (headlights 22, handbrake 23, engine 24 wide, 16 apart, centred; bottom at the padding)
+	local lampY = 319.5
+	ICONS.headlights(460.5, lampY, 22, info.headlights and W.green or W.off, 2.4)
+	ICONS.handbrake(499, lampY, 23, info.handbrake and W.red or W.off, 2.2)
+	ICONS.engine(538.5, lampY, 24, info.engine and W.amber or W.off, 2.2)
+
+	-- the box between: LIGHTS / SIREN in an emergency car, the warning or "Systems OK"
+	roundedBox(W_PANEL_RADIUS - 12, 432, W_BOX_TOP, 136, W_BOX_BOTTOM - W_BOX_TOP, W.inner)
 	local message = info.engine and "Check engine" or (info.lowFuel and "Low fuel" or "")
 	-- (the rows' heights, centred in the inner box like the design's flex column)
 	local total = 0
@@ -1622,7 +1618,7 @@ local function drawWide(info, vehicle, police)
 	elseif not police then
 		total = W_READY
 	end
-	local rowY = 240 - total / 2
+	local rowY = (W_BOX_TOP + W_BOX_BOTTOM) / 2 - total / 2
 
 	if police then
 		local lightMode = vehicle:GetNW2Int("audio_lights", 0)
