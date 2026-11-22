@@ -21,7 +21,7 @@
 	  - the built-in lamps (AudioEngine.BUILTIN_LIGHTS, a car whose audio_lightbar is itself, placed
 	    by its body bone): their lenses are plain textures, so a lit one gets a drawn glowing quad.
 	  - the glow: one dynamic light per car (the nearest MAX_DLIGHT_CARS), in the colour flashing at
-	    that moment. It replaced a glow sprite on every lit lens and a dynamic light per side: many
+	    that moment, over the side it flashes on (BAR_LIGHT_OFFSETS; built-in lamps: that side's middle). It replaced a glow sprite on every lit lens and a dynamic light per side: many
 	    light sources for one bar.
 ]]
 local AudioEngine = AUDIO_ENGINE
@@ -37,8 +37,9 @@ local DLIGHT_DIST = 2500
 local MAX_DLIGHT_CARS = 8
 local DLIGHT_BASE = 0x40000
 local DLIGHT = { brightness = 2, decay = 4000, size = 360, life = 0.05 }
--- the glow's place on the bar: over its middle
-local BAR_LIGHT_OFFSET = Vector(0, 0, 14)
+-- the glow's place on the bar (its model space: -X the driver's side, front +Y), by the side flashing:
+-- over that end's outer modules, the centre's over the front centre lens
+local BAR_LIGHT_OFFSETS = { [-1] = Vector(-22, 0, 14), [0] = Vector(0, 8, 14), [1] = Vector(22, 0, 14) }
 
 local LENS_MATERIAL = CreateMaterial("audio_engine_lightbar_lens", "UnlitGeneric", {
 	["$basetexture"] = "color/white",
@@ -184,38 +185,44 @@ hook.Add("PostDrawTranslucentRenderables", "audio_engine_police", function(drawi
 	end
 end)
 
--- the colour the car's lights glow with right now, or nil: the driver's side, else the passenger's,
--- else the centre (the patterns light one side at a time)
+-- the colour the car's lights glow with right now and the side it comes from (-1 driver's, 1
+-- passenger's, 0 centre), or nil: the driver's side, else the passenger's, else the centre (the
+-- patterns light one side at a time)
 local GLOW_ORDER = { { side = -1, group = "o" }, { side = 1, group = "o" }, { side = 0, group = "c" } }
 local function glowColor(entry, mode, phaseTime)
 	if entry.lamps then
 		for _, wanted in ipairs(GLOW_ORDER) do
 			for _, lamp in ipairs(entry.lamps) do
-				if lamp.side == wanted.side and isLit(lamp, mode, phaseTime) then return COLORS[lamp.color] or COLORS.white end
+				if lamp.side == wanted.side and isLit(lamp, mode, phaseTime) then return COLORS[lamp.color] or COLORS.white, wanted.side end
 			end
 		end
 
 		return nil
 	end
 	for _, wanted in ipairs(GLOW_ORDER) do
-		if isLit(wanted, mode, phaseTime) then return entry.sides[wanted.side] end
+		if isLit(wanted, mode, phaseTime) then return entry.sides[wanted.side], wanted.side end
 	end
 
 	return nil
 end
 
--- where the glow comes from: over the bar's middle, or the middle of the built-in lamps
-local function glowPosition(entry)
+-- where the glow comes from: over the flashing side's end of the bar, or the middle of that side's
+-- built-in lamps
+local function glowPosition(entry, side)
 	if not entry.lamps then
 		local barPosition, angles = lightbarPose(entry.lightbar)
-		return (LocalToWorld(BAR_LIGHT_OFFSET, angle_zero, barPosition, angles))
+		return (LocalToWorld(BAR_LIGHT_OFFSETS[side], angle_zero, barPosition, angles))
 	end
-	local localPosition = entry.lampsMiddle
+	entry.lampMiddles = entry.lampMiddles or {}
+	local localPosition = entry.lampMiddles[side]
 	if not localPosition then
+		local count = 0
 		localPosition = Vector(0, 0, 0)
-		for _, lamp in ipairs(entry.lamps) do localPosition = localPosition + lamp.position end
-		localPosition = localPosition / math.max(#entry.lamps, 1)
-		entry.lampsMiddle = localPosition
+		for _, lamp in ipairs(entry.lamps) do
+			if lamp.side == side then localPosition, count = localPosition + lamp.position, count + 1 end
+		end
+		localPosition = localPosition / math.max(count, 1)
+		entry.lampMiddles[side] = localPosition
 	end
 	local boneMatrix = entry.vehicle:GetBoneMatrix(entry.bone)
 
@@ -223,8 +230,8 @@ local function glowPosition(entry)
 end
 
 local function lightSurroundings(entry, mode, phaseTime)
-	local color = glowColor(entry, mode, phaseTime)
-	local position = color and glowPosition(entry)
+	local color, side = glowColor(entry, mode, phaseTime)
+	local position = color and glowPosition(entry, side)
 	if not position then return end
 	local dynamicLight = DynamicLight(DLIGHT_BASE + entry.vehicle:EntIndex())
 	if not dynamicLight then return end

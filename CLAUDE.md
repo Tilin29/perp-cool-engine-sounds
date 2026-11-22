@@ -65,7 +65,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the LED bar (addons/police_lightbar) lights its own lenses (its skin's
   VMTs); nothing is drawn over a bar any more, PERP's original included (the user: no overlaid colours); built-in lamps still get a drawn
   additive lens quad per lit module; sv_police prints which bar model is in use at load; the glow
-  is one dynamic light per car (the nearest `MAX_DLIGHT_CARS` 8) over the bar's middle in the colour flashing then (the user: one light source,
+  is one dynamic light per car (the nearest `MAX_DLIGHT_CARS` 8) in the colour flashing then, over the side it flashes on (the user:
+  `BAR_LIGHT_OFFSETS` x -22 driver's / +22 passenger's / front centre; built-in lamps: that side's lamps' middle) (the user: one light source,
   not a sprite per lens + a light per side); key `audio_engine_lightkey` (default lshift;
   no police script has a Source boost block, so shift is free). HUD shows the mode, plus whatever the `audio_engine/lights-label`
   hook returns (veh) after a dot: the police siren module (below) answers with its tone.
