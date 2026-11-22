@@ -572,58 +572,33 @@ end)
 local indicatorVolumeConVar = CreateClientConVar("audio_engine_indicator_volume", "0.5", true, false,
 	"Volume of the indicators' tick, heard by whoever sits in the car (0 = off)", 0, 1)
 local TICK_RATE = 44100
-local TICK_SECONDS = 0.05
+local TICK_SECONDS = 0.06
 --[[
-	A flasher relay's click, as a recording of one sounds: no tone, a few ms of noise (the armature
-	striking) coloured by the plastic case's resonances (band passes { Hz, Q, level }, not ringing
-	sines: those were a cartoon "blip", the user), the contacts bouncing once or twice right after,
-	and muffled behind the dash. The release ("tock") is softer and a little duller.
+	The click: a clock-like "tic" as the lamps come on, a lower "toc" as they go off (the user's pick of
+	four takes, "clock"). Two decaying tones { Hz, decay s, level }, each a pair 0.6 % apart (a little
+	beating, not a pure beep), raised over a soft CLICK_ATTACK. Tried and dropped: ringing tones with a
+	low thump (funny), filtered noise bursts with contact bounces (too clicky, dull and sharp).
 ]]
-local CLICK_BANDS = { { 520, 1.5, 0.5 }, { 1400, 3, 1 }, { 2900, 4, 0.7 }, { 4600, 5, 0.35 } }
-local CLICK_DIRECT = 0.15          -- the unfiltered strike mixed in
-local CLICK_MUFFLE_HZ = 7000       -- the dash in front of it (one-pole low pass)
-local CLICK_TAIL = 0.012           -- s: the whole click dies away over this
--- { pitch (the bands x this), level, bounces { s after the strike, level } }
-local CLICK_VERSIONS = {
-	on = { pitch = 1, level = 1, bounces = { { 0.0035, 0.35 }, { 0.0068, 0.12 } } },
-	off = { pitch = 0.82, level = 0.7, bounces = { { 0.0028, 0.25 } } },
-}
+local CLICK_MODES = { { 1700, 0.005, 1 }, { 850, 0.009, 0.5 } }
+local CLICK_ATTACK = 0.0006        -- s, raised cosine
+local CLICK_DETUNE = 1.006
+local CLICK_VERSIONS = { on = { pitch = 1, level = 1 }, off = { pitch = 0.76, level = 0.8 } }
 AudioEngine.IndicatorSerial = (AudioEngine.IndicatorSerial or 0) + 1
 local tickSounds   -- { on = name, off = name } once generated
 
--- an Audio EQ Cookbook band pass (0 dB peak)
-local function bandPass(frequency, q)
-	local w0 = 2 * math.pi * frequency / TICK_RATE
-	local alpha = sin(w0) / (2 * q)
-	local a0 = 1 + alpha
-	return { b0 = alpha / a0, b2 = -alpha / a0, a1 = -2 * cos(w0) / a0, a2 = (1 - alpha) / a0, x1 = 0, x2 = 0, y1 = 0, y2 = 0 }
-end
-
 local function renderClick(version)
 	local count = floor(TICK_SECONDS * TICK_RATE)
-	local filters = {}
-	for index, band in ipairs(CLICK_BANDS) do filters[index] = bandPass(band[1] * version.pitch, band[2]) end
-	local muffle = 1 - math.exp(-2 * math.pi * CLICK_MUFFLE_HZ / TICK_RATE)
-	local samples, peak, seed, muffled = {}, 0, 12345, 0
+	local samples, peak = {}, 0
 	for index = 1, count do
 		local time = (index - 1) / TICK_RATE
-		-- the strike and the bounces: short noise bursts (a fixed generator: every client renders the same click)
-		seed = (seed * 16807) % 2147483647
-		local noise = seed / 1073741823.5 - 1
-		local burst = min(1, time / 0.0001) * math.exp(-time / 0.0005)
-		for _, bounce in ipairs(version.bounces) do
-			if time >= bounce[1] then burst = burst + bounce[2] * math.exp(-(time - bounce[1]) / 0.00035) end
+		local attack = time < CLICK_ATTACK and 0.5 - 0.5 * cos(math.pi * time / CLICK_ATTACK) or 1
+		local value = 0
+		for _, mode in ipairs(CLICK_MODES) do
+			local frequency = mode[1] * version.pitch
+			value = value + mode[3] * math.exp(-time / mode[2]) * 0.5
+				* (sin(2 * math.pi * frequency * time) + sin(2 * math.pi * frequency * CLICK_DETUNE * time + 1))
 		end
-		local excitation = noise * burst
-		local value = excitation * CLICK_DIRECT
-		for bandIndex, filter in ipairs(filters) do
-			local output = filter.b0 * excitation + filter.b2 * filter.x2 - filter.a1 * filter.y1 - filter.a2 * filter.y2
-			filter.x2, filter.x1 = filter.x1, excitation
-			filter.y2, filter.y1 = filter.y1, output
-			value = value + output * CLICK_BANDS[bandIndex][3]
-		end
-		muffled = muffled + (value - muffled) * muffle
-		value = muffled * math.exp(-time / CLICK_TAIL) * min(1, (count - index) / (0.004 * TICK_RATE))
+		value = value * attack
 		samples[index] = value
 		peak = max(peak, abs(value))
 	end
