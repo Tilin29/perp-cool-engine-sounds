@@ -16,3 +16,12 @@ Run from a working folder (scratch, not the repo):
 
 Left out of the rebuild (our bar never uses them): the LED / basic screen bodygroups, their 11 message skins,
 the screen bone and the screenflip animation.
+
+## Lens textures
+
+`python -I make_vtf.py <addons/police_lightbar/materials/police_lightbar> <source folder>` builds `leds_large.vtf`
+(512x128, the face lenses) and `leds_small.vtf` (256x128, the corner lenses) from `led_large.bmp` / `led_small.bmp`
+(unlit) and `led_<large|small>_<red|white|blue|yellow>.png` (the user's lit versions): 5 frames, 0 unlit, 1 red,
+2 white, 3 blue, 4 yellow; uncompressed BGRA8888 with mipmaps (no image library: `imageio.py` reads PNG / BMP).
+The lit frames' alpha is 255, the unlit frame's 0: the lens VMTs' `$selfillum` mask, so a lit lens glows in the dark.
+cl_police's `AudioLightbarLens` material proxy picks each lens's frame as the bar is drawn.
