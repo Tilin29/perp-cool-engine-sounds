@@ -67,6 +67,14 @@ end)
 -- lua refresh: cars already out there
 for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do setupPolice(vehicle) end
 
+-- which bar the cars get: the LED one only with the police_lightbar addon installed in garrysmod/addons
+if AudioEngine.LIGHTBAR_MODEL == AudioEngine.LIGHTBAR_LED_MODEL then
+	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (lenses lit by its skins)")
+else
+	MsgN("[Audio Engine] light bars: ", AudioEngine.LIGHTBAR_MODEL, " (", AudioEngine.LIGHTBAR_LED_MODEL,
+		" isn't mounted: install the police_lightbar addon for lit lenses)")
+end
+
 -- a car's light mode (0 off, 1 CODE 2, 2 CODE 3) and, on the LED bar, its skin: the flashing itself
 -- runs in the skin's materials (sh_police's AudioEngine.LightbarSkin)
 function AudioEngine.SetLights(vehicle, mode)

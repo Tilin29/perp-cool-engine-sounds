@@ -63,7 +63,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
   Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
   off / CODE 2 / CODE 3 (NW2 `audio_lights`). `cl_police.lua`: the LED bar (addons/police_lightbar) lights its own lenses (its skin's
-  VMTs); PERP's original bar and built-in lamps get a drawn additive lens quad per lit module; the glow
+  VMTs); nothing is drawn over a bar any more, PERP's original included (the user: no overlaid colours); built-in lamps still get a drawn
+  additive lens quad per lit module; sv_police prints which bar model is in use at load; the glow
   is one dynamic light per car (the nearest `MAX_DLIGHT_CARS` 8) over the bar's middle in the colour flashing then (the user: one light source,
   not a sprite per lens + a light per side); key `audio_engine_lightkey` (default lshift;
   no police script has a Source boost block, so shift is free). HUD shows the mode, plus whatever the `audio_engine/lights-label`
@@ -418,7 +419,9 @@ The core never names it. The dev harnesses still use it as their test car: they 
 `dev/baker/check_syntax.js` also compiles `addons/*/lua`.
 
 ## Police lightbar (separate addon)
-`addons/police_lightbar/`: its own GMod addon like the SL65 (copy it into garrysmod/addons/ next to this one), not part of the engine.
+`addons/police_lightbar/`: its own GMod addon like the SL65, not part of the engine. GMod doesn't load addons nested in an addon: on the
+user's machine `garrysmod/addons/police_lightbar` is a directory junction to it (made 2026-11-22; always the repo's files, restart GMod
+to mount changes to new files); without it the cars get PERP's original bar, unlit.
 - The rebuild `models/perpheads/props/police_lightbar_leds.mdl`: PERP's bar (workshop 2897742669) body only, every LED lens on its own
   material `materials/police_lightbar/lens_<face>_<side>_<inner|outer>` / `lens_rear_centre` / `lens_corner_<side>_<front|side|rear>`
   (15; the front face has no centre lens), so each lens can be lit by itself. In the original all lenses shared 2 materials (`LEDs` /

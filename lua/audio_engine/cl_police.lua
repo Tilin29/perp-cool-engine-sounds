@@ -16,9 +16,10 @@
 	    themselves, all in its materials: the server sets the bar's skin for the car's scheme and
 	    mode (sv_police's AudioEngine.SetLights), whose lens materials run the pattern with Source's
 	    own VMT proxies. No Lua here; nothing is drawn over it.
-	  - PERP's original bar (the addon not installed) and the built-in lamps (AudioEngine.BUILTIN_LIGHTS,
-	    a car whose audio_lightbar is itself, placed by its body bone): their lenses are plain
-	    textures, so a lit one gets a drawn glowing quad.
+	  - PERP's original bar (the addon not installed): nothing drawn over it (the user: no overlaid
+	    colours), only the glow.
+	  - the built-in lamps (AudioEngine.BUILTIN_LIGHTS, a car whose audio_lightbar is itself, placed
+	    by its body bone): their lenses are plain textures, so a lit one gets a drawn glowing quad.
 	  - the glow: one dynamic light per car (the nearest MAX_DLIGHT_CARS), in the colour flashing at
 	    that moment. It replaced a glow sprite on every lit lens and a dynamic light per side: many
 	    light sources for one bar.
@@ -35,7 +36,6 @@ local DRAW_DIST = 6000
 local DLIGHT_DIST = 2500
 local MAX_DLIGHT_CARS = 8
 local DLIGHT_BASE = 0x40000
-local LENS_HEIGHT = 1.7
 local DLIGHT = { brightness = 2, decay = 4000, size = 360, life = 0.05 }
 -- the glow's place on the bar: over its middle
 local BAR_LIGHT_OFFSET = Vector(0, 0, 14)
@@ -129,8 +129,7 @@ local function refreshList()
 					table.insert(emergencyCars, entry)
 				end
 			else
-				-- (the LED bar lights its own lenses: nothing drawn over it)
-				entry.lensesLightThemselves = string.lower(lightbar:GetModel() or "") == AudioEngine.LIGHTBAR_LED_MODEL
+				-- (a bar: nothing drawn over it, only its glow)
 				table.insert(emergencyCars, entry)
 			end
 		end
@@ -160,16 +159,6 @@ local function lightbarPose(lightbar)
 	return lightbar:GetPos(), lightbar:GetAngles()
 end
 
-local function drawBar(entry, mode, phaseTime)
-	local barPosition, angles = lightbarPose(entry.lightbar)
-	local forward, right, up = angles:Forward(), angles:Right(), angles:Up()
-	for _, lamp in ipairs(AudioEngine.LIGHTBAR_MODULES) do
-		if isLit(lamp, mode, phaseTime) then
-			drawLens(LocalToWorld(lamp.position, angle_zero, barPosition, angles), turned(forward, right, up, lamp.normal), lamp.width, LENS_HEIGHT, entry.sides[lamp.side])
-		end
-	end
-end
-
 -- built-in lamps follow the body bone (nil while the car hasn't set up its bones: not drawn)
 local function drawBuiltin(entry, mode, phaseTime)
 	local boneMatrix = entry.vehicle:GetBoneMatrix(entry.bone)
@@ -186,11 +175,10 @@ hook.Add("PostDrawTranslucentRenderables", "audio_engine_police", function(drawi
 	if drawingDepth or drawingSkybox then return end
 	local eyePosition = EyePos()
 	for _, entry in ipairs(emergencyCars) do
-		if not entry.lensesLightThemselves then
+		if entry.lamps then
 			local mode = lightModeOf(entry)
 			if mode > 0 and entry.lightbar:GetPos():DistToSqr(eyePosition) < DRAW_DIST * DRAW_DIST then
-				local phaseTime = phaseTimeOf(entry.vehicle, mode)
-				if entry.lamps then drawBuiltin(entry, mode, phaseTime) else drawBar(entry, mode, phaseTime) end
+				drawBuiltin(entry, mode, phaseTimeOf(entry.vehicle, mode))
 			end
 		end
 	end
