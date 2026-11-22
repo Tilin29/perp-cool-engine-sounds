@@ -1,6 +1,6 @@
 --[[
 	Audio Engine - driver HUD (client): the instrument cluster, centred at the bottom of the screen,
-	no panel behind it. Seven looks, picked with audio_engine_cluster (not saved: every load starts
+	no panel behind it. Eight looks, picked with audio_engine_cluster (not saved: every load starts
 	on 0; the numbers are the user's order):
 	  0   automatic (the default): the classic
 	  1   classic (design A): rev counter, speedometer and fuel gauge as dials with needles
@@ -8,12 +8,13 @@
 	  3   German hatch (A5): twin chrome-ringed dials, a red LCD between them
 	  4   60s vintage (A3): cream faces, chrome rims, jewel lamps
 	  5   80s digital (A4): a VFD rev arc of blocks, seven-segment speed and gear
-	  6   floating arc (B): one rev arc with the speed and gear in its middle
-	  7   motorsport strip (C): a bar of rev segments over speed / gear / rpm read-outs
+	  6   wide-screen (D2): one screen, speed and revs as rings of bars, a centre panel
+	  7   floating arc (B): one rev arc with the speed and gear in its middle
+	  8   motorsport strip (C): a bar of rev segments over speed / gear / rpm read-outs
 	In an emergency car (a light bar or built-in lights: police, fire, medical) the ones with emergency-light controls show
 	them: the classic turns into A2 (its police look, siren tones and CODE 2 / CODE 3 buttons), D
-	shows LIGHTS / SIREN in its centre panel, A5 buttons under its LCD.
-	Drawn after the "Speedometer HUD" design canvas (artboards A, A2, A3, A4, A5, B, C, D): the
+	and D2 show LIGHTS / SIREN in their centre panel, A5 buttons under its LCD.
+	Drawn after the "Speedometer HUD" design canvas (artboards A, A2, A3, A4, A5, B, C, D, D2): the
 	positions and sizes below are that design's pixels, scaled to the screen.
 
 	Indicators, hazards and headlights are the cluster's own lamps on the default controls (see
@@ -34,12 +35,12 @@ end
 local scaleConVar = CreateClientConVar("audio_engine_hud_scale", "1", true, false, "HUD size multiplier", 0.5, 2)
 -- (not archived: the user's rule, every load starts on A)
 local clusterConVar = CreateClientConVar("audio_engine_cluster", "0", false, false,
-	"Instrument cluster: 0 automatic (the classic), 1 classic, 2 modern digital, 3 German hatch, 4 60s vintage, 5 80s digital, 6 floating arc, 7 motorsport strip. Police cars get the light/siren controls on 1-3. Not saved")
+	"Instrument cluster: 0 automatic (the classic), 1 classic, 2 modern digital, 3 German hatch, 4 60s vintage, 5 80s digital, 6 wide-screen, 7 floating arc, 8 motorsport strip. Emergency cars get the light/siren controls on 1-3 and 6. Not saved")
 
 local cos, sin, rad, min, max, floor, abs, clamp = math.cos, math.sin, math.rad, math.min, math.max, math.floor, math.abs, math.Clamp
 
 -- the design's size of each cluster x this x (screen height / 1080) x audio_engine_hud_scale
-local CLUSTER_SIZE = { a = 0.7, d = 0.7, a5 = 0.7, a3 = 0.7, a4 = 0.6, b = 0.75, c = 0.65 }   -- (A4 smaller: the user's)
+local CLUSTER_SIZE = { a = 0.7, d = 0.7, a5 = 0.7, a3 = 0.7, a4 = 0.6, d2 = 0.7, b = 0.75, c = 0.65 }   -- (A4 smaller: the user's)
 local BOTTOM_MARGIN = 20       -- px at 1080 between the cluster and the bottom of the screen
 local MIN_FONT = 9             -- px: smaller text can't be read
 
@@ -77,6 +78,10 @@ local FONTS = {
 	V_Tach = { 25, 500 }, V_Speed = { 26, 500 }, V_Fuel = { 21, 500 }, V_Label = { 11, 400 }, V_Unit = { 12, 400 }, V_Gear = { 20, 500 },
 	-- A4 (F): 80s digital (VFD)
 	F_Scale = { 21, 400, false, 3 }, F_Label = { 11, 400 }, F_Unit = { 16, 400, false, 3 }, F_Fuel = { 13, 400 },
+	-- D2 (W): wide-screen (Roboto for the design's Inter Tight, Roboto Condensed for its Barlow digits)
+	W_Label = { 13, 600, false, nil, "Roboto" }, W_Big = { 58, 600 }, W_Gear = { 13, 600, false, nil, "Roboto" },
+	W_GearOn = { 17, 600, false, 3, "Roboto" }, W_PanelGear = { 26, 600 }, W_Percent = { 15, 600, false, nil, "Roboto" },
+	W_Tiny = { 11, 600, false, nil, "Roboto" }, W_Mode = { 20, 600, false, nil, "Roboto" }, W_Message = { 13, 500, false, nil, "Roboto" },
 }
 local fontScales = {}
 local function fontsFor(prefix, scale)
@@ -649,6 +654,8 @@ local function readState(player, vehicle, car, deltaTime)
 	local rpmSmooth, rpmSmoothDigits = smoothRpmValue(max(0, engineState.rpm), deltaTime)
 	state.rpmSmooth = rpmSmooth
 	state.rpmSmoothDigits = string.Comma(floor(rpmSmoothDigits / RPM_DIGIT_STEP + 0.5) * RPM_DIGIT_STEP)
+	state.rpmSmoothThousands = string.format("%.1f", max(0, rpmSmoothDigits) / 1000)
+	state.gearCount = istable(config.gears) and #config.gears or 0
 	state.redline = config.redline
 	state.majorRpm = (config.redline + 500 > 12000) and 2000 or 1000
 	state.dialRpm = math.ceil((config.redline + 500) / state.majorRpm) * state.majorRpm
@@ -1459,6 +1466,178 @@ local function drawDigital(info)
 end
 
 ---------------------------------------------------------------------------
+-- D2: wide-screen (one screen in a bezel, speed and revs as rings of bars, a centre panel:
+-- gear, fuel, LIGHTS / SIREN in an emergency car, warnings)
+---------------------------------------------------------------------------
+local W = {
+	blue = rgb("4aa8ff"), orange = rgb("ff8a4a"), red = rgb("ff3b30"), green = rgb("4ade80"), amber = rgb("ffb53a"),
+	policeRed = rgb("ff5147"), policeBlue = rgb("5aa8ff"),
+	bezel = rgb("222528"), bezelLight = rgb("3a3e43"), screen = rgb("08090c"), panel = rgb("0d1117"), inner = rgb("151b23"),
+	white = Color(255, 255, 255, 204), off = Color(255, 255, 255, 36), grey = Color(255, 255, 255, 115),
+	label = Color(255, 255, 255, 140), faint = Color(255, 255, 255, 102), divider = Color(255, 255, 255, 20),
+	panelRim = Color(255, 255, 255, 18), ring = Color(255, 255, 255, 15), innerRing = Color(255, 255, 255, 13),
+}
+W.blueDim = mix(W.blue, rgb("05070a"), 0.8)
+W.orangeDim = mix(W.orange, rgb("05070a"), 0.8)
+local W_CENTRE_Y, W_BARS = 226, 64
+local W_LEFT_X, W_RIGHT_X = 230, 770
+-- design px: a LIGHTS / SIREN row, the warning row (its divider + 8 + the icon), "Systems OK", the gap between rows
+local W_BLOCK, W_MESSAGE, W_READY, W_GAP = 36, 29, 16, 8
+
+-- a rounded box in design px (draw.RoundedBox leaves its corner texture set)
+local function roundedBox(radius, x, y, width, height, color)
+	local screenX, screenY = place(x, y)
+	draw.RoundedBox(max(1, floor(radius * pixel + 0.5)), screenX, screenY, width * pixel, height * pixel, color)
+	draw.NoTexture()
+end
+
+-- the design's outlined digits (text-stroke, no fill): the outline drawn round, the inside in the screen's colour
+local function hollowText(value, font, x, y, color, alignX, alignY)
+	local screenX, screenY = place(x, y)
+	screenX, screenY = floor(screenX + 0.5), floor(screenY + 0.5)
+	local width = max(1, floor(2 * pixel + 0.5))
+	for offsetX = -width, width, width do
+		for offsetY = -width, width, width do
+			if offsetX ~= 0 or offsetY ~= 0 then
+				draw.SimpleText(value, "AudioHud_" .. font, screenX + offsetX, screenY + offsetY, color, alignX, alignY)
+			end
+		end
+	end
+	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, W.screen, alignX, alignY)
+end
+
+-- a ring of W_BARS bars from -135 to 135 degrees, lit up to `share` (red from `redFrom`, a share too)
+local function wideBars(centreX, share, onColor, dimColor, redFrom)
+	local x, y = place(centreX, W_CENTRE_Y)
+	for i = 0, W_BARS - 1 do
+		local barShare = i / (W_BARS - 1)
+		local angle = -135 + barShare * 270
+		local x0, y0 = polar(x, y, 94, angle)
+		local x1, y1 = polar(x, y, 120, angle)
+		if share > 0 and barShare <= share + 1e-6 then
+			local color = (redFrom and barShare >= redFrom) and W.red or onColor
+			line(x0, y0, x1, y1, 7 * pixel, faded(color, 60))
+			line(x0, y0, x1, y1, 3 * pixel, color)
+		else
+			line(x0, y0, x1, y1, 3 * pixel, dimColor)
+		end
+	end
+end
+
+-- the warning triangle by the centre panel's message (the design's 24 x 22)
+local function warningIcon(x, y, width, color)
+	iconStart(x, y, width, 24, 22)
+	iconPath(2, color, 12, 2, 22.5, 20, 1.5, 20, 12, 2)
+	iconPath(2.2, color, 12, 8, 12, 13.5)
+	iconDisc(12, 16.5, 1.2, color)
+end
+
+local function drawWide(info, vehicle, police)
+	-- the bezel and the screen
+	roundedBox(18, 22, 52, 956, 372, Color(0, 0, 0, 45))
+	roundedBox(18, 26, 56, 948, 368, Color(0, 0, 0, 80))
+	roundedBox(18, 26, 46, 948, 368, W.bezel)
+	rectangle(44, 46, 912, 3, W.bezelLight)
+	roundedBox(13, 32, 52, 936, 356, W.screen)
+	roundedBox(8, 419, 103, 162, 238, W.panelRim)
+	roundedBox(8, 420, 104, 160, 236, W.panel)
+
+	for _, centreX in ipairs({ W_LEFT_X, W_RIGHT_X }) do
+		local x, y = place(centreX, W_CENTRE_Y)
+		band(x, y, 127.5, 128.5, 0, 360, W.ring, 6)
+		band(x, y, 79.5, 80.5, 0, 360, W.innerRing, 6)
+	end
+
+	-- speed (left) and revs (right) as bars, the fuel's bars under the speed
+	wideBars(W_LEFT_X, clamp(info.speed / info.dialSpeed, 0, 1), W.blue, W.blueDim)
+	wideBars(W_RIGHT_X, clamp(info.rpm / info.dialRpm, 0, 1), W.orange, W.orangeDim, info.redline / info.dialRpm)
+	local fuelX, fuelY = place(W_LEFT_X, W_CENTRE_Y)
+	local fuelColor = info.lowFuel and W.amber or WHITE
+	for i = 0, 13 do
+		local barShare = i / 13
+		local angle = 208 - barShare * 56
+		local x0, y0 = polar(fuelX, fuelY, 100, angle)
+		local x1, y1 = polar(fuelX, fuelY, 112, angle)
+		local lit = info.fuelShown > 0.02 and barShare <= info.fuelShown + 0.04
+		line(x0, y0, x1, y1, 4 * pixel, lit and fuelColor or W.off)
+	end
+	text("E", "W_Label", 194, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	text("F", "W_Label", 266, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	ICONS.fuel(W_LEFT_X, 292, 16, info.lowFuel and W.amber or W.off, 2.4)
+
+	-- read-outs
+	text(info.unitLabel, "W_Label", W_LEFT_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	hollowText(tostring(info.speedDigits), "W_Big", W_LEFT_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text("×1000rpm", "W_Label", W_RIGHT_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	hollowText(info.rpmSmoothThousands, "W_Big", W_RIGHT_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+
+	-- the gears round the bottom of the rev ring (N, 1.. the car's top gear; R in N's place reversing)
+	local gearCount = clamp(info.gearCount, 1, 8)
+	local spacing = min(9, 54 / gearCount)
+	local gearsX, gearsY = place(W_RIGHT_X, W_CENTRE_Y)
+	for index = 0, gearCount do
+		local label = index == 0 and (info.gear == "R" and "R" or "N") or tostring(index)
+		local current = label == info.gear
+		local labelX, labelY = polar(gearsX, gearsY, 104, 180 + spacing * gearCount / 2 - index * spacing)
+		labelX, labelY = floor(labelX + 0.5), floor(labelY + 0.5)
+		if current then
+			draw.SimpleText(label, "AudioHud_W_GearOn_Glow", labelX, labelY, faded(W.orange, 170), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+			draw.SimpleText(label, "AudioHud_W_GearOn", labelX, labelY, W.orange, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		else
+			draw.SimpleText(label, "AudioHud_W_Gear", labelX, labelY, W.faint, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
+	end
+
+	-- lamps: indicators over the panel's corners, handbrake / headlights bottom left, engine / low fuel bottom right
+	if info.left then indicatorGlow(372, 96, 13, W.green) end
+	ICONS.arrowA(372, 96, 24, info.left and W.green or W.off, true)
+	if info.right then indicatorGlow(628, 96, 13, W.green) end
+	ICONS.arrowA(628, 96, 24, info.right and W.green or W.off, false)
+	ICONS.handbrake(79, 326, 26, info.handbrake and W.red or W.off, 2.2)
+	ICONS.headlights(78, 355.5, 24, info.headlights and W.green or W.off, 2.4)
+	ICONS.engine(921.5, 325.5, 27, info.engine and W.amber or W.off, 2.2)
+	ICONS.fuel(925, 355, 20, info.lowFuel and W.amber or W.off, 2.2)
+
+	-- the centre panel: gear and fuel on top, then LIGHTS / SIREN, the warning or "Systems OK"
+	text(info.gear, "W_PanelGear", 432, 129, WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	local percent = string.format("%d%%", floor(info.fuelShown * 100 + 0.5))
+	text(percent, "W_Percent", 568, 129, info.lowFuel and W.amber or WHITE, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+	ICONS.fuel(568 - textWidth(percent, "W_Percent") - 13, 129, 14, W.white, 2.4)
+	roundedBox(6, 432, 152, 136, 176, W.inner)
+
+	local message = info.engine and "Check engine" or (info.lowFuel and "Low fuel" or "")
+	-- (the rows' heights, centred in the inner box like the design's flex column)
+	local total = 0
+	if police then total = 2 * W_BLOCK + W_GAP end
+	if message ~= "" then
+		total = total + (police and W_GAP or 0) + W_MESSAGE
+	elseif not police then
+		total = W_READY
+	end
+	local rowY = 240 - total / 2
+
+	if police then
+		local lightMode = vehicle:GetNW2Int("audio_lights", 0)
+		local second = police.second == POLICE_BLUE and W.policeBlue or police.second
+		text("LIGHTS", "W_Tiny", 442, rowY, W.label, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		text(lightMode == 1 and "CODE 2" or (lightMode == 2 and "CODE 3" or "OFF"), "W_Mode", 442, rowY + 14,
+			lightMode == 1 and second or (lightMode == 2 and W.policeRed or W.grey), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		rowY = rowY + W_BLOCK + W_GAP
+		local tone = sirenTone(vehicle)
+		text("SIREN", "W_Tiny", 442, rowY, W.label, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		text(tone ~= "" and tone or "OFF", "W_Mode", 442, rowY + 14, tone ~= "" and W.amber or W.grey, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+		rowY = rowY + W_BLOCK + W_GAP
+	end
+	if message ~= "" then
+		rectangle(442, rowY, 116, 1, W.divider)
+		warningIcon(453, rowY + 19, 22, W.amber)
+		text(message, "W_Message", 472, rowY + 19, WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	elseif not police then
+		text("Systems OK", "W_Message", 500, rowY + W_READY / 2, W.grey, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	end
+end
+
+---------------------------------------------------------------------------
 -- HUD
 ---------------------------------------------------------------------------
 -- smoothRevs: the cluster shows the revs as a bar / segments (smoothRpmValue), not a needle alone.
@@ -1469,7 +1648,8 @@ local CLUSTERS = {
 	a5 = { box = A, draw = drawGerman, fonts = "G", police = true },
 	a3 = { box = A, draw = drawVintage, fonts = "V" },
 	a4 = { box = A, draw = drawDigital, fonts = "F", smoothRevs = true },
-	b = { box = B, draw = drawArc, fonts = "B", smoothRevs = true },
+	d2 = { box = A, draw = drawWide, fonts = "W", police = true, smoothRevs = true },
+	b ={ box = B, draw = drawArc, fonts = "B", smoothRevs = true },
 	c = { box = C, draw = drawStrip, fonts = "C", smoothRevs = true },
 }
 
@@ -1480,7 +1660,7 @@ local function emergencySchemeOf(vehicle)
 end
 
 -- audio_engine_cluster's numbers (the user's order) -> the design's clusters; 0 or anything else = the classic
-local CLUSTER_NUMBERS = { "a", "d", "a5", "a3", "a4", "b", "c" }
+local CLUSTER_NUMBERS = { "a", "d", "a5", "a3", "a4", "d2", "b", "c" }
 
 local function clusterFor()
 	return CLUSTER_NUMBERS[clusterConVar:GetInt()] or "a"
