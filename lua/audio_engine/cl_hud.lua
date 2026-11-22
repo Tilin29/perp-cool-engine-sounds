@@ -8,7 +8,7 @@
 	  3   German hatch (A5): twin chrome-ringed dials, a red LCD between them
 	  4   60s vintage (A3): cream faces, chrome rims, jewel lamps
 	  5   80s digital (A4): a VFD rev arc of blocks, seven-segment speed and gear
-	  6   wide-screen (D2): one screen, speed and revs as rings of bars, a centre panel
+	  6   wide-screen (D2): two round faces, revs and speed as rings of bars, a centre panel
 	  7   floating arc (B): one rev arc with the speed and gear in its middle
 	  8   motorsport strip (C): a bar of rev segments over speed / gear / rpm read-outs
 	In an emergency car (a light bar or built-in lights: police, fire, medical) the ones with emergency-light controls show
@@ -1469,17 +1469,22 @@ local function drawDigital(info)
 end
 
 ---------------------------------------------------------------------------
--- D2: wide-screen (one screen in a bezel, speed and revs as rings of bars, a centre panel:
--- gear, fuel, LIGHTS / SIREN in an emergency car, warnings)
+-- D2: wide-screen (two round dark faces, speed and revs as rings of bars, a centre panel between
+-- them: gear, fuel, LIGHTS / SIREN in an emergency car, warnings)
 ---------------------------------------------------------------------------
 local W = {
 	blue = rgb("4aa8ff"), orange = rgb("ff8a4a"), red = rgb("ff3b30"), green = rgb("4ade80"), amber = rgb("ffb53a"),
 	policeRed = rgb("ff5147"), policeBlue = rgb("5aa8ff"),
-	bezel = rgb("222528"), bezelLight = rgb("3a3e43"), screen = rgb("08090c"), panel = rgb("0d1117"), inner = rgb("151b23"),
+	face = rgb("0e1013"), faceIn = rgb("1c1f23"), faceOut = rgb("040506"), inner = rgb("151b23"),
 	white = Color(255, 255, 255, 204), off = Color(255, 255, 255, 36), grey = Color(255, 255, 255, 115),
 	label = Color(255, 255, 255, 140), faint = Color(255, 255, 255, 102), divider = Color(255, 255, 255, 20),
-	panelRim = Color(255, 255, 255, 18), ring = Color(255, 255, 255, 15), innerRing = Color(255, 255, 255, 13),
+	rim = Color(255, 255, 255, 26), innerRing = Color(255, 255, 255, 13),
 }
+-- the faces' radial gradient (light in the middle, dark at the rim) as layered discs: the lit middle's
+-- alpha, and the colour it gives (the outlined digits' inside, which sits in it)
+local W_FACE_LIGHT = 110
+W.faceLit = mix(W.face, W.faceIn, W_FACE_LIGHT / 255)
+W.panelFace = mix(W.face, W.faceIn, 0.25)
 W.blueDim = mix(W.blue, rgb("05070a"), 0.8)
 W.orangeDim = mix(W.orange, rgb("05070a"), 0.8)
 local W_CENTRE_Y, W_BARS = 226, 64
@@ -1495,7 +1500,7 @@ local function roundedBox(radius, x, y, width, height, color)
 	draw.NoTexture()
 end
 
--- the design's outlined digits (text-stroke, no fill): the outline drawn round, the inside in the screen's colour
+-- the design's outlined digits (text-stroke, no fill): the outline drawn round, the inside in the face's colour
 local function hollowText(value, font, x, y, color, alignX, alignY)
 	local screenX, screenY = place(x, y)
 	screenX, screenY = floor(screenX + 0.5), floor(screenY + 0.5)
@@ -1507,7 +1512,7 @@ local function hollowText(value, font, x, y, color, alignX, alignY)
 			end
 		end
 	end
-	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, W.screen, alignX, alignY)
+	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, W.faceLit, alignX, alignY)
 end
 
 -- a ring of W_BARS bars from -135 to 135 degrees, lit up to `share` (red from `redFrom`, a share too)
@@ -1537,20 +1542,19 @@ local function warningIcon(x, y, width, color)
 end
 
 local function drawWide(info, vehicle, police)
-	-- the bezel and the screen
-	roundedBox(18, 22, 52, 956, 372, Color(0, 0, 0, 45))
-	roundedBox(18, 26, 56, 948, 368, Color(0, 0, 0, 80))
-	roundedBox(18, 26, 46, 948, 368, W.bezel)
-	rectangle(44, 46, 912, 3, W.bezelLight)
-	roundedBox(13, 32, 52, 936, 356, W.screen)
-	roundedBox(8, 419, 103, 162, 238, W.panelRim)
-	roundedBox(8, 420, 104, 160, 236, W.panel)
-
-	for _, centreX in ipairs({ W_SPEED_X, W_RPM_X }) do
+	-- the faces (dropped shadow, dark rim, lit middle a little above the centre) and the centre panel
+	for _, centreX in ipairs({ W_RPM_X, W_SPEED_X }) do
 		local x, y = place(centreX, W_CENTRE_Y)
-		band(x, y, 127.5, 128.5, 0, 360, W.ring, 6)
+		disc(x, y + 10 * pixel, 154, Color(0, 0, 0, 80))
+		disc(x, y, 150, W.faceOut)
+		disc(x, y, 138, W.face)
+		disc(x, y - 15 * pixel, 112, faded(W.faceIn, W_FACE_LIGHT))
+		band(x, y, 149, 150, 0, 360, W.rim, 6)
 		band(x, y, 79.5, 80.5, 0, 360, W.innerRing, 6)
 	end
+	roundedBox(12, 420, 114, 160, 236, Color(0, 0, 0, 80))
+	roundedBox(12, 420, 104, 160, 236, W.rim)
+	roundedBox(11, 421, 105, 158, 234, W.panelFace)
 
 	-- revs (left) and speed (right) as bars, the fuel's bars under the speed
 	wideBars(W_SPEED_X, clamp(info.speed / info.dialSpeed, 0, 1), W.blue, W.blueDim)
