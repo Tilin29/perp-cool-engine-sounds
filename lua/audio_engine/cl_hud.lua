@@ -572,40 +572,72 @@ end)
 local indicatorVolumeConVar = CreateClientConVar("audio_engine_indicator_volume", "0.5", true, false,
 	"Volume of the indicators' tick, heard by whoever sits in the car (0 = off)", 0, 1)
 local TICK_RATE = 44100
-local TICK_SECONDS = 0.06
--- a relay's click: a few ms of noise ringing the case (damped sines { Hz, decay s, level }) and a thump
-local TICK_RESONANCES = { { 2300, 0.006, 1 }, { 3500, 0.004, 0.6 }, { 950, 0.010, 0.5 }, { 190, 0.008, 0.7 } }
-local TOCK_PITCH, TOCK_LEVEL = 0.8, 0.65      -- the release click: lower, softer
+local TICK_SECONDS = 0.05
+--[[
+	A flasher relay's click, as a recording of one sounds: no tone, a few ms of noise (the armature
+	striking) coloured by the plastic case's resonances (band passes { Hz, Q, level }, not ringing
+	sines: those were a cartoon "blip", the user), the contacts bouncing once or twice right after,
+	and muffled behind the dash. The release ("tock") is softer and a little duller.
+]]
+local CLICK_BANDS = { { 520, 1.5, 0.5 }, { 1400, 3, 1 }, { 2900, 4, 0.7 }, { 4600, 5, 0.35 } }
+local CLICK_DIRECT = 0.15          -- the unfiltered strike mixed in
+local CLICK_MUFFLE_HZ = 7000       -- the dash in front of it (one-pole low pass)
+local CLICK_TAIL = 0.012           -- s: the whole click dies away over this
+-- { pitch (the bands x this), level, bounces { s after the strike, level } }
+local CLICK_VERSIONS = {
+	on = { pitch = 1, level = 1, bounces = { { 0.0035, 0.35 }, { 0.0068, 0.12 } } },
+	off = { pitch = 0.82, level = 0.7, bounces = { { 0.0028, 0.25 } } },
+}
 AudioEngine.IndicatorSerial = (AudioEngine.IndicatorSerial or 0) + 1
 local tickSounds   -- { on = name, off = name } once generated
 
-local function renderClick(pitch, level)
+-- an Audio EQ Cookbook band pass (0 dB peak)
+local function bandPass(frequency, q)
+	local w0 = 2 * math.pi * frequency / TICK_RATE
+	local alpha = sin(w0) / (2 * q)
+	local a0 = 1 + alpha
+	return { b0 = alpha / a0, b2 = -alpha / a0, a1 = -2 * cos(w0) / a0, a2 = (1 - alpha) / a0, x1 = 0, x2 = 0, y1 = 0, y2 = 0 }
+end
+
+local function renderClick(version)
 	local count = floor(TICK_SECONDS * TICK_RATE)
-	local samples, peak, seed = {}, 0, 12345
+	local filters = {}
+	for index, band in ipairs(CLICK_BANDS) do filters[index] = bandPass(band[1] * version.pitch, band[2]) end
+	local muffle = 1 - math.exp(-2 * math.pi * CLICK_MUFFLE_HZ / TICK_RATE)
+	local samples, peak, seed, muffled = {}, 0, 12345, 0
 	for index = 1, count do
 		local time = (index - 1) / TICK_RATE
-		-- the strike: a short decaying noise burst (a fixed LCG: every client renders the same click)
-		seed = (seed * 1103515245 + 12345) % 2147483648
-		local value = (seed / 1073741824 - 1) * math.exp(-time / 0.0004) * 0.6
-		for _, resonance in ipairs(TICK_RESONANCES) do
-			value = value + resonance[3] * math.exp(-time / resonance[2]) * sin(2 * math.pi * resonance[1] * pitch * time)
+		-- the strike and the bounces: short noise bursts (a fixed generator: every client renders the same click)
+		seed = (seed * 16807) % 2147483647
+		local noise = seed / 1073741823.5 - 1
+		local burst = min(1, time / 0.0001) * math.exp(-time / 0.0005)
+		for _, bounce in ipairs(version.bounces) do
+			if time >= bounce[1] then burst = burst + bounce[2] * math.exp(-(time - bounce[1]) / 0.00035) end
 		end
-		-- (a 0.2 ms fade in: no step at the start)
-		value = value * min(1, time / 0.0002)
+		local excitation = noise * burst
+		local value = excitation * CLICK_DIRECT
+		for bandIndex, filter in ipairs(filters) do
+			local output = filter.b0 * excitation + filter.b2 * filter.x2 - filter.a1 * filter.y1 - filter.a2 * filter.y2
+			filter.x2, filter.x1 = filter.x1, excitation
+			filter.y2, filter.y1 = filter.y1, output
+			value = value + output * CLICK_BANDS[bandIndex][3]
+		end
+		muffled = muffled + (value - muffled) * muffle
+		value = muffled * math.exp(-time / CLICK_TAIL) * min(1, (count - index) / (0.004 * TICK_RATE))
 		samples[index] = value
 		peak = max(peak, abs(value))
 	end
-	for index = 1, count do samples[index] = samples[index] / peak * 0.9 * level end
+	for index = 1, count do samples[index] = samples[index] / max(peak, 1e-9) * 0.9 * version.level end
 	return samples, count
 end
 
 local function buildTickSounds()
 	tickSounds = {}
-	for _, version in ipairs({ { "on", 1, 1 }, { "off", TOCK_PITCH, TOCK_LEVEL } }) do
-		local samples, count = renderClick(version[2], version[3])
-		local name = string.format("audio_engine_indicator_%d_%s", AudioEngine.IndicatorSerial, version[1])
+	for _, which in ipairs({ "on", "off" }) do
+		local samples, count = renderClick(CLICK_VERSIONS[which])
+		local name = string.format("audio_engine_indicator_%d_%s", AudioEngine.IndicatorSerial, which)
 		sound.Generate(name, TICK_RATE, count / TICK_RATE, function(sampleIndex) return samples[sampleIndex + 1] or 0 end)
-		tickSounds[version[1]] = name
+		tickSounds[which] = name
 	end
 end
 
