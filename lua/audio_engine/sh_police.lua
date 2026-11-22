@@ -13,10 +13,17 @@
 	Lightbar model space: long axis X (-29.7..29.7), front +Y, the message board at the rear,
 	base at z 0, lenses z 3.3..5.0: the same way round as the TDM cars (nose +Y, -X the
 	driver's side), so it mounts unturned.
+
+	With the police_lightbar addon (addons/police_lightbar in this repo) the bar is its rebuild,
+	models/perpheads/props/police_lightbar_leds.mdl: the same body, every LED lens on its own
+	material (police_lightbar/lens_*), so cl_police can light each lens itself (SetSubMaterial).
 ]]
 local AudioEngine = AUDIO_ENGINE
 
-AudioEngine.LIGHTBAR_MODEL = "models/perpheads/props/police_lightbar.mdl"
+AudioEngine.LIGHTBAR_ORIGINAL_MODEL = "models/perpheads/props/police_lightbar.mdl"
+AudioEngine.LIGHTBAR_LED_MODEL = "models/perpheads/props/police_lightbar_leds.mdl"
+-- the rebuild where it's installed (the server picks: it spawns the bar)
+AudioEngine.LIGHTBAR_MODEL = util.IsValidModel(AudioEngine.LIGHTBAR_LED_MODEL) and AudioEngine.LIGHTBAR_LED_MODEL or AudioEngine.LIGHTBAR_ORIGINAL_MODEL
 AudioEngine.LIGHTBAR_ANGLE = Angle(0, 0, 0)
 
 -- spawn name (AudioEngine.JOB_VEHICLES) -> where the bar sits, in the car's model space: centre line,
@@ -172,26 +179,31 @@ AudioEngine.LIGHT_MODES = { "CODE 2", "CODE 3" }
 --[[
 	LED modules of the bar: pos = lens centre, n = outward normal, w = width.
 	group: o outer, i inner, c centre, k corner; side -1 = driver's side (red), 1 = passenger's
-	side (blue), 0 = centre (white)
+	side (blue), 0 = centre (white). lens = the module's own material on the LED model
+	(police_lightbar/lens_<lens>; the front has no centre lens: nil)
 	Written as read from the mesh, which is in the root bone's frame (turned -90 deg about Z:
 	x = rear, y = passenger's side); module() turns them into model space (x, y) -> (y, -x)
 ]]
 local MODULE_HEIGHT = 4.15
-local function lightbarModule(meshX, meshY, normalX, normalY, width, group, side)
-	return { position = Vector(meshY, -meshX, MODULE_HEIGHT), normal = Vector(normalY, -normalX, 0), width = width, group = group, side = side }
+local function lightbarModule(meshX, meshY, normalX, normalY, width, group, side, lens)
+	return { position = Vector(meshY, -meshX, MODULE_HEIGHT), normal = Vector(normalY, -normalX, 0), width = width, group = group, side = side, lens = lens }
 end
 
+-- (mesh x < 0 is the front face, mesh y < 0 the driver's side)
+local SIDE_NAMES = { [-1] = "driver", [1] = "passenger" }
 AudioEngine.LIGHTBAR_MODULES = {}
 for _, faceSide in ipairs({ -1, 1 }) do
 	local faceX = 7.6 * faceSide
-	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(faceX, 0, faceSide, 0, 10, "c", 0))
+	local face = faceSide < 0 and "front" or "rear"
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(faceX, 0, faceSide, 0, 10, "c", 0, faceSide > 0 and "rear_centre" or nil))
 	for _, side in ipairs({ -1, 1 }) do
-		table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(faceX, 10 * side, faceSide, 0, 9.5, "i", side))
-		table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(faceX, 19.35 * side, faceSide, 0, 9, "o", side))
+		table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(faceX, 10 * side, faceSide, 0, 9.5, "i", side, face .. "_" .. SIDE_NAMES[side] .. "_inner"))
+		table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(faceX, 19.35 * side, faceSide, 0, 9, "o", side, face .. "_" .. SIDE_NAMES[side] .. "_outer"))
 	end
 end
 for _, side in ipairs({ -1, 1 }) do
-	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(-6.2, 26.6 * side, -0.88, 0.48 * side, 4.8, "k", side))
-	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(-1, 29.6 * side, 0.05, side, 5, "k", side))
-	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(5.2, 26.7 * side, 0.71, 0.7 * side, 4.9, "k", side))
+	local corner = "corner_" .. SIDE_NAMES[side]
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(-6.2, 26.6 * side, -0.88, 0.48 * side, 4.8, "k", side, corner .. "_front"))
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(-1, 29.6 * side, 0.05, side, 5, "k", side, corner .. "_side"))
+	table.insert(AudioEngine.LIGHTBAR_MODULES, lightbarModule(5.2, 26.7 * side, 0.71, 0.7 * side, 4.9, "k", side, corner .. "_rear"))
 end

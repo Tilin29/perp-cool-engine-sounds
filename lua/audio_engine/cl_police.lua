@@ -13,6 +13,11 @@
 	Colours by the car's scheme (NW2 audio_lightscheme): on the bar per side, built-in lamps keep
 	their lens's own colour. A car whose audio_lightbar is itself has built-in lamps
 	(AudioEngine.BUILTIN_LIGHTS), placed by its body bone.
+
+	The LED bar model (AudioEngine.LIGHTBAR_LED_MODEL, every lens its own material) lights the lenses
+	themselves: a lit module's lens gets police_lightbar/lit_<colour> (SetSubMaterial, only when it
+	changes), and the glow sprite and dynamic light stay; the drawn lens quad is left out there. A
+	colour whose lit texture isn't there yet (the user paints them) keeps the drawn quad.
 ]]
 local AudioEngine = AUDIO_ENGINE
 
@@ -49,11 +54,30 @@ local COLORS = {
 	yellow = Color(255, 170, 10),
 }
 -- the bar's colour per side (-1 driver's, 0 centre, 1 passenger's) by scheme
-local SCHEME_SIDES = {
-	police = { [-1] = COLORS.red, [0] = COLORS.white, [1] = COLORS.blue },
-	fire = { [-1] = COLORS.red, [0] = COLORS.yellow, [1] = COLORS.yellow },
-	medical = { [-1] = COLORS.red, [0] = COLORS.white, [1] = COLORS.white },
+local SCHEME_SIDE_NAMES = {
+	police = { [-1] = "red", [0] = "white", [1] = "blue" },
+	fire = { [-1] = "red", [0] = "yellow", [1] = "yellow" },
+	medical = { [-1] = "red", [0] = "white", [1] = "white" },
 }
+local SCHEME_SIDES = {}
+for scheme, names in pairs(SCHEME_SIDE_NAMES) do
+	SCHEME_SIDES[scheme] = {}
+	for side, name in pairs(names) do SCHEME_SIDES[scheme][side] = COLORS[name] end
+end
+
+-- the LED bar's lit lens material per colour, or false while its texture isn't there
+local litMaterials = {}
+local function litMaterial(colorName)
+	local found = litMaterials[colorName]
+	if found == nil then
+		local path = "police_lightbar/lit_" .. colorName
+		local material = Material(path)
+		local texture = not material:IsError() and material:GetTexture("$basetexture")
+		found = (texture and not texture:IsError()) and path or false
+		litMaterials[colorName] = found
+	end
+	return found
+end
 local glowColor = Color(255, 255, 255)
 
 -- which half of the wig-wag a module flashes in: -1 or 1 (the centre modules have their own timing)
@@ -97,12 +121,30 @@ end
 local emergencyCars = {}
 local nextRefresh = 0
 
+-- the LED bar's lens name -> its material slot (SetSubMaterial's index), kept per bar entity; nil on
+-- any other model
+local lensSlotCache = setmetatable({}, { __mode = "k" })
+local function lensSlotsOf(lightbar)
+	if string.lower(lightbar:GetModel() or "") ~= AudioEngine.LIGHTBAR_LED_MODEL then return nil end
+	local slots = lensSlotCache[lightbar]
+	if slots then return slots end
+	slots = {}
+	for index, path in ipairs(lightbar:GetMaterials()) do
+		local lens = string.match(string.lower(path), "police_lightbar/lens_([%w_]+)$")
+		if lens then slots[lens] = index - 1 end
+	end
+	lensSlotCache[lightbar] = slots
+	return slots
+end
+
 local function refreshList()
 	emergencyCars = {}
 	for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
 		local lightbar = vehicle:GetNW2Entity("audio_lightbar")
 		if IsValid(lightbar) then
-			local entry = { vehicle = vehicle, lightbar = lightbar, sides = SCHEME_SIDES[vehicle:GetNW2String("audio_lightscheme", "police")] or SCHEME_SIDES.police }
+			local scheme = vehicle:GetNW2String("audio_lightscheme", "police")
+			if not SCHEME_SIDES[scheme] then scheme = "police" end
+			local entry = { vehicle = vehicle, lightbar = lightbar, sides = SCHEME_SIDES[scheme], sideNames = SCHEME_SIDE_NAMES[scheme] }
 			if lightbar == vehicle then
 				local builtinSet = AudioEngine.BUILTIN_LIGHTS[string.lower(vehicle:GetModel() or "")]
 				local bone = builtinSet and vehicle:LookupBone(builtinSet.bone)
@@ -111,6 +153,7 @@ local function refreshList()
 					table.insert(emergencyCars, entry)
 				end
 			else
+				entry.lensSlots = lensSlotsOf(lightbar)
 				table.insert(emergencyCars, entry)
 			end
 		end
@@ -124,9 +167,12 @@ local function lightModeOf(entry)
 	return vehicle:GetNW2Int("audio_lights", 0)
 end
 
-local function drawLens(worldPosition, worldNormal, width, height, color, eyePosition)
-	render.SetMaterial(LENS_MATERIAL)
-	render.DrawQuadEasy(worldPosition, worldNormal, width, height, color, 0)
+local function drawLens(worldPosition, worldNormal, width, height, color, eyePosition, lensLit)
+	-- (a lens the LED model lights itself needs no drawn quad, only the glow)
+	if not lensLit then
+		render.SetMaterial(LENS_MATERIAL)
+		render.DrawQuadEasy(worldPosition, worldNormal, width, height, color, 0)
+	end
 	local toEye = eyePosition - worldPosition
 	local distance = toEye:Length()
 	local facing = worldNormal:Dot(toEye) / math.max(distance, 1)
@@ -153,7 +199,9 @@ local function drawBar(entry, mode, phaseTime, eyePosition)
 	local forward, right, up = angles:Forward(), angles:Right(), angles:Up()
 	for _, lamp in ipairs(AudioEngine.LIGHTBAR_MODULES) do
 		if isLit(lamp, mode, phaseTime) then
-			drawLens(LocalToWorld(lamp.position, angle_zero, barPosition, angles), turned(forward, right, up, lamp.normal), lamp.width, LENS_HEIGHT, entry.sides[lamp.side], eyePosition)
+			local lensLit = entry.litLenses and lamp.lens and entry.litLenses[lamp.lens]
+			drawLens(LocalToWorld(lamp.position, angle_zero, barPosition, angles), turned(forward, right, up, lamp.normal), lamp.width, LENS_HEIGHT,
+				entry.sides[lamp.side], eyePosition, lensLit)
 		end
 	end
 end
@@ -240,6 +288,27 @@ local function lightSurroundings(entry, mode, phaseTime)
 	end
 end
 
+-- the LED bar's lenses: each lit module's lens on its colour's lit material, the others back on
+-- their own (only what changed is set); entry.litLenses = the lenses lit this frame, for drawBar
+local function setLenses(entry, mode, phaseTime)
+	local slots, lightbar = entry.lensSlots, entry.lightbar
+	-- (what each lens shows is kept on the bar: the list's entries are made again every LIST_REFRESH)
+	lightbar.audioShownLenses = lightbar.audioShownLenses or {}
+	local shown = lightbar.audioShownLenses
+	entry.litLenses = entry.litLenses or {}
+	for _, lamp in ipairs(AudioEngine.LIGHTBAR_MODULES) do
+		local slot = lamp.lens and slots[lamp.lens]
+		if slot then
+			local wanted = mode > 0 and isLit(lamp, mode, phaseTime) and litMaterial(entry.sideNames[lamp.side]) or ""
+			if shown[lamp.lens] ~= wanted then
+				lightbar:SetSubMaterial(slot, wanted)
+				shown[lamp.lens] = wanted
+			end
+			entry.litLenses[lamp.lens] = wanted ~= ""
+		end
+	end
+end
+
 local litCarsByDistance = {}
 hook.Add("Think", "audio_engine_police", function()
 	local now = CurTime()
@@ -251,6 +320,10 @@ hook.Add("Think", "audio_engine_police", function()
 	local eyePosition = EyePos()
 	table.Empty(litCarsByDistance)
 	for _, entry in ipairs(emergencyCars) do
+		if entry.lensSlots and IsValid(entry.lightbar) then
+			local near = entry.lightbar:GetPos():DistToSqr(eyePosition) < DRAW_DIST * DRAW_DIST
+			setLenses(entry, near and lightModeOf(entry) or 0, now + entry.vehicle:EntIndex() * PHASE_PER_INDEX)
+		end
 		if lightModeOf(entry) > 0 then
 			entry.distanceSqr = entry.lightbar:GetPos():DistToSqr(eyePosition)
 			if entry.distanceSqr < DLIGHT_DIST * DLIGHT_DIST then table.insert(litCarsByDistance, entry) end

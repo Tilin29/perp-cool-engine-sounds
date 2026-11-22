@@ -56,7 +56,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   the model's own lamps `AudioEngine.BUILTIN_LIGHTS[model]` { bone, lamps { pos, n, w, h, color, side, group } } in the body bone's space
   (GTA IV ports turn car.body 90 deg; drawn through `GetBoneMatrix`), picked from the lens material's vertices and texture colours
   with an MDL/VVD reader (headlights, tail lights, indicators left out); such a car is its own NW2 `audio_lightbar`; `AudioEngine.POLICE_BY_SCRIPT` from `AudioEngine.JOB_VEHICLES`; `AudioEngine.LIGHTBAR_MODULES` = the LED
-  lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669: model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
+  lenses of `models/perpheads/props/police_lightbar.mdl`, workshop 2897742669 (its textures live in that item's content.gma under
+  materials/models/jarheads/props/police_lightbar/; copies of the 6 the bar uses and an LED rebuild of it are the separate
+  addon `addons/police_lightbar/` (see "Police lightbar" below)): model space long axis X, front +Y like the cars, so `AudioEngine.LIGHTBAR_ANGLE` 0; its mesh is in a root bone
   turned -90 deg, which `module()` undoes; -X driver's side, red; +X blue; centre white). `sv_police.lua`: on spawn (script, or the
   spawn entry's `AudioPerpScript`) sets the livery skin (11; Crown Vic police 12, its 11 is the taxi; Transit has one skin), hides the
   Crown Vic's taxi sign/meter, parents a `prop_dynamic` bar (NW2 `audio_lightbar`); `audio_engine_lights [0-2]` (driver only) steps
@@ -412,6 +414,25 @@ its handling `scripts/vehicles/plpd/sl65amg_rtu.txt`, the spawn entries (Vehicle
 once `AUDIO_ENGINE.RegisterCar` exists (autorun goes in name order, else at Initialize), which also gives it the trumpet horn in `CAR_HORN.CONFIG.models`.
 The core never names it. The dev harnesses still use it as their test car: they dofile sh_car.lua after sh_config (dev/build.py inlines it too).
 `dev/baker/check_syntax.js` also compiles `addons/*/lua`.
+
+## Police lightbar (separate addon)
+`addons/police_lightbar/`: its own GMod addon like the SL65 (copy it into garrysmod/addons/ next to this one), not part of the engine.
+- The rebuild `models/perpheads/props/police_lightbar_leds.mdl`: PERP's bar (workshop 2897742669) body only, every LED lens on its own
+  material `materials/police_lightbar/lens_<face>_<side>_<inner|outer>` / `lens_rear_centre` / `lens_corner_<side>_<front|side|rear>`
+  (15; the front face has no centre lens), so each lens can be lit by itself. In the original all lenses shared 2 materials (`LEDs` /
+  `LEDs2`) and every lens quad mapped the whole texture (UV 0..1): no texture could light them separately. Made by our own decompiler
+  (`dev/police_lightbar/`, README there; no Crowbar): SMD in the pose the game draws (the original's root bone turns its mesh -90 deg),
+  turned for `$staticprop` (studiomdl turns it +90) and wound for studiomdl; checked against the original: all 608 triangles in place,
+  same winding, same uvs. Left out (unused by us): screen bodygroups, 11 message skins, the screen bone, screenflip.
+  `AudioEngine.LIGHTBAR_MODEL` = it when `util.IsValidModel`, else the original (`LIGHTBAR_ORIGINAL_MODEL`).
+- cl_police lights a lit module's lens with `police_lightbar/lit_<white|red|yellow|blue>` (SetSubMaterial on the bar, only on change,
+  state on the bar entity `audioShownLenses`; `AudioEngine.LIGHTBAR_MODULES[i].lens`), keeps the glow sprite and dynamic light, and drops
+  the drawn lens quad there. The lit VMTs (UnlitGeneric) are in; their VTFs (`police_lightbar/lit_<colour>.vtf`) are the user's to paint:
+  a colour without one keeps the drawn quad (`litMaterial`). Not yet run in game.
+- Copies of the bar's 6 VTFs at their original path `materials/models/jarheads/props/police_lightbar/` (housing, housing_nrm, housing_exp,
+  led_small, led_large, plastic) for the user to repaint: they replace the workshop's by path (the lens VMTs use led_small / led_large).
+  Not yet confirmed in game that the addon's copy wins over the workshop item's.
+- Players need the addon downloaded (workshop upload or resource.AddFile) to see any of it.
 
 ## Police siren (separate module, may not stay)
 Own loader `lua/autorun/police_siren_init.lua`, files in `lua/police_siren/`, studio in `dev/siren_studio/`: delete those three
