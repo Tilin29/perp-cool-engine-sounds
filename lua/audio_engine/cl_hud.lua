@@ -582,6 +582,8 @@ local TICK_SECONDS = 0.06
 local CLICK_MODES = { { 1700, 0.005, 1 }, { 850, 0.009, 0.5 } }
 local CLICK_ATTACK = 0.0006        -- s, raised cosine
 local CLICK_DETUNE = 1.006
+-- the click's peak (x audio_engine_indicator_volume): 70 % of the 0.9 it was first played at (the user)
+local CLICK_PEAK = 0.63
 local CLICK_VERSIONS = { on = { pitch = 1, level = 1 }, off = { pitch = 0.76, level = 0.8 } }
 AudioEngine.IndicatorSerial = (AudioEngine.IndicatorSerial or 0) + 1
 local tickSounds   -- { on = name, off = name } once generated
@@ -602,7 +604,7 @@ local function renderClick(version)
 		samples[index] = value
 		peak = max(peak, abs(value))
 	end
-	for index = 1, count do samples[index] = samples[index] / max(peak, 1e-9) * 0.9 * version.level end
+	for index = 1, count do samples[index] = samples[index] / max(peak, 1e-9) * CLICK_PEAK * version.level end
 	return samples, count
 end
 
