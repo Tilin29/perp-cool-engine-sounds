@@ -39,7 +39,7 @@ local clusterConVar = CreateClientConVar("audio_engine_cluster", "0", false, fal
 local cos, sin, rad, min, max, floor, abs, clamp = math.cos, math.sin, math.rad, math.min, math.max, math.floor, math.abs, math.Clamp
 
 -- the design's size of each cluster x this x (screen height / 1080) x audio_engine_hud_scale
-local CLUSTER_SIZE = { a = 0.7, d = 0.7, a5 = 0.7, a3 = 0.7, a4 = 0.42, b = 0.75, c = 0.65 }   -- (A4 smaller: the user's)
+local CLUSTER_SIZE = { a = 0.7, d = 0.7, a5 = 0.7, a3 = 0.7, a4 = 0.48, b = 0.75, c = 0.65 }   -- (A4 smaller: the user's)
 local BOTTOM_MARGIN = 20       -- px at 1080 between the cluster and the bottom of the screen
 local MIN_FONT = 9             -- px: smaller text can't be read
 
