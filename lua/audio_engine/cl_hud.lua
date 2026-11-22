@@ -1069,14 +1069,11 @@ local function drawModern(info, vehicle, police)
 		band(x, y, 185, 186, 0, 360, D.rim, 6)
 		band(x, y, 115.5, 116.5, 0, 360, D.innerRim, 6)
 	end
-	-- the centre panel: the design's 168 x 166 with LIGHTS / SIREN, else a small box just round the
-	-- fuel block (narrower, 8 px round it)
+	-- the centre panel: the design's 168 x 166 with LIGHTS / SIREN, else as wide but only as tall as
+	-- the fuel block (8 px above and below it)
 	local contentLeft, contentRight = 430, 570
 	local panelLeft, panelTop, panelWidth, panelHeight = 416, 147, 168, 166
-	if not police then
-		contentLeft, contentRight = 448, 552
-		panelLeft, panelTop, panelWidth, panelHeight = 438, 199.5, 124, 61
-	end
+	if not police then panelTop, panelHeight = 199.5, 61 end
 	local panelX, panelY = place(panelLeft, panelTop)
 	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY + 8 * pixel, panelWidth * pixel, panelHeight * pixel, Color(0, 0, 0, 70))
 	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY, panelWidth * pixel, panelHeight * pixel, faded(D.face, 235))
