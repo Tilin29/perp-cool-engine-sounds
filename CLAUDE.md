@@ -489,7 +489,8 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   voice scaled to whole cycles per loop, vibrato/tremolo whole cycles, rendered twice and the second pass kept, peak 0.95.
 - `sh_siren.lua`: `PoliceSiren.SoundingTone(veh)`: the driver's pick (NW2 `siren_tone`, valid while NW2 `siren_at` = the light mode it was
   picked in), else `lightTones[mode]` of the car's scheme (`PoliceSiren.Scheme`). `sv_siren.lua`: `police_siren_tone` (next in the scheme's cycle,
-  then off), driver only, lights on.
+  then off), driver only, lights on. The driver getting out silences it, lights left on (the user): siren_tone "" at the current mode
+  (`PlayerLeaveVehicle` on the car itself; passengers' pods have no lightbar), so it stays off back in until the tone key or a new mode.
 - `cl_siren.lua`: builds a tone twice (outside / inside) in a coroutine (5 ms/frame; stored as the engine's loops are, one
   pre-roll sample [y_L, y_1 .. y_L] with loopStart 1: the game loops from sample 1, and without it every pass skipped y_1,
   a tick the user heard on the wail) the first time a car near sounds it (a failed one isn't retried); `sound.Generate`
