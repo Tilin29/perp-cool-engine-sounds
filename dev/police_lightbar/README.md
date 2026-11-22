@@ -7,13 +7,13 @@ The PERPHeads light bar (`models/perpheads/props/police_lightbar.mdl`, workshop 
 Then `install.cmd` copies the addon into garrysmod/addons (restart GMod). Run the steps from a working folder (scratch, not the repo):
 
 1. `python -I gma_index.py <workshop>/content/4000/2897742669/content.gma` writes `index.json` (the archive's file list).
-2. `python -I decompile.py` writes `src/lightbar_leds.smd` (body only, the mesh as stored: the game draws the original
-   turned +90 deg and studiomdl turns a `$staticprop` +90 too; triangles wound for studiomdl; lenses named by where they
-   end up) and `src/lens_textures.json`.
+2. `python -I decompile.py` writes `src/lightbar_leds.smd` (body only, the mesh as stored: studiomdl turns a `$staticprop`
+   +90 deg, which puts the bar's front at +Y like the cars; turned -90 it sat back to front on the cars; triangles wound
+   for studiomdl; lenses named by where they end up) and `src/lens_textures.json`.
 3. Copy `police_lightbar_leds.qc` into `src/`, then
    `<GarrysMod>/bin/studiomdl.exe -game <GarrysMod>/garrysmod -nop4 police_lightbar_leds.qc`; it writes to
    `garrysmod/models/perpheads/props/`: move the .mdl, .vvd and .dx90.vtx into `addons/police_lightbar/models/perpheads/props/`.
-4. `python -I verify.py` compares the build with the original (drawn turned +90): every triangle in the same place and
+4. `python -I verify.py` compares the build with the original's mesh turned +90: every triangle in the same place and
    winding, and every lens at sh_police's module table position.
 
 Left out of the rebuild (our bar never uses them): the LED / basic screen bodygroups, their 11 message skins,

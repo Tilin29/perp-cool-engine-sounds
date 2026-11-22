@@ -34,7 +34,7 @@ oMats, _, orig = load(read(b + '.mdl'), read(b + '.vvd'), read(b + '.dx90.vtx'))
 n = 'X:/SteamLibrary/steamapps/common/GarrysMod/garrysmod/addons/cool_engine_sounds_perpcars/addons/police_lightbar/models/perpheads/props/police_lightbar_leds'
 nMats, nRot, new = load(open(n + '.mdl', 'rb').read(), open(n + '.vvd', 'rb').read(), open(n + '.dx90.vtx', 'rb').read())
 import math
-oRot = (0, 0, math.pi / 2)   # the original is drawn turned +90 (mesh (x, y) -> (-y, x))
+oRot = (0, 0, math.pi / 2)   # the rebuild is the original's mesh turned +90 (mesh (x, y) -> (-y, x))
 print('new root rotation', [round(r, 4) for r in nRot])
 print('new materials', nMats)
 import math

@@ -36,8 +36,9 @@ for k in range(I(vtx, lod)):
         for t in range(0, ni, 3):
             triangles.append((materials[meshMaterial[k]], [meshStart[k] + ids[idx[t + q]] for q in range(3)]))
 
-# the game draws the original's mesh turned +90 deg about Z: (x, y) -> (-y, x) (its idle pose and poseToBone
-# together; -90 was the first guess and came out back to front in game, the user). studiomdl turns a
+# the rebuild is the mesh turned +90 deg about Z: (x, y) -> (-y, x), front +Y like the cars. The first build
+# turned it -90 (as the original seemed to be drawn: its message board at the rear) and sat back to front on
+# the cars in game (the user); how the original itself is drawn wasn't confirmed. studiomdl turns a
 # $staticprop's SMD +90 deg itself, so the SMD is the mesh as it is
 def toModel(x, y, z): return (x, y, z)
 
