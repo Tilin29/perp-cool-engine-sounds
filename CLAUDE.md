@@ -270,7 +270,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
 - `cl_hud.lua`: the instrument cluster (the old panel is gone), centred at the bottom of the screen, no panel behind it
   (the user's), from the user's design canvas "Speedometer HUD" (claude.ai artifact 9u8bvacxqDaVy57zJ6s3tr: artboards A classic, B
   floating arc, C motorsport strip, A2 classic + police, A3 60s vintage, A4 80s digital, A5 German hatch, D modern digital, D2 wide-screen; positions are its pixels x `CLUSTER_SIZE` x screen height / 1080 x
-  `audio_engine_hud_scale`; the 1000 x 460 ones all use A's box, so they sit in the same place). `audio_engine_cluster` 0..8 (the user's order: 1 = A, 2 = D,
+  `audio_engine_hud_scale`; the 1000 x 460 ones all use A's box, so they sit in the same place; the rev counter is always on the left of the speedometer, the user's: D, A5 and D2 were mirrored for it, in the design too). `audio_engine_cluster` 0..8 (the user's order: 1 = A, 2 = D,
   3 = A5, 4 = A3, 5 = A4, 6 = D2, 7 = B, 8 = C; 0 = automatic = A; client, NOT archived: every load starts on 0).
   Clusters with emergency-light controls (`CLUSTERS[id].police`: A, D, A5, D2: LIGHTS / SIREN in its centre panel over the warning / "Systems OK" line; its speed / revs / fuel are rings of bars, digits outlined, the gears N..top round the rev ring's foot) show them in any emergency car (a light bar or built-in lights, NW2 `audio_lightbar`:
   police, fire and medical, `EMERGENCY_SCHEMES` by `audio_lightscheme`; not unmarked cars): each scheme's siren buttons are named for its tones

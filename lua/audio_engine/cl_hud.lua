@@ -1052,6 +1052,7 @@ local D = {
 	dotOff = Color(255, 255, 255, 46), divider = Color(255, 255, 255, 20), rim = Color(255, 255, 255, 25), innerRim = Color(255, 255, 255, 13),
 }
 local D_RADIUS = 160
+local D_RPM_X, D_SPEED_X = 220, 780
 
 -- one of D's dials: track, ticks and numbers, the lit arc to `value`, the needle
 local function modernDial(centreX, max, major, value, fillColor, needleColor, redFrom, label)
@@ -1109,17 +1110,18 @@ local function drawModern(info, vehicle, police)
 	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY, panelWidth * pixel, panelHeight * pixel, faded(D.face, 235))
 	draw.NoTexture()
 
+	-- the rev counter on the left, the speedometer on the right
 	local revColor = info.rpm >= info.redline and D.red or D.accent
-	modernDial(220, info.dialSpeed, info.speedMajor, info.speed, WHITE, WHITE, nil, function(value) return string.format("%d", value) end)
-	modernDial(780, info.dialRpm, info.majorRpm, info.rpm, revColor, info.rpm >= info.redline and D.needleRed or WHITE, info.redline,
+	modernDial(D_SPEED_X, info.dialSpeed, info.speedMajor, info.speed, WHITE, WHITE, nil, function(value) return string.format("%d", value) end)
+	modernDial(D_RPM_X, info.dialRpm, info.majorRpm, info.rpm, revColor, info.rpm >= info.redline and D.needleRed or WHITE, info.redline,
 		function(value) return string.format("%d", value / 1000) end)
 
 	-- read-outs in the dials
-	textShadowed(tostring(info.speedDigits), "D_Speed", 220, 166, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	text(info.usesMph and "mph" or "km/h", "D_Unit", 220, 254, D.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	text(info.gear, "D_Gear", 780, 166, D.accent, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, faded(D.accent, 102))
-	text(info.rpmDigits .. " rpm", "D_Unit", 780, 254, D.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	text("×1000 rpm", "D_Small", 780, 310, D.faint, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	textShadowed(tostring(info.speedDigits), "D_Speed", D_SPEED_X, 166, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text(info.usesMph and "mph" or "km/h", "D_Unit", D_SPEED_X, 254, D.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text(info.gear, "D_Gear", D_RPM_X, 166, D.accent, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, faded(D.accent, 102))
+	text(info.rpmDigits .. " rpm", "D_Unit", D_RPM_X, 254, D.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text("×1000 rpm", "D_Small", D_RPM_X, 310, D.faint, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
 	if info.left then indicatorGlow(472, 120, 14, D.green) end
 	ICONS.arrowA(472, 120, 28, info.left and D.green or D.off, true)
@@ -1184,6 +1186,7 @@ G.tickGlow = faded(G.lighting, 60)
 G.lcdGlow = faded(G.lcd, 150)
 G.buttonLabel = mix(G.lighting, WHITE, 0.4)
 local G_SWEEP = 125
+local G_RPM_X, G_SPEED_X = 290, 710   -- the rev counter on the left, the speedometer on the right
 
 -- the housing: a box between two half circles round the dials' centres
 local function stadium(centreY, radius, color)
@@ -1242,22 +1245,22 @@ local function drawGerman(info, vehicle, police)
 	stadium(230, 174, G.bevel)
 	stadium(230, 170, G.house)
 
-	germanDial(290, info.dialSpeed, info.speedMajor, nil, "G_Speed", function(value) return string.format("%d", value) end)
-	germanDial(710, info.dialRpm, info.majorRpm, info.redline, "G_Tach", function(value) return string.format("%d", value / 1000) end)
+	germanDial(G_SPEED_X, info.dialSpeed, info.speedMajor, nil, "G_Speed", function(value) return string.format("%d", value) end)
+	germanDial(G_RPM_X, info.dialRpm, info.majorRpm, info.redline, "G_Tach", function(value) return string.format("%d", value / 1000) end)
 
 	-- the fuel gauge inside the rev counter
-	local fuelX, fuelY = place(710, 336)
+	local fuelX, fuelY = place(G_RPM_X, 336)
 	for tick = 0, 4 do
 		local x0, y0 = polar(fuelX, fuelY, 30, -50 + tick * 25)
 		local x1, y1 = polar(fuelX, fuelY, tick % 2 == 0 and 40 or 36, -50 + tick * 25)
 		line(x0, y0, x1, y1, 1.6 * pixel, tick == 0 and G.red or G.core)
 	end
-	text("0", "G_Small", 676, 330, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, G.glow)
-	text("1/1", "G_Small", 744, 330, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, G.glow)
-	ICONS.fuel(710, 352, 15, info.lowFuel and G.amber or G.off, 2.4)
+	text("0", "G_Small", G_RPM_X - 34, 330, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, G.glow)
+	text("1/1", "G_Small", G_RPM_X + 34, 330, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, G.glow)
+	ICONS.fuel(G_RPM_X, 352, 15, info.lowFuel and G.amber or G.off, 2.4)
 
-	text(info.usesMph and "mph" or "km/h", "G_Unit", 290, 296, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, G.glow)
-	text("×1000 /min", "G_Small", 710, 168, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, G.glow)
+	text(info.usesMph and "mph" or "km/h", "G_Unit", G_SPEED_X, 296, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, G.glow)
+	text("×1000 /min", "G_Small", G_RPM_X, 168, G.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, G.glow)
 
 	-- the LCD: gear and speed
 	rectangle(462, 162, 76, 118, G.lcdBack)
@@ -1287,9 +1290,9 @@ local function drawGerman(info, vehicle, police)
 	if info.right then indicatorGlow(576, 106, 13, G.green) end
 	ICONS.arrowA(576, 106, 24, info.right and G.green or G.off, false)
 
-	germanNeedle(290, 230, 142, 26, 2.6, -G_SWEEP + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 2 * G_SWEEP, 17)
-	germanNeedle(710, 230, 142, 26, 2.6, -G_SWEEP + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 2 * G_SWEEP, 17)
-	germanNeedle(710, 336, 36, 6, 1.4, -50 + clamp(info.fuelShown, 0, 1) * 100, 6)
+	germanNeedle(G_SPEED_X, 230, 142, 26, 2.6, -G_SWEEP + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 2 * G_SWEEP, 17)
+	germanNeedle(G_RPM_X, 230, 142, 26, 2.6, -G_SWEEP + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 2 * G_SWEEP, 17)
+	germanNeedle(G_RPM_X, 336, 36, 6, 1.4, -50 + clamp(info.fuelShown, 0, 1) * 100, 6)
 end
 
 ---------------------------------------------------------------------------
@@ -1480,7 +1483,8 @@ local W = {
 W.blueDim = mix(W.blue, rgb("05070a"), 0.8)
 W.orangeDim = mix(W.orange, rgb("05070a"), 0.8)
 local W_CENTRE_Y, W_BARS = 226, 64
-local W_LEFT_X, W_RIGHT_X = 230, 770
+-- the rev ring on the left, the speed (and fuel) on the right
+local W_RPM_X, W_SPEED_X = 230, 770
 -- design px: a LIGHTS / SIREN row, the warning row (its divider + 8 + the icon), "Systems OK", the gap between rows
 local W_BLOCK, W_MESSAGE, W_READY, W_GAP = 36, 29, 16, 8
 
@@ -1542,16 +1546,16 @@ local function drawWide(info, vehicle, police)
 	roundedBox(8, 419, 103, 162, 238, W.panelRim)
 	roundedBox(8, 420, 104, 160, 236, W.panel)
 
-	for _, centreX in ipairs({ W_LEFT_X, W_RIGHT_X }) do
+	for _, centreX in ipairs({ W_SPEED_X, W_RPM_X }) do
 		local x, y = place(centreX, W_CENTRE_Y)
 		band(x, y, 127.5, 128.5, 0, 360, W.ring, 6)
 		band(x, y, 79.5, 80.5, 0, 360, W.innerRing, 6)
 	end
 
-	-- speed (left) and revs (right) as bars, the fuel's bars under the speed
-	wideBars(W_LEFT_X, clamp(info.speed / info.dialSpeed, 0, 1), W.blue, W.blueDim)
-	wideBars(W_RIGHT_X, clamp(info.rpm / info.dialRpm, 0, 1), W.orange, W.orangeDim, info.redline / info.dialRpm)
-	local fuelX, fuelY = place(W_LEFT_X, W_CENTRE_Y)
+	-- revs (left) and speed (right) as bars, the fuel's bars under the speed
+	wideBars(W_SPEED_X, clamp(info.speed / info.dialSpeed, 0, 1), W.blue, W.blueDim)
+	wideBars(W_RPM_X, clamp(info.rpm / info.dialRpm, 0, 1), W.orange, W.orangeDim, info.redline / info.dialRpm)
+	local fuelX, fuelY = place(W_SPEED_X, W_CENTRE_Y)
 	local fuelColor = info.lowFuel and W.amber or WHITE
 	for i = 0, 13 do
 		local barShare = i / 13
@@ -1561,20 +1565,20 @@ local function drawWide(info, vehicle, police)
 		local lit = info.fuelShown > 0.02 and barShare <= info.fuelShown + 0.04
 		line(x0, y0, x1, y1, 4 * pixel, lit and fuelColor or W.off)
 	end
-	text("E", "W_Label", 194, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-	text("F", "W_Label", 266, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-	ICONS.fuel(W_LEFT_X, 292, 16, info.lowFuel and W.amber or W.off, 2.4)
+	text("E", "W_Label", W_SPEED_X - 36, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	text("F", "W_Label", W_SPEED_X + 36, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	ICONS.fuel(W_SPEED_X, 292, 16, info.lowFuel and W.amber or W.off, 2.4)
 
 	-- read-outs
-	text(info.unitLabel, "W_Label", W_LEFT_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	hollowText(tostring(info.speedDigits), "W_Big", W_LEFT_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	text("×1000rpm", "W_Label", W_RIGHT_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
-	hollowText(info.rpmSmoothThousands, "W_Big", W_RIGHT_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text(info.unitLabel, "W_Label", W_SPEED_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	hollowText(tostring(info.speedDigits), "W_Big", W_SPEED_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text("×1000rpm", "W_Label", W_RPM_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	hollowText(info.rpmSmoothThousands, "W_Big", W_RPM_X, 196, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
 	-- the gears round the bottom of the rev ring (N, 1.. the car's top gear; R in N's place reversing)
 	local gearCount = clamp(info.gearCount, 1, 8)
 	local spacing = min(9, 54 / gearCount)
-	local gearsX, gearsY = place(W_RIGHT_X, W_CENTRE_Y)
+	local gearsX, gearsY = place(W_RPM_X, W_CENTRE_Y)
 	for index = 0, gearCount do
 		local label = index == 0 and (info.gear == "R" and "R" or "N") or tostring(index)
 		local current = label == info.gear
