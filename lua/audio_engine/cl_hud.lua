@@ -863,6 +863,9 @@ local EMERGENCY_SCHEMES = {
 -- (the horn key's tone red, the user's)
 local SIREN_BUTTON_COLORS = { SIREN_AMBER, SIREN_AMBER, POLICE_RED }
 local SIREN_BUTTON_WIDTH, LIGHT_BUTTON_WIDTH, BUTTON_GAP = 80, 100, 6
+-- s: CODE 3's pattern period (sh_police's AudioEngine.LIGHT_PERIODS[2]): the classic's CODE 3 button
+-- is lit for its first half
+local CODE3_BUTTON_BLINK = 0.5
 
 -- the tone, from whoever answers the engine's lights-label hook (the siren module: its tone name, PHASER while the horn plays it)
 local function sirenTone(vehicle)
@@ -884,8 +887,14 @@ function drawPolicePanel(vehicle, scheme)
 		drawButton(100 + (index - 1) * (SIREN_BUTTON_WIDTH + BUTTON_GAP), 50, SIREN_BUTTON_WIDTH, button[1], on, on, SIREN_BUTTON_COLORS[index])
 	end
 
-	-- the light mode's button flashes with the car's own lights (cl_police: either side lit)
+	-- the light mode's button flashes with the car's own lights (cl_police: either side lit). CODE 3's
+	-- quick flashes (~16 a second) made the button flicker: it blinks with the pattern's halves instead
+	-- (lit while the driver's side flashes, CODE3_BUTTON_BLINK), in step with the car (the user: slower)
 	local flashing = lightsFlashing(vehicle, lightMode)
+	if lightMode == 2 then
+		local patternTime = AudioEngine.LightPhaseTime and AudioEngine.LightPhaseTime(vehicle, 2) or RealTime()
+		flashing = patternTime % CODE3_BUTTON_BLINK < CODE3_BUTTON_BLINK / 2
+	end
 	drawButton(712, 50, LIGHT_BUTTON_WIDTH, "CODE 2", lightMode == 1, lightMode == 1 and flashing, scheme.second)
 	drawButton(712 + LIGHT_BUTTON_WIDTH + BUTTON_GAP, 50, LIGHT_BUTTON_WIDTH, "CODE 3", lightMode == 2, lightMode == 2 and flashing, POLICE_RED)
 end
