@@ -1199,6 +1199,8 @@ local D = {
 	dotOff = Color(255, 255, 255, 46), divider = Color(255, 255, 255, 20), rim = Color(255, 255, 255, 25), innerRim = Color(255, 255, 255, 13),
 }
 local D_RADIUS = 160
+-- the faces' and centre panel's opacity: barely see-through, as D3 (the user's; the design's 0.92 showed too much)
+local D_FACE_ALPHA = 255 * 0.99
 local D_RPM_X, D_SPEED_X = 220, 780
 
 -- one of D's dials: track, ticks and numbers, the lit arc to `value`, the needle
@@ -1238,11 +1240,11 @@ local function modernStatus(y, title, dotColor, value, valueColor)
 end
 
 local function drawModern(info, vehicle, police)
-	-- faces (a little see-through, like the design's 0.92) and the centre panel
+	-- faces (barely see-through, D_FACE_ALPHA) and the centre panel
 	for _, centreX in ipairs({ 220, 780 }) do
 		local x, y = place(centreX, 230)
 		disc(x, y + 10 * pixel, 190, Color(0, 0, 0, 70))
-		disc(x, y, 186, faded(D.face, 235))
+		disc(x, y, 186, faded(D.face, D_FACE_ALPHA))
 		disc(x, y - 12 * pixel, 140, faded(D.faceIn, 70))
 		band(x, y, 185, 186, 0, 360, D.rim, 6)
 		band(x, y, 103.5, 104.5, 0, 360, D.innerRim, 6)   -- (the design's 116 ran through the bigger numbers)
@@ -1254,7 +1256,7 @@ local function drawModern(info, vehicle, police)
 	if not police then panelTop, panelHeight = 199.5, 61 end
 	local panelX, panelY = place(panelLeft, panelTop)
 	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY + 8 * pixel, panelWidth * pixel, panelHeight * pixel, Color(0, 0, 0, 70))
-	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY, panelWidth * pixel, panelHeight * pixel, faded(D.face, 235))
+	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY, panelWidth * pixel, panelHeight * pixel, faded(D.face, D_FACE_ALPHA))
 	draw.NoTexture()
 
 	-- the rev counter on the left, the speedometer on the right
