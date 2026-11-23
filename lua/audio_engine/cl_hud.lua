@@ -1,6 +1,6 @@
 --[[
 	Audio Engine - driver HUD (client): the instrument cluster, centred at the bottom of the screen,
-	no panel behind it. Eight looks, picked with audio_engine_cluster (not saved: every load starts
+	no panel behind it. Nine looks, picked with audio_engine_cluster (not saved: every load starts
 	on 0; the numbers are the user's order):
 	  0   automatic (the default): the classic
 	  1   classic (design A): rev counter, speedometer and fuel gauge as dials with needles
@@ -9,12 +9,13 @@
 	  4   60s vintage (A3): cream faces, chrome rims, jewel lamps
 	  5   80s digital (A4): a VFD rev arc of blocks, seven-segment speed and gear
 	  6   wide-screen (D2): two round faces, revs and speed as rings of bars, a centre panel
-	  7   floating arc (B): one rev arc with the speed and gear in its middle
-	  8   motorsport strip (C): a bar of rev segments over speed / gear / rpm read-outs
+	  7   angled display (D3): a see-through hexagonal screen, revs and speed as scales along its edges
+	  8   floating arc (B): one rev arc with the speed and gear in its middle
+	  9   motorsport strip (C): a bar of rev segments over speed / gear / rpm read-outs
 	In an emergency car (a light bar or built-in lights: police, fire, medical) the ones with emergency-light controls show
 	them: the classic turns into A2 (its police look, siren tones and CODE 2 / CODE 3 buttons), D
-	and D2 show LIGHTS / SIREN in their centre panel, A5 buttons under its LCD.
-	Drawn after the "Speedometer HUD" design canvas (artboards A, A2, A3, A4, A5, B, C, D, D2): the
+	and D2 show LIGHTS / SIREN in their centre panel, D3 in its status column, A5 buttons under its LCD.
+	Drawn after the "Speedometer HUD" design canvas (artboards A, A2, A3, A4, A5, B, C, D, D2, D3): the
 	positions and sizes below are that design's pixels, scaled to the screen.
 
 	Indicators, hazards and headlights are the cluster's own lamps on the default controls (see
@@ -35,12 +36,12 @@ end
 local scaleConVar = CreateClientConVar("audio_engine_hud_scale", "1", true, false, "HUD size multiplier", 0.5, 2)
 -- (not archived: the user's rule, every load starts on A)
 local clusterConVar = CreateClientConVar("audio_engine_cluster", "0", false, false,
-	"Instrument cluster: 0 automatic (the classic), 1 classic, 2 modern digital, 3 German hatch, 4 60s vintage, 5 80s digital, 6 wide-screen, 7 floating arc, 8 motorsport strip. Emergency cars get the light/siren controls on 1-3 and 6. Not saved")
+	"Instrument cluster: 0 automatic (the classic), 1 classic, 2 modern digital, 3 German hatch, 4 60s vintage, 5 80s digital, 6 wide-screen, 7 angled display, 8 floating arc, 9 motorsport strip. Emergency cars get the light/siren controls on 1-3, 6 and 7. Not saved")
 
 local cos, sin, rad, min, max, floor, abs, clamp = math.cos, math.sin, math.rad, math.min, math.max, math.floor, math.abs, math.Clamp
 
 -- the design's size of each cluster x this x (screen height / 1080) x audio_engine_hud_scale
-local CLUSTER_SIZE = { a = 0.7, d = 0.7, a5 = 0.7, a3 = 0.7, a4 = 0.6, d2 = 0.7, b = 0.75, c = 0.65 }   -- (A4 smaller: the user's)
+local CLUSTER_SIZE = { a = 0.7, d = 0.7, a5 = 0.7, a3 = 0.7, a4 = 0.6, d2 = 0.7, d3 = 0.7, b = 0.75, c = 0.65 }   -- (A4 smaller: the user's)
 local BOTTOM_MARGIN = 20       -- px at 1080 between the cluster and the bottom of the screen
 local MIN_FONT = 9             -- px: smaller text can't be read
 
@@ -82,6 +83,10 @@ local FONTS = {
 	W_Label = { 13, 600, false, nil, "Roboto" }, W_Big = { 58, 600, false, nil, "Roboto" }, W_Gear = { 13, 600, false, nil, "Roboto" },
 	W_GearOn = { 17, 600, false, 3, "Roboto" }, W_PanelGear = { 24, 600, false, nil, "Roboto" }, W_Percent = { 15, 600, false, nil, "Roboto" },
 	W_Tiny = { 11, 600, false, nil, "Roboto" }, W_Mode = { 20, 600, false, nil, "Roboto" }, W_Message = { 13, 500, false, nil, "Roboto" },
+	-- D3 (H): angled display (Roboto for the design's Inter Tight)
+	H_Num = { 21, 500, false, nil, "Roboto" }, H_Big = { 58, 500, false, nil, "Roboto" }, H_Unit = { 13, 500, false, nil, "Roboto" },
+	H_Gear = { 34, 600, false, 4, "Roboto" }, H_Header = { 13, 600, false, nil, "Roboto" }, H_Row = { 14, 400, false, nil, "Roboto" },
+	H_RowValue = { 14, 600, false, nil, "Roboto" }, H_Message = { 13, 500, false, nil, "Roboto" },
 }
 local fontScales = {}
 local function fontsFor(prefix, scale)
@@ -1784,6 +1789,313 @@ local function drawWide(info, vehicle, police)
 end
 
 ---------------------------------------------------------------------------
+-- D3: angled display (an elongated hexagonal screen in a bezel; revs on the left, speed on the
+-- right, each a scale running along the screen's edge with a lit sweep and a needle across it;
+-- a STATUS column in the middle with the lamps over it)
+---------------------------------------------------------------------------
+local H = {
+	accent = rgb("3d7bff"), red = rgb("ff3b30"), redNumber = rgb("ff5a4f"), green = rgb("4ade80"), amber = rgb("ffb53a"),
+	code2 = rgb("5aa8ff"), code3 = rgb("ff5147"),
+	number = Color(255, 255, 255, 217), track = Color(255, 255, 255, 191), tick = Color(255, 255, 255, 204),
+	minor = Color(255, 255, 255, 102), off = Color(255, 255, 255, 46), fuelOff = Color(255, 255, 255, 41),
+	unit = Color(255, 255, 255, 166), header = Color(255, 255, 255, 179), rowLabel = Color(255, 255, 255, 191),
+	grey = Color(255, 255, 255, 128), divider = Color(255, 255, 255, 31), rule = Color(255, 255, 255, 20),
+}
+H.accentLight = mix(H.accent, WHITE, 0.35)
+H.accentGlow = faded(H.accent, 153)
+H.sweep = faded(H.accent, 56)
+H.litGlow = faded(H.accent, 60)
+H.needleGlow = faded(H.accent, 90)
+H.rowLit = faded(H.accent, 34)
+H.messageBack = faded(H.amber, 26)
+-- the screen and its bezel: barely see-through (the user's: 0.8 and 0.9 were too much)
+H.screenAlpha = 0.99
+H.screen = rgb("07090d", 255 * H.screenAlpha)
+-- the bezel's vertical gradient: top, middle (y 232), bottom
+H.bezelTop, H.bezelMiddle, H.bezelBottom = rgb("2c2f34"), rgb("0d0e10"), rgb("1c1e21")
+H.rpmX, H.speedX = 262, 738
+
+-- the outlines and scales, worked out once (in a block: the file is near Lua's 200 locals)
+do
+	-- points per rounded corner of the scales / of the bezel's outlines
+	local H_CORNER_STEPS, H_OUTLINE_STEPS = 12, 6
+
+	-- a closed outline: start x, y, then { x, y } straight on or { control x, control y, x, y } a quadratic curve
+	local function sampleOutline(definition)
+		local xs, ys = { definition[1] }, { definition[2] }
+		for index = 3, #definition do
+			local entry = definition[index]
+			if #entry == 2 then
+				xs[#xs + 1], ys[#ys + 1] = entry[1], entry[2]
+			else
+				local x0, y0 = xs[#xs], ys[#ys]
+				for step = 1, H_OUTLINE_STEPS do
+					local t = step / H_OUTLINE_STEPS
+					local u = 1 - t
+					xs[#xs + 1] = u * u * x0 + 2 * u * t * entry[1] + t * t * entry[3]
+					ys[#ys + 1] = u * u * y0 + 2 * u * t * entry[2] + t * t * entry[4]
+				end
+			end
+		end
+		-- (it ends where it started)
+		xs[#xs], ys[#ys] = nil, nil
+		return { x = xs, y = ys, count = #xs }
+	end
+	H.outer = sampleOutline({ 396, 58, { 604, 58 }, { 620, 58, 635.8, 60.6 }, { 806.4, 88.5 }, { 840, 94, 858.4, 122.6 },
+		{ 913.4, 208 }, { 934, 240, 914.1, 272.4 }, { 847.7, 380.4 }, { 832, 406, 802, 406 }, { 198, 406 }, { 168, 406, 152.3, 380.4 },
+		{ 85.9, 272.4 }, { 66, 240, 86.6, 208 }, { 141.6, 122.6 }, { 160, 94, 193.6, 88.5 }, { 364.2, 60.6 }, { 380, 58, 396, 58 } })
+	H.inner = sampleOutline({ 392, 66, { 608, 66 }, { 620, 66, 631.8, 68 }, { 806.4, 97.1 }, { 836, 102, 852.1, 127.3 },
+		{ 905.7, 211.3 }, { 924, 240, 906.1, 268.9 }, { 839.7, 375.9 }, { 826, 398, 800, 398 }, { 200, 398 }, { 174, 398, 160.3, 375.9 },
+		{ 93.9, 268.9 }, { 76, 240, 94.3, 211.3 }, { 147.9, 127.3 }, { 164, 102, 193.6, 97.1 }, { 368.2, 68 }, { 380, 66, 392, 66 } })
+	-- each bezel piece's colour, by its height (made once)
+	H.bezelColors = {}
+	for index = 1, H.outer.count do
+		local nextIndex = index % H.outer.count + 1
+		local y = (H.outer.y[index] + H.outer.y[nextIndex] + H.inner.y[index] + H.inner.y[nextIndex]) / 4
+		local color = y < 232 and mix(H.bezelTop, H.bezelMiddle, clamp((y - 58) / 174, 0, 1))
+			or mix(H.bezelMiddle, H.bezelBottom, clamp((y - 232) / 174, 0, 1))
+		H.bezelColors[index] = faded(color, 255 * H.screenAlpha)
+	end
+
+	--[[
+		A dial's scale: along the bottom from the middle, out to a point on the outer side, back in and
+		along the top edge rising to the centre (the design's pathPts). direction 1 = the left (revs),
+		-1 = mirrored (speed). Normals point into the dial: the ticks sit outside the line, the numbers,
+		the sweep and the needle inside.
+	]]
+	local function hexDialPath(direction)
+		local function sideX(x) return direction > 0 and x or 1000 - x end
+		local corners = { { sideX(374), 372 }, { sideX(184), 372 }, { sideX(108), 240 }, { sideX(170), 128 }, { sideX(384), 92 } }
+		local radii = { 0, 30, 34, 30, 0 }
+		local xs, ys = { corners[1][1] }, { corners[1][2] }
+		for index = 2, #corners - 1 do
+			local corner, radius = corners[index], radii[index]
+			local function toward(other)
+				local deltaX, deltaY = other[1] - corner[1], other[2] - corner[2]
+				local distance = math.sqrt(deltaX * deltaX + deltaY * deltaY)
+				return corner[1] + deltaX * radius / distance, corner[2] + deltaY * radius / distance
+			end
+			local x0, y0 = toward(corners[index - 1])
+			local x1, y1 = toward(corners[index + 1])
+			-- (straight to the corner: one segment is exact, points along it are interpolated)
+			xs[#xs + 1], ys[#ys + 1] = x0, y0
+			for step = 1, H_CORNER_STEPS do
+				local t = step / H_CORNER_STEPS
+				local u = 1 - t
+				xs[#xs + 1] = u * u * x0 + 2 * u * t * corner[1] + t * t * x1
+				ys[#ys + 1] = u * u * y0 + 2 * u * t * corner[2] + t * t * y1
+			end
+		end
+		xs[#xs + 1], ys[#ys + 1] = corners[#corners][1], corners[#corners][2]
+		local count = #xs
+		local path = { x = xs, y = ys, count = count, length = { 0 }, segmentNX = {}, segmentNY = {}, vertexNX = {}, vertexNY = {} }
+		for index = 1, count - 1 do
+			local deltaX, deltaY = xs[index + 1] - xs[index], ys[index + 1] - ys[index]
+			local length = math.sqrt(deltaX * deltaX + deltaY * deltaY)
+			path.length[index + 1] = path.length[index] + length
+			length = max(length, 1e-6)
+			path.segmentNX[index], path.segmentNY[index] = direction * -deltaY / length, direction * deltaX / length
+		end
+		for index = 1, count do
+			local before, after = max(1, index - 1), min(count - 1, index)
+			local normalX, normalY = path.segmentNX[before] + path.segmentNX[after], path.segmentNY[before] + path.segmentNY[after]
+			local length = max(math.sqrt(normalX * normalX + normalY * normalY), 1e-6)
+			path.vertexNX[index], path.vertexNY[index] = normalX / length, normalY / length
+		end
+		path.total = path.length[count]
+		return path
+	end
+	H.rpmPath, H.speedPath = hexDialPath(1), hexDialPath(-1)
+end
+
+-- the point `share` (0..1) along a dial's path: x, y, the normal there, the index of the point after it
+local function hexPathAt(path, share)
+	local target = clamp(share, 0, 1) * path.total
+	local index = 2
+	while index < path.count and path.length[index] < target do index = index + 1 end
+	local segment = index - 1
+	local segmentLength = path.length[index] - path.length[segment]
+	local t = segmentLength > 0 and (target - path.length[segment]) / segmentLength or 0
+	local x0, y0 = path.x[segment], path.y[segment]
+	return x0 + (path.x[index] - x0) * t, y0 + (path.y[index] - y0) * t, path.segmentNX[segment], path.segmentNY[segment], index
+end
+
+--[[
+	The path up to `share` as a band `near`..`far` design px inside it (negative = outside). Along the
+	points' own normals the pieces share their edges exactly (no overlaps for see-through colours);
+	`perSegment` gives each piece its segment's rectangle instead (the sweep: 40 px is wider than
+	the corners' radius, where the points' normals would fold over), which overlap: drawn as a mask.
+]]
+local function hexBand(path, share, near, far, color, perSegment)
+	if share <= 0.002 then return end
+	local endX, endY, endNormalX, endNormalY, endIndex = hexPathAt(path, share)
+	local list = points(4)
+	for index = 1, endIndex - 1 do
+		local last = index == endIndex - 1
+		local x0, y0 = path.x[index], path.y[index]
+		local x1, y1 = path.x[index + 1], path.y[index + 1]
+		if last then x1, y1 = endX, endY end
+		local normalX0, normalY0, normalX1, normalY1
+		if perSegment then
+			normalX0, normalY0 = path.segmentNX[index], path.segmentNY[index]
+			normalX1, normalY1 = normalX0, normalY0
+		else
+			normalX0, normalY0 = path.vertexNX[index], path.vertexNY[index]
+			if last then
+				normalX1, normalY1 = endNormalX, endNormalY
+			else
+				normalX1, normalY1 = path.vertexNX[index + 1], path.vertexNY[index + 1]
+			end
+		end
+		list[1].x, list[1].y = place(x0 + normalX0 * near, y0 + normalY0 * near)
+		list[2].x, list[2].y = place(x1 + normalX1 * near, y1 + normalY1 * near)
+		list[3].x, list[3].y = place(x1 + normalX1 * far, y1 + normalY1 * far)
+		list[4].x, list[4].y = place(x0 + normalX0 * far, y0 + normalY0 * far)
+		fillPoly(list, 4, color)
+	end
+end
+
+-- the sweeps (overlapping rectangles) through the stencil: drawn once wherever any covers
+H.mask = Color(0, 0, 0, 1)
+local function hexSweeps(rpmShare, speedShare)
+	render.ClearStencil()
+	render.SetStencilEnable(true)
+	render.SetStencilWriteMask(255)
+	render.SetStencilTestMask(255)
+	render.SetStencilReferenceValue(1)
+	render.SetStencilCompareFunction(STENCIL_ALWAYS)
+	render.SetStencilPassOperation(STENCIL_REPLACE)
+	render.SetStencilFailOperation(STENCIL_KEEP)
+	render.SetStencilZFailOperation(STENCIL_KEEP)
+	render.OverrideColorWriteEnable(true, false)
+	hexBand(H.rpmPath, rpmShare, 0, 40, H.mask, true)
+	hexBand(H.speedPath, speedShare, 0, 40, H.mask, true)
+	render.OverrideColorWriteEnable(false, false)
+	render.SetStencilCompareFunction(STENCIL_EQUAL)
+	render.SetStencilPassOperation(STENCIL_KEEP)
+	local x, y = place(0, 0)
+	surface.SetDrawColor(H.sweep)
+	surface.DrawRect(x, y, 1000 * pixel, 460 * pixel)
+	render.SetStencilEnable(false)
+end
+
+-- ticks (outside the line) and numbers (inside); red from `redFrom`
+local function hexScale(path, maximum, major, minor, label, redFrom)
+	local count = math.Round(maximum / minor)
+	for index = 0, count do
+		local value = index * minor
+		local x, y, normalX, normalY = hexPathAt(path, value / maximum)
+		local isMajor = abs(value / major - math.Round(value / major)) < 1e-6
+		local inRed = redFrom and value >= redFrom - 1e-9
+		local length = isMajor and 10 or 6
+		local x0, y0 = place(x - normalX * 2, y - normalY * 2)
+		local x1, y1 = place(x - normalX * length, y - normalY * length)
+		line(x0, y0, x1, y1, (inRed and 2.4 or (isMajor and 2 or 1.4)) * pixel, inRed and H.red or (isMajor and H.tick or H.minor))
+		if isMajor then
+			text(label(value), "H_Num", x + normalX * 24, y + normalY * 24, inRed and H.redNumber or H.number, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
+	end
+end
+
+-- the lit line along the scale up to the value, and the needle across it there
+local function hexLitAndNeedle(path, share)
+	share = clamp(share, 0, 1)
+	hexBand(path, share, -5, 5, H.litGlow)
+	hexBand(path, share, -2, 2, H.accent)
+	hexBand(path, 1, -0.8, 0.8, H.track)
+	local x, y, normalX, normalY = hexPathAt(path, share)
+	local x0, y0 = place(x + normalX * 44, y + normalY * 44)
+	local x1, y1 = place(x - normalX * 8, y - normalY * 8)
+	line(x0, y0, x1, y1, 9 * pixel, H.needleGlow)
+	line(x0, y0, x1, y1, 3 * pixel, WHITE)
+end
+
+local function drawHex(info, vehicle, police)
+	-- the bezel (pieces between the two outlines, coloured by height) and the screen inside it
+	local list = points(4)
+	for index = 1, H.outer.count do
+		local nextIndex = index % H.outer.count + 1
+		list[1].x, list[1].y = place(H.outer.x[index], H.outer.y[index])
+		list[2].x, list[2].y = place(H.outer.x[nextIndex], H.outer.y[nextIndex])
+		list[3].x, list[3].y = place(H.inner.x[nextIndex], H.inner.y[nextIndex])
+		list[4].x, list[4].y = place(H.inner.x[index], H.inner.y[index])
+		fillPoly(list, 4, H.bezelColors[index])
+	end
+	local screen = points(H.inner.count)
+	for index = 1, H.inner.count do screen[index].x, screen[index].y = place(H.inner.x[index], H.inner.y[index]) end
+	fillPoly(screen, H.inner.count, H.screen)
+
+	-- the scales: revs (red from the redline) on the left, speed on the right
+	local rpmShare = clamp(info.rpm / info.dialRpm, 0, 1)
+	local speedShare = clamp(info.speed / info.dialSpeed, 0, 1)
+	hexSweeps(rpmShare, speedShare)
+	hexLitAndNeedle(H.rpmPath, rpmShare)
+	hexLitAndNeedle(H.speedPath, speedShare)
+	hexScale(H.rpmPath, info.dialRpm, info.majorRpm, info.majorRpm / 2, function(value) return string.format("%d", value / 1000) end, info.redline)
+	hexScale(H.speedPath, info.dialSpeed, info.speedMajor, info.speedMajor / 2, function(value) return string.format("%d", value) end)
+	rectangle(400, 112, 1, 252, H.rule)
+	rectangle(600, 112, 1, 252, H.rule)
+
+	-- read-outs: revs (thousands) and gear on the left, speed and the fuel bar on the right
+	text(info.rpmSmoothThousands, "H_Big", H.rpmX, 172, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text("x1000 r/min", "H_Unit", H.rpmX, 234, H.unit, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	local gear = tonumber(info.gear) and ("D" .. info.gear) or info.gear
+	text(gear, "H_Gear", 306, 290, H.accentLight, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, H.accentGlow)
+	text(tostring(info.speedDigits), "H_Big", H.speedX, 172, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	text(string.lower(info.unitLabel), "H_Unit", H.speedX, 234, H.unit, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	ICONS.fuel(639.5, 308.5, 17, info.lowFuel and H.amber or H.off, 2.2)
+	local fuel = clamp(info.fuelShown, 0, 1)
+	for index = 0, 7 do
+		local lit = fuel >= (index + 0.5) / 8 or (index == 0 and fuel > 0.02)
+		rectangle(656 + index * 12, 302.5, 9, 12, lit and (info.lowFuel and H.amber or WHITE) or H.fuelOff)
+	end
+
+	-- the lamps over the status column, the indicators at the bottom of it (the user's: the design
+	-- had all five in one row over it, ~21 px; now ~30, the indicators the same size; they keep their glow)
+	local lampY = 86
+	ICONS.headlights(452, lampY, 30, info.headlights and H.green or H.off, 2.4)
+	ICONS.handbrake(500, lampY, 32, info.handbrake and H.red or H.off, 2.2)
+	ICONS.engine(548, lampY, 32, info.engine and H.amber or H.off, 2.2)
+	local indicatorY = 372
+	if info.left then indicatorGlow(440, indicatorY, 16, H.green) end
+	ICONS.arrowA(440, indicatorY, 30, info.left and H.green or H.off, true)
+	if info.right then indicatorGlow(560, indicatorY, 16, H.green) end
+	ICONS.arrowA(560, indicatorY, 30, info.right and H.green or H.off, false)
+
+	-- STATUS: LIGHTS / SIREN in an emergency car, the fuel, a warning
+	-- (lower than the design's 104: between the bigger lamps and the indicators, the user's)
+	local statusTop = 140
+	text("STATUS", "H_Header", 500, statusTop, H.header, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	rectangle(412, statusTop + 22, 176, 1, H.divider)
+	local rowY = statusTop + 29
+	local function statusRow(label, value, valueColor, lit)
+		if lit then
+			rectangle(412, rowY, 176, 31, H.rowLit)
+			outline(412, rowY, 176, 31, H.accent)
+		end
+		text(label, "H_Row", 421, rowY + 15.5, H.rowLabel, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+		text(value, "H_RowValue", 579, rowY + 15.5, valueColor, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+		rowY = rowY + 37
+	end
+	if police then
+		local lightMode = vehicle:GetNW2Int("audio_lights", 0)
+		local second = police.second == POLICE_BLUE and H.code2 or police.second
+		statusRow("Lights", lightMode == 1 and "CODE 2" or (lightMode == 2 and "CODE 3" or "OFF"),
+			lightMode == 1 and second or (lightMode == 2 and H.code3 or H.grey), lightMode > 0)
+		local tone = sirenTone(vehicle)
+		statusRow("Siren", tone ~= "" and tone or "OFF", tone ~= "" and H.amber or H.grey, tone ~= "")
+	end
+	statusRow("Fuel", string.format("%d%%", floor(fuel * 100 + 0.5)), info.lowFuel and H.amber or WHITE, false)
+	local message = info.engine and "Check engine" or (info.lowFuel and "Low fuel" or "")
+	if message ~= "" then
+		rectangle(412, rowY, 176, 30, H.messageBack)
+		outline(412, rowY, 176, 30, H.amber)
+		warningIcon(430, rowY + 15, 18, H.amber)
+		text(message, "H_Message", 447, rowY + 15, WHITE, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	end
+end
+
+---------------------------------------------------------------------------
 -- HUD
 ---------------------------------------------------------------------------
 -- smoothRevs: the cluster shows the revs as a bar / segments (smoothRpmValue), not a needle alone.
@@ -1795,6 +2107,7 @@ local CLUSTERS = {
 	a3 = { box = A, draw = drawVintage, fonts = "V" },
 	a4 = { box = A, draw = drawDigital, fonts = "F", smoothRevs = true },
 	d2 = { box = A, draw = drawWide, fonts = "W", police = true, smoothRevs = true },
+	d3 = { box = A, draw = drawHex, fonts = "H", police = true, smoothRevs = true },
 	b ={ box = B, draw = drawArc, fonts = "B", smoothRevs = true },
 	c = { box = C, draw = drawStrip, fonts = "C", smoothRevs = true },
 }
@@ -1806,7 +2119,7 @@ local function emergencySchemeOf(vehicle)
 end
 
 -- audio_engine_cluster's numbers (the user's order) -> the design's clusters; 0 or anything else = the classic
-local CLUSTER_NUMBERS = { "a", "d", "a5", "a3", "a4", "d2", "b", "c" }
+local CLUSTER_NUMBERS = { "a", "d", "a5", "a3", "a4", "d2", "d3", "b", "c" }
 
 local function clusterFor()
 	return CLUSTER_NUMBERS[clusterConVar:GetInt()] or "a"
