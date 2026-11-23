@@ -1334,6 +1334,9 @@ G.glow = faded(G.lighting, 170)
 G.tickGlow = faded(G.lighting, 60)
 G.lcdGlow = faded(G.lcd, 150)
 G.buttonLabel = mix(G.lighting, WHITE, 0.4)
+-- the housing behind the dials: barely see-through, as D and D3 (the user's); the dials stay solid
+G.houseAlpha = 255 * 0.99
+G.bevelSeen, G.houseSeen = faded(G.bevel, G.houseAlpha), faded(G.house, G.houseAlpha)
 local G_SWEEP = 125
 local G_RPM_X, G_SPEED_X = 290, 710   -- the rev counter on the left, the speedometer on the right
 
@@ -1344,6 +1347,38 @@ local function stadium(centreY, radius, color)
 	disc(x, y, radius, color)
 	x, y = place(710, centreY)
 	disc(x, y, radius, color)
+end
+
+--[[
+	The housing's bevel and face through the stencil: its pieces (box, two discs; the face over the
+	bevel) overlap, and drawn straight in a see-through colour the overlaps would show darker.
+	Stencil 1 = the bevel's ring, 2 = the face; each filled once.
+]]
+local function germanHousing()
+	render.ClearStencil()
+	render.SetStencilEnable(true)
+	render.SetStencilWriteMask(255)
+	render.SetStencilTestMask(255)
+	render.SetStencilCompareFunction(STENCIL_ALWAYS)
+	render.SetStencilPassOperation(STENCIL_REPLACE)
+	render.SetStencilFailOperation(STENCIL_KEEP)
+	render.SetStencilZFailOperation(STENCIL_KEEP)
+	render.OverrideColorWriteEnable(true, false)
+	render.SetStencilReferenceValue(1)
+	stadium(230, 174, BLACK)
+	render.SetStencilReferenceValue(2)
+	stadium(230, 170, BLACK)
+	render.OverrideColorWriteEnable(false, false)
+	render.SetStencilCompareFunction(STENCIL_EQUAL)
+	render.SetStencilPassOperation(STENCIL_KEEP)
+	local x, y = place(100, 40)
+	render.SetStencilReferenceValue(1)
+	surface.SetDrawColor(G.bevelSeen)
+	surface.DrawRect(x, y, 800 * pixel, 380 * pixel)
+	render.SetStencilReferenceValue(2)
+	surface.SetDrawColor(G.houseSeen)
+	surface.DrawRect(x, y, 800 * pixel, 380 * pixel)
+	render.SetStencilEnable(false)
 end
 
 local function germanDial(centreX, max, major, redFrom, font, label)
@@ -1391,8 +1426,7 @@ end
 
 local function drawGerman(info, vehicle, police)
 	stadium(242, 176, Color(0, 0, 0, 90))
-	stadium(230, 174, G.bevel)
-	stadium(230, 170, G.house)
+	germanHousing()
 
 	germanDial(G_SPEED_X, info.dialSpeed, info.speedMajor, nil, "G_Speed", function(value) return string.format("%d", value) end)
 	germanDial(G_RPM_X, info.dialRpm, info.majorRpm, info.redline, "G_Tach", function(value) return string.format("%d", value / 1000) end)
