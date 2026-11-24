@@ -287,6 +287,18 @@ local function widenBounds(entity, pad)
 	entity:SetRenderBounds(bounds.mins - padding, bounds.maxs + padding)
 end
 
+-- the base gamemode's third-person vehicle camera sets its distance from the car's render bounds:
+-- widened, it zoomed out (the user). The camera is worked out with the car's own bounds
+local function withOwnBounds(entity, call, ...)
+	local bounds = IsValid(entity) and originalBounds[entity]
+	if not bounds or bounds.pad == 0 then return call(...) end
+	entity:SetRenderBounds(bounds.mins, bounds.maxs)
+	local results = { call(...) }
+	local padding = Vector(bounds.pad, bounds.pad, bounds.pad)
+	entity:SetRenderBounds(bounds.mins - padding, bounds.maxs + padding)
+	return unpack(results)
+end
+
 --[[
 	The render origin moves an entity's bones, so its attachments too, and the game builds the
 	driver's view from the car's eye attachment (and parents children to it). Left on between
@@ -606,7 +618,7 @@ local cameraFrame = -1
 
 local function calcView(originalCall, gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
 	updateFrame()
-	local view = originalCall("CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
+	local view = withOwnBounds(own.vehicle, originalCall, "CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
 	local entry = own.vehicle and displaced[own.vehicle]
 	if not entry then return view end
 	-- a copy: some cameras hand back the same table each frame
