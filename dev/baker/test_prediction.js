@@ -1,11 +1,7 @@
 /*
   Offline check of the driving prediction (lua/audio_engine/sh_handling.lua), no Garry's Mod needed:
 
-    node test_prediction.js [ping ms] [ticks per command packet]      (default 150, 1)
-
-  Ticks per packet 2 is GMod's default cl_cmdrate 30 at 66 tick: commands reach the server two at
-  a time, and the car's physics still steps once a tick (Handling.CommandClock evens that out;
-  NOCLOCK=1 sends the raw command number, as before it, to compare).
+    node test_prediction.js [ping ms]      (default 150)
 
   A simulated server runs a car on "Source" physics that the client doesn't know (its own engine
   curve, brakes, tyre forces and steering, plus random bumps), with the handling model on top as
@@ -27,8 +23,6 @@ const { LuaFactory } = require('wasmoon')
 
 const ADDON = path.resolve(__dirname, '..', '..')
 const PING = Number(process.argv[2] || 150)
-const BATCH = Math.max(1, Number(process.argv[3] || 1))
-const CLOCK = process.env.NOCLOCK ? 0 : 1
 
 ;(async () => {
   const L = await new LuaFactory().createEngine()
@@ -40,7 +34,7 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
     IN_FORWARD, IN_BACK, IN_MOVELEFT, IN_MOVERIGHT, IN_JUMP = 8, 16, 512, 1024, 2
     function CreateConVar() return { GetBool = function() return true end } end`)
   await L.doString(fs.readFileSync(path.join(ADDON, 'lua', 'audio_engine', 'sh_handling.lua'), 'utf8'))
-  await L.doString(`PING = ${PING} BATCH = ${BATCH} CLOCK = ${CLOCK}`)
+  await L.doString(`PING = ${PING}`)
   await L.doString(String.raw`
     local H = AUDIO_ENGINE.Handling
     local DT = 1 / 66
@@ -119,20 +113,15 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
       return { px = a.px + (b.px - a.px) * share, py = a.py + (b.py - a.py) * share, yaw = a.yaw + ((b.yaw - a.yaw + 540) % 360 - 180) * share }
     end
 
-    -- (as cl_handling's)
-    local function commandsAfter(base, list, now)
-      local number, count = base.command, 0
-      local last = base.buttons
+    local function commandsAfter(number, list, now)
+      local count = 0
+      local last = client.base.buttons
       for n = number + 1, math.min(client.newest, number + 32) do
         count = count + 1
         last = client.history[n] or last
         list[count] = last
       end
-      local fraction = math.max(0, math.min(1, (now - client.newestAt) / DT)) - (base.commandFraction or 0)
-      if fraction < 0 then
-        if count > 0 then count, fraction = count - 1, fraction + 1 else fraction = 0 end
-      end
-      return count, fraction, last
+      return count, math.max(0, math.min(1, (now - client.newestAt) / DT))
     end
 
     local stats = { predicted = {}, plain = {}, predictedYaw = {}, plainYaw = {}, jump = 0 }
@@ -152,14 +141,7 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
         local buttons = keysAt(clientTime)
         client.history[tickIndex] = buttons
         client.newest, client.newestAt = tickIndex, clientTime
-        -- (commands go out BATCH at a time, in one packet)
-        client.outgoing = client.outgoing or {}
-        client.outgoing[#client.outgoing + 1] = { number = tickIndex, buttons = buttons }
-        if tickIndex % BATCH == 0 then
-          local arrive = clientTime + UP + jitter()
-          for _, command in ipairs(client.outgoing) do toServer[#toServer + 1] = { arrive = arrive, number = command.number, buttons = command.buttons } end
-          client.outgoing = {}
-        end
+        toServer[#toServer + 1] = { arrive = clientTime + UP + jitter(), number = tickIndex, buttons = buttons }
         -- the server's tick, one up-latency behind the client's clock (as Source keeps them)
         serverTime = clientTime
         local latest
@@ -171,7 +153,6 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
         end
         if latest then server.command, server.buttons = latest.number, latest.buttons end
         serverTick(serverTime)
-        if server.command > 0 then server.clock = CLOCK == 1 and H.CommandClock(server.clock, server.command) or server.command end
         -- a crash nobody predicted: at 13 s the car stops dead against something (the model lets go, as
         -- sv_handling's impact callback makes it, easing back after impactHold + impactEase)
         if serverTime >= 13 and not server.crashed then
@@ -179,21 +160,18 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
           server.body.vx, server.body.vy, server.body.yawRate = 0, 0, 0
           server.impactAt = serverTime
         end
-        local impact, impactAge = false, nil
+        local impact = false
         if server.impactAt then
-          local share = H.ImpactShare(spec.settings, serverTime - server.impactAt)
-          server.body.controlShare = share
+          local settings = spec.settings
+          local share = (serverTime - server.impactAt - settings.impactHold) / settings.impactEase
+          server.body.controlShare = math.max(0, math.min(1, share))
           impact = share < 1
-          if impact then impactAge = serverTime - server.impactAt end
         end
         local serverTickIndex = math.floor(serverTime / DT + 0.5)
         truth[serverTickIndex] = { px = server.body.px, py = server.body.py, yaw = yawOf(server.body) }
         if serverTickIndex % 2 == 0 and random() > 0.03 then
           local state = H.CopyBody(server.body)
-          local clock = server.clock or 0
-          state.command, state.commandFraction = math.floor(clock), clock - math.floor(clock)
-          state.time, state.steer, state.drift = serverTime, server.state.steer, server.state.drift
-          state.modelOn, state.impactAge, state.blockedFor = true, impactAge, server.state.blockedFor
+          state.command, state.time, state.steer, state.drift = server.command, serverTime, server.state.steer, server.state.drift
           state.driving, state.limiter, state.impact, state.buttons = true, 0, impact, server.buttons
           toClient[#toClient + 1] = { arrive = serverTime + UP + jitter(), state = state }
         end
@@ -206,9 +184,7 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
           local state = message.state
           if not client.base or state.time > client.base.time then
             local previous = client.base
-            -- (as cl_handling's learnFrom: a straight run on the same keys)
-            if previous and state.time - previous.time < 0.15 and state.buttons == previous.buttons and not state.impact and not previous.impact
-              and math.abs(state.steer) <= 0.15 and math.abs(previous.steer) <= 0.15 and not state.drift and not previous.drift then
+            if previous and state.time - previous.time < 0.15 then
               local before, after = H.ForwardSpeed(previous, spec), H.ForwardSpeed(state, spec)
               H.Learn(client.learner, H.DriveMode(state.buttons, after, true, 0), (before + after) / 2, (after - before) / (state.time - previous.time) - H.SlopeAcceleration(state, spec))
             end
@@ -221,13 +197,13 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
         nextFrame = nextFrame + FRAME
         local base = client.base
         if base then
-          local count, fraction, lastButtons = commandsAfter(base, client.commands, clientTime)
-          local predicted = H.Predict(base, client.commands, count, fraction, spec, client.learner, DT, client.predicted, client.state, lastButtons)
+          local count, fraction = commandsAfter(base.command, client.commands, clientTime)
+          local predicted = H.Predict(base, client.commands, count, fraction, spec, client.learner, DT, client.predicted, client.state)
           if client.fresh then
             client.fresh = false
             if client.shown and client.previous then
-              local c2, f2, b2 = commandsAfter(client.previous, client.earlierCommands, clientTime)
-              local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState, b2)
+              local c2, f2 = commandsAfter(client.previous.command, client.earlierCommands, clientTime)
+              local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState)
               H.SmootherAbsorb(client.smoother, earlier, predicted)
             end
           end
@@ -282,7 +258,7 @@ const CLOCK = process.env.NOCLOCK ? 0 : 1
       response.predicted or -1, response.plain or -1, stats.jump, client.learner.samples) .. string.format('|%.3f|%.1f', stats.crashOff or 0, stats.crashWorst or 0))`)
   const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst] = result.split('|').map(Number)
   const m = (inch) => (inch * 0.0254).toFixed(2) + ' m'
-  console.log(`ping ${PING} ms, ${BATCH} command(s) a packet${CLOCK ? '' : ' (no command clock)'}, 3% of states lost, ${samples} acceleration samples learned`)
+  console.log(`ping ${PING} ms, 3% of states lost, ${samples} acceleration samples learned`)
   console.log(`  position off where the server will be:  predicted mean ${m(pm)}, 95% ${m(p95)}, worst ${m(pw)}`)
   console.log(`                                          plain Source mean ${m(qm)}, 95% ${m(q95)}, worst ${m(qw)}`)
   console.log(`  heading off:                            predicted mean ${pym.toFixed(1)} deg, 95% ${py95.toFixed(1)}, worst ${pyw.toFixed(1)}`)

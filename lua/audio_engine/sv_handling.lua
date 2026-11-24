@@ -32,10 +32,7 @@ AudioEngine.HU_PER_MPH = HU_PER_MPH
 local MPH_TO_METRES = 0.44704   -- m/s per mph
 
 -- p is a table as GetVehicleParams returns it (speeds in its units). Sets it on the car, giving
--- SetVehicleParams the speeds it wants. The unit is checked once (the engine's, the same for every
--- car): matchSteering re-sends the params every few mph at speed, and each check was a
--- GetVehicleParams for nothing
-local speedsInMph   -- nil until checked: true = SetVehicleParams takes mph, false = inches/s
+-- SetVehicleParams the speeds it wants, and checks the unit took.
 function AudioEngine.SetParams(vehicle, params)
 	params = table.Copy(params)
 	-- Source's wheels over FastCarSpeed matched to the model (matchSteering, below)
@@ -43,19 +40,15 @@ function AudioEngine.SetParams(vehicle, params)
 	if steerOverride and istable(params.steering) then
 		params.steering.degreesFast, params.steering.speedFast = steerOverride.degreesFast, steerOverride.speedFast
 	end
-	if speedsInMph ~= false then
-		for _, speedKey in ipairs(SPEED_KEYS) do
-			if params.engine and params.engine[speedKey] then params.engine[speedKey] = params.engine[speedKey] / HU_PER_MPH end
-		end
+	for _, speedKey in ipairs(SPEED_KEYS) do
+		if params.engine and params.engine[speedKey] then params.engine[speedKey] = params.engine[speedKey] / HU_PER_MPH end
 	end
 	if not pcall(vehicle.SetVehicleParams, vehicle, params) then return false end
-	if speedsInMph ~= nil then return true end
 	-- self-check the speed unit: if the engine took our mph as inches/s, set it again scaled
 	local succeeded, applied = pcall(vehicle.GetVehicleParams, vehicle)
-	if succeeded and istable(applied) and applied.engine and applied.engine.maxSpeed and params.engine and (params.engine.maxSpeed or 0) > 0 then
+	if succeeded and istable(applied) and applied.engine and applied.engine.maxSpeed and params.engine and params.engine.maxSpeed then
 		local expectedSpeed = params.engine.maxSpeed * HU_PER_MPH
-		speedsInMph = math.abs(applied.engine.maxSpeed - params.engine.maxSpeed) >= math.abs(applied.engine.maxSpeed - expectedSpeed)
-		if not speedsInMph then
+		if math.abs(applied.engine.maxSpeed - params.engine.maxSpeed) < math.abs(applied.engine.maxSpeed - expectedSpeed) then
 			for _, speedKey in ipairs(SPEED_KEYS) do
 				if params.engine[speedKey] then params.engine[speedKey] = params.engine[speedKey] * HU_PER_MPH end
 			end
@@ -309,9 +302,9 @@ end
 local function impactShareOf(vehicle, settings, now)
 	local impactAt = vehicle.audioImpactAt
 	if not impactAt then return 1 end
-	local share = Handling.ImpactShare(settings, now - impactAt)
-	if share >= 1 then vehicle.audioImpactAt = nil end
-	return share
+	local share = (now - impactAt - settings.impactHold) / settings.impactEase
+	if share >= 1 then vehicle.audioImpactAt = nil return 1 end
+	return math.max(0, share)
 end
 
 local function keyDown(player, key) return player:KeyDown(key) end
@@ -326,22 +319,11 @@ local function wantsState(driver)
 	return driver:GetInfoNum("audio_engine_predict", 1) ~= 0
 end
 
--- seconds (0..2.55) as a byte in hundredths
-local function writeHundredths(seconds) net.WriteUInt(math.Clamp(math.Round((seconds or 0) * 100), 0, 255), 8) end
-
--- (temporary, to find what draws the car swaying instead of turning on the test server)
-local clockConVar = CreateConVar("audio_engine_predict_clock", "1", FCVAR_NONE,
-	"Testing: 0 = the driver's state carries the last command number as it is (no command clock)", 0, 1)
-
-local function sendState(vehicle, driver, body, state, buttons, impact, impactAge, modelHere)
+local function sendState(vehicle, driver, body, state, buttons, impact)
 	if not wantsState(driver) then return end
 	net.Start("audio_engine_drive", true)
 	net.WriteUInt(vehicle:EntIndex(), 13)
-	-- (the command the car's physics stands at: Handling.CommandClock, whole part + 1/256ths)
-	local clock = math.max(0, (clockConVar:GetBool() and state.commandClock) or driver.audioCommandNumber or 0)
-	local whole = math.floor(clock)
-	net.WriteUInt(whole % 4294967296, 32)
-	net.WriteUInt(math.min(255, math.floor((clock - whole) * 256)), 8)
+	net.WriteUInt((driver.audioCommandNumber or 0) % 4294967296, 32)
 	net.WriteDouble(CurTime())   -- (a float is ~0.06 s coarse after 11 days up)
 	net.WriteFloat(body.px) net.WriteFloat(body.py) net.WriteFloat(body.pz)
 	local angles = vehicle:GetAngles()
@@ -357,12 +339,6 @@ local function sendState(vehicle, driver, body, state, buttons, impact, impactAg
 	net.WriteUInt(math.Round(body.controlShare * 100), 7)
 	net.WriteUInt(buttons, 5)
 	net.WriteUInt(vehicle.audioLimiterState or 0, 2)
-	-- (so the replay carries on as the server will: the model easing back after an impact, a
-	-- wall's gentle follow)
-	net.WriteBool(modelHere)
-	net.WriteBool(impactAge ~= nil)
-	if impactAge then writeHundredths(impactAge) end
-	writeHundredths(state.blockedFor and math.max(0, state.blockedFor) or 0)
 	net.Send(driver)
 end
 
@@ -465,8 +441,6 @@ local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
 	local contactAt = vehicle.audioContactAt
 	body.touching = contactAt ~= nil and now - contactAt < spec.settings.contactHold
 	local impactShare = impactShareOf(vehicle, spec.settings, now)
-	local impactAge = vehicle.audioImpactAt and now - vehicle.audioImpactAt or nil
-	if driver.audioCommandNumber then state.commandClock = Handling.CommandClock(state.commandClock, driver.audioCommandNumber) end
 	-- (carConfig.stability = false: a car registered without the model)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)
 	local modelHere = modelOn and modelAllowed(vehicle, carConfig)
@@ -488,9 +462,8 @@ local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
 	-- engine off (or starting): Source doesn't steer a car whose engine is disabled. The model's
 	-- steering (A/D, ramped by Control above) turns its front wheels instead, so it can be steered
 	-- rolling with the parking brake off (sv_engine.lua)
-	-- (every tick: it's cheap, and whatever Source does with its controls meanwhile is overwritten)
 	if not vehicle.audioDrivable and vehicle.SetSteering then vehicle:SetSteering(-state.steer, 0) end   -- (Source: right = +)
-	if sendNow then sendState(vehicle, driver, body, state, buttons, impactShare < 1, impactAge, modelHere) end
+	if sendNow then sendState(vehicle, driver, body, state, buttons, impactShare < 1) end
 end
 
 hook.Add("Tick", "audio_engine_handling", function()
