@@ -592,6 +592,8 @@ local function updateFrame()
 			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
 		end
 		own.displayPosition, own.displayAngles = toPosition, displayAngles
+		-- (for the readout: Source's pose now, before anything is drawn moved)
+		own.sourcePosition, own.sourceYaw = vehicle:GetPos(), vehicle:GetAngles().y
 		own.velocity = own.velocity or Vector()
 		own.velocity:SetUnpacked(predicted.vx, predicted.vy, predicted.vz)
 		own.velocityAt = realNow
@@ -626,6 +628,7 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	if type(view) == "table" then for key, value in pairs(view) do moved[key] = value end end
 	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
 	moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
+	own.cameraShift = moved.origin:Distance((type(view) == "table" and view.origin) or origin)
 	cameraFrame = FrameNumber()
 	return moved
 end
@@ -733,11 +736,12 @@ local function updateLive(realNow)
 	liveLine("corrections %.0f/s, mean %.1f in | wall stops %.0f%% of frames | camera not moved %.0f%% of frames",
 		corrections / seconds, corrections > 0 and (snapshot.correctionSum - last.correctionSum) / corrections or 0,
 		frames > 0 and per("clamped") / frames * 100 or 0, frames > 0 and per("cameraMissed") / frames * 100 or 0)
-	if IsValid(vehicle) and own.displayPosition and own.base then
+	if IsValid(vehicle) and own.displayPosition and own.sourcePosition and own.base then
 		local speed = math.sqrt(own.base.vx * own.base.vx + own.base.vy * own.base.vy)
-		local ahead = (own.displayPosition - vehicle:GetPos()):Length()
-		liveLine("drawn %.1f m ahead of Source's car (speed x lead = %.1f m) | turned %.1f deg from it",
-			ahead * 0.01905, speed * (own.lead or 0) * 0.01905, math.abs(math.NormalizeAngle(own.displayAngles.y - vehicle:GetAngles().y)))
+		local ahead = (own.displayPosition - own.sourcePosition):Length()
+		liveLine("drawn %.1f m ahead of Source's car (speed x lead = %.1f m) | turned %.1f deg from it | camera moved %.1f m",
+			ahead * 0.01905, speed * (own.lead or 0) * 0.01905, math.abs(math.NormalizeAngle(own.displayAngles.y - own.sourceYaw)),
+			(own.cameraShift or 0) * 0.01905)
 	end
 end
 
