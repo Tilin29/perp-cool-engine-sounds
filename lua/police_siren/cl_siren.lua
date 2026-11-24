@@ -43,6 +43,15 @@ local SIREN_BUDGET_MARGIN = 2
 local BUILD_BUDGET = 0.005
 local SWAP_FADE = 0.15
 --[[
+	A siren that was already sounding when you start (or stop) hearing it: the car came into the budget
+	(police_siren_maxcars), out of dormancy, or was seen for the first time. It fades in / out over
+	HEARD_FADE instead of the tone's own attack / release (0.05 / 0.08 s), which made each car joining
+	a passing column a short "water drop" (the user). A tone switched on or changed keeps CONFIG.attack.
+	lastSoundingTone[vehicle]: the tone the car sounded at its last update, false = none, nil = not seen.
+]]
+local HEARD_FADE = 0.5
+local lastSoundingTone = setmetatable({}, { __mode = "k" })
+--[[
 	Getting in or out swaps the tone's version (inside / outside), and a sound always starts at the top
 	of its loop: the siren restarted (the user). So a car you sit in, or one within PARTNER_RANGE when
 	its tone starts, plays both versions from the same moment, the one not heard at PARTNER_VOLUME
@@ -391,7 +400,10 @@ end
 local function update(vehicle)
 	local config = PoliceSiren.CONFIG
 	local state = cars[vehicle]
-	local wantedTone = not vehicle:IsDormant() and not overBudget[vehicle] and playingTone(vehicle, RealTime()) or nil
+	local soundingTone = playingTone(vehicle, RealTime())
+	local previousTone = lastSoundingTone[vehicle]
+	lastSoundingTone[vehicle] = soundingTone or false
+	local wantedTone = not vehicle:IsDormant() and not overBudget[vehicle] and soundingTone or nil
 	if wantedTone and not soundNames[wantedTone] then
 		requestTone(wantedTone)
 		wantedTone = nil
@@ -451,8 +463,19 @@ local function update(vehicle)
 	end
 	-- getting in or out: the same tone swaps version quickly; a new tone or none fades as set
 	local swapVersion = state and state.toneId == wantedTone
-	if state then stopTone(state, swapVersion and SWAP_FADE or config.release, not swapVersion) end
-	cars[vehicle] = wantedTone and startTone(vehicle, wantedTone, listenerInside, swapVersion and SWAP_FADE or config.attack) or nil
+	if state then
+		-- (still sounding, only no longer heard: past the budget or dormant)
+		local noLongerHeard = wantedTone == nil and soundingTone == state.toneId
+		local releaseTime = swapVersion and SWAP_FADE or noLongerHeard and HEARD_FADE or config.release
+		stopTone(state, releaseTime, not swapVersion and not noLongerHeard)
+	end
+	if not wantedTone then
+		cars[vehicle] = nil
+		return
+	end
+	local startsHearing = previousTone == nil or previousTone == wantedTone
+	local attackTime = swapVersion and SWAP_FADE or startsHearing and HEARD_FADE or config.attack
+	cars[vehicle] = startTone(vehicle, wantedTone, listenerInside, attackTime)
 end
 
 local sirenCars, sirenCarSet = {}, {}
