@@ -21,6 +21,22 @@ set -euo pipefail
 BEFORE="${BEFORE:-}"
 AFTER="${AFTER:-HEAD}"
 
+# A secret pasted with a space or a line break around it fails the login while it looks right
+# (the server refused the password with the right one typed in FileZilla): trimmed off, and
+# noted for the failure report (lengths and what was trimmed only, never the values)
+trimmed() { local value="$1"; value="${value#"${value%%[![:space:]]*}"}"; printf '%s' "${value%"${value##*[![:space:]]}"}"; }
+describe() {
+	local name="$1" raw="$2" clean="$3" note=""
+	[ "$raw" = "$clean" ] || note=", $(( ${#raw} - ${#clean} )) space / line break character(s) trimmed off"
+	case "$clean" in *[[:space:]]*) note="$note, has a space inside" ;; esac
+	printf '%s: %d characters%s' "$name" "${#clean}" "$note"
+}
+userNote=$(describe TEST_SFTP_USER "$SFTP_USER" "$(trimmed "$SFTP_USER")")
+passwordNote=$(describe TEST_SFTP_PASSWORD "$SFTP_PASSWORD" "$(trimmed "$SFTP_PASSWORD")")
+SFTP_USER=$(trimmed "$SFTP_USER")
+SFTP_PASSWORD=$(trimmed "$SFTP_PASSWORD")
+case "$SFTP_USER" in *@*|*:*|*/*) userNote="$userNote, has @ : or / in it (the username alone, not user@host)" ;; esac
+
 work=$(mktemp -d)
 changes="$work/changes.txt"
 # (a push that changes the deploy itself uploads everything: the way to try a fix of it)
@@ -78,6 +94,10 @@ explain() {
 		4) echo "::error::sshpass: ssh said something it didn't expect (exit 4): see the lines below." ;;
 		*) echo "::error::The upload failed (exit $code): see the lines below." ;;
 	esac
+	# (as an annotation too: readable on the run's page without the log)
+	if grep -q "Permission denied" "$work/sftp.log"; then
+		echo "::error::The server refused the login. Secrets as received: $userNote; $passwordNote"
+	fi
 	echo "--- sftp's last lines:"
 	tail -n 25 "$work/sftp.log" | sed 's/^/  /'
 	echo "--- the key the server shows now (pinned: ${SFTP_HOST_KEY##* ssh-})"
