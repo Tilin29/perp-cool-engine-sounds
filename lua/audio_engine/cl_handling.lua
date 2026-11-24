@@ -870,10 +870,10 @@ local function eyeOffsetOf(car)
 	return offset
 end
 
-local function cameraAngles(player, car, angles)
-	if not player.LocalEyeAngles or player:GetVehicle() ~= car then return angles end
+local function cameraAnglesFor(player, car, angles)
+	if not player.LocalEyeAngles or player:GetVehicle() ~= car then return angles, "game's (not the driver)" end
 	local offset = eyeOffsetOf(car)
-	if not offset then return angles end
+	if not offset then return angles, "game's (no eyes attachment)" end
 	local _, carAngles = AudioEngine.DisplayPose(car)
 	local _, eyeAngles = LocalToWorld(vector_origin, offset, vector_origin, carAngles)
 	local _, look = LocalToWorld(vector_origin, player:LocalEyeAngles(), vector_origin, eyeAngles)
@@ -883,9 +883,35 @@ local function cameraAngles(player, car, angles)
 			cameraAnglesWarned = true
 			print(string.format("[Audio Engine] vehicle camera: the car-locked look direction came out %.0f deg from the game's; using the game's", math.AngleDifference(look.y, angles.y)))
 		end
-		return angles
+		return angles, "game's (too far off)"
 	end
-	return look
+	return look, "ours"
+end
+
+-- audio_engine_camera_log [seconds]: 10 times a second, the yaws the camera and the car come from
+-- (temporary: to see what the camera turns ahead of)
+local cameraLogUntil, cameraLogNext = 0, 0
+concommand.Add("audio_engine_camera_log", function(_, _, args)
+	cameraLogUntil = RealTime() + math.Clamp(tonumber(args[1]) or 5, 1, 30)
+	print("[Audio Engine] camera log: t | yaw: car GetAngles, GetRenderAngles, GetNetworkAngles, eyes attachment | camera: game's, ours, mouse (local) | used")
+end, nil, "Print the car's and the camera's yaw while you drive, to see which leads (temporary)")
+
+local function logCamera(player, car, angles, look, used)
+	local now = RealTime()
+	if now > cameraLogUntil or now < cameraLogNext then return end
+	cameraLogNext = now + 0.1
+	local attachmentId = car:LookupAttachment("vehicle_driver_eyes")
+	local attachment = attachmentId and attachmentId > 0 and car:GetAttachment(attachmentId)
+	local networkYaw = car.GetNetworkAngles and car:GetNetworkAngles().y or 0
+	print(string.format("  %6.2f | %7.1f %7.1f %7.1f %7.1f | %7.1f %7.1f %7.1f | %s", cameraLogUntil - now,
+		car:GetAngles().y, car:GetRenderAngles().y, networkYaw, attachment and attachment.Ang.y or 0,
+		angles.y, look and look.y or 0, player.LocalEyeAngles and player:LocalEyeAngles().y or 0, used))
+end
+
+local function cameraAngles(player, car, angles)
+	local result, used = cameraAnglesFor(player, car, angles)
+	logCamera(player, car, angles, result, used)
+	return result
 end
 
 -- an error in the prediction must not take every addon's camera with it: CalcView still runs
