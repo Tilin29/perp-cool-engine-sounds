@@ -234,7 +234,7 @@ local function recordFrame(realNow, predicted, display, vehicle, keys)
 	if realNow > record.untilTime then
 		local lines = { "kind,time,command,replayed,keys_server,keys_client,mph,steer_server,steer_client,yawtarget_server,yawtarget_client,"
 			.. "yawrate_server,yawrate_client,yaw_server,yaw_client,yaw_error,pos_error_forward_in,pos_error_side_in,slip_server,slip_client,control,ground",
-			"# F rows: kind,time,keys,mph,yaw_drawn,yaw_predicted,yaw_source,drawn_minus_source,smoother_in,smoother_yaw_deg,lead_ms,commands" }
+			"# F rows: kind,time,keys,mph,yaw_drawn,yaw_predicted,yaw_source,drawn_minus_source,smoother_in,smoother_yaw_deg,lead_ms,commands,wheels_drawn,wheels_source" }
 		for _, row in ipairs(record.rows) do lines[#lines + 1] = row end
 		file.Write("audio_engine_predict_log.csv", table.concat(lines, "\n"))
 		print(string.format("[Audio Engine] prediction log: %d rows -> garrysmod/data/audio_engine_predict_log.csv", #record.rows))
@@ -243,10 +243,10 @@ local function recordFrame(realNow, predicted, display, vehicle, keys)
 	end
 	local drawnYaw, sourceYaw = own.displayAngles and own.displayAngles.y or 0, vehicle:GetAngles().y
 	local _, mph = slipOf(predicted, own.spec)
-	recordRow(string.format("F,%.3f,%s,%.0f,%.1f,%.1f,%.1f,%.1f,%.1f,%.2f,%.0f,%d",
+	recordRow(string.format("F,%.3f,%s,%.0f,%.1f,%.1f,%.1f,%.1f,%.1f,%.2f,%.0f,%d,%.2f,%.2f",
 		CurTime() - record.startTime, keysText(keys), mph, drawnYaw, yawOf(predicted), sourceYaw,
 		math.NormalizeAngle(drawnYaw - sourceYaw), Handling.SmootherSize(own.smoother), (own.smoother.rz or 0) * DEG,
-		(own.lead or 0) * 1000, own.count or 0))
+		(own.lead or 0) * 1000, own.count or 0, own.steerPose or 0, own.sourceSteerPose or 0))
 end
 
 concommand.Add("audio_engine_predict_record", function(_, _, args)
@@ -442,6 +442,49 @@ local function putSteerPose()
 	local restore = low + vehicle:GetPoseParameter(STEER_POSE) * (high - low)
 	vehicle:SetPoseParameter(STEER_POSE, clamp(value, -1, 1) * math.max(math.abs(low), math.abs(high)))
 	steerPose = { entity = vehicle, restore = restore }
+end
+
+--[[
+	How far Source turns the wheels at a speed, as a share of full lock (the pose's 1): it draws
+	the wheels' angle as a share of DegreesSlow, and the angle shrinks with speed (to DegreesFast,
+	over FastCarSpeed the model's turn): the full pose at any speed turned them far too much (the
+	user). Learned per speed band from Source's own pose while the server's steering has held full
+	lock a while; until then the model's turn angle at that speed / its slow lock
+]]
+local WHEEL_BAND = 5            -- m/s
+local WHEEL_BANDS = 16
+local WHEEL_LEARN_RATE = 0.2
+local WHEEL_STEADY = 0.4        -- s the server's steering held full lock before Source's pose is trusted
+local wheelShares = {}          -- model -> { [band] = share }
+
+-- Source's pose now, -1..1 (read while nothing of ours is on it)
+local function sourceSteerPose(vehicle)
+	local index = vehicle:LookupPoseParameter(STEER_POSE)
+	if not index or index < 0 then return nil end
+	local low, high = vehicle:GetPoseParameterRange(index)
+	if not low or high <= low then return nil end
+	return (low + vehicle:GetPoseParameter(STEER_POSE) * (high - low)) / math.max(math.abs(low), math.abs(high))
+end
+
+local function wheelShareAt(vehicle, spec, speed)
+	local shares = wheelShares[vehicle:GetModel() or ""]
+	local learned = shares and shares[clamp(math.floor(speed / WHEEL_BAND) + 1, 1, WHEEL_BANDS)]
+	if learned then return learned end
+	local settings = spec.settings
+	return clamp(Handling.TurnAngle(settings, spec.wheelbase, speed) / settings.lockSlow, 0.05, 1)
+end
+
+local function learnWheelShare(vehicle, base, speed, realNow)
+	if math.abs(base.steer or 0) < 0.99 then own.fullLockSince = nil return end
+	own.fullLockSince = own.fullLockSince or realNow
+	local pose = own.sourceSteerPose
+	if realNow - own.fullLockSince < WHEEL_STEADY or not pose or pose * base.steer > 0 then return end
+	local model = vehicle:GetModel() or ""
+	local shares = wheelShares[model]
+	if not shares then shares = {}; wheelShares[model] = shares end
+	local band = clamp(math.floor(speed / WHEEL_BAND) + 1, 1, WHEEL_BANDS)
+	local share = clamp(math.abs(pose), 0, 1)
+	shares[band] = shares[band] and shares[band] + (share - shares[band]) * WHEEL_LEARN_RATE or share
 end
 
 local function takeSteerPoseOff()
@@ -725,7 +768,11 @@ local function updateFrame()
 			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
 		end
 		own.displayPosition, own.displayAngles = toPosition, displayAngles
-		own.steerPose = -(own.state.steer or 0)
+		-- (the wheels: the predicted steering x how far Source turns them at this speed)
+		own.sourceSteerPose = sourceSteerPose(vehicle)
+		local wheelSpeed = math.abs(Handling.ForwardSpeed(base, spec)) * Handling.INCH
+		learnWheelShare(vehicle, base, wheelSpeed, realNow)
+		own.steerPose = -(own.state.steer or 0) * wheelShareAt(vehicle, spec, math.abs(Handling.ForwardSpeed(predicted, spec)) * Handling.INCH)
 		-- (for the readout: Source's pose now, before anything is drawn moved)
 		own.sourcePosition, own.sourceYaw = vehicle:GetPos(), vehicle:GetAngles().y
 		own.velocity = own.velocity or Vector()
