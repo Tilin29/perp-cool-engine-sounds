@@ -23,8 +23,9 @@ AFTER="${AFTER:-HEAD}"
 
 work=$(mktemp -d)
 changes="$work/changes.txt"
-if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-	echo "Full upload (no previous commit to compare with)"
+# (a push that changes the deploy itself uploads everything: the way to try a fix of it)
+if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null 	|| git diff --name-only "$BEFORE" "$AFTER" | grep -qE '^\.github/(scripts/deploy_test\.sh|workflows/deploy-test\.yml)$'; then
+	echo "Full upload (a manual run, no previous commit to compare with, or the deploy changed)"
 	git -c core.quotepath=off ls-files | sed 's/^/M\t/' > "$changes"
 else
 	echo "Uploading the changes from ${BEFORE:0:7} to ${AFTER:0:7}"
@@ -52,8 +53,7 @@ if [ "$uploadCount" -eq 0 ] && [ "$deleteCount" -eq 0 ]; then echo "Nothing for 
 
 # only the pinned host key is accepted; the password only (the runner has no keys to offer)
 knownHosts="$work/known_hosts"
-printf '%s
-' "$SFTP_HOST_KEY" > "$knownHosts"
+printf '%s\n' "$SFTP_HOST_KEY" > "$knownHosts"
 sshOptions=(-oBatchMode=no -oStrictHostKeyChecking=yes "-oUserKnownHostsFile=$knownHosts" -oPubkeyAuthentication=no
 	-oPreferredAuthentications=password,keyboard-interactive -oNumberOfPasswordPrompts=1 -oConnectTimeout=30 -P "$SFTP_PORT")
 export SSHPASS="$SFTP_PASSWORD"
@@ -65,20 +65,34 @@ batch="$work/commands.sftp"
 	awk '{ path = ""; count = split($0, parts, "/"); for (i = 2; i <= count; i++) { path = path "/" parts[i]; print path } }' "$folders" | sort -u |
 		while IFS= read -r folder; do echo "-mkdir \"$folder\""; done
 	while IFS= read -r target; do echo "-rm \"$target\""; done < "$deletes"
-	while IFS=$'	' read -r file target folder; do echo "put \"$file\" \"$target\""; done < "$uploads"
+	while IFS=$'\t' read -r file target folder; do echo "put \"$file\" \"$target\""; done < "$uploads"
 	echo "bye"
 } > "$batch"
 
+# what went wrong, when it does (nothing printed here holds the password)
+explain() {
+	local code=$1
+	case "$code" in
+		5) echo "::error::sshpass: the server refused the password (exit 5). Check TEST_SFTP_PASSWORD / TEST_SFTP_USER." ;;
+		6) echo "::error::sshpass: the server's host key isn't the pinned one (exit 6)." ;;
+		4) echo "::error::sshpass: ssh said something it didn't expect (exit 4): see the lines below." ;;
+		*) echo "::error::The upload failed (exit $code): see the lines below." ;;
+	esac
+	echo "--- sftp's last lines:"
+	tail -n 25 "$work/sftp.log" | sed 's/^/  /'
+	echo "--- the key the server shows now (pinned: ${SFTP_HOST_KEY##* ssh-})"
+	ssh-keyscan -p "$SFTP_PORT" -T 15 "$SFTP_HOST" 2>/dev/null | sed 's/^/  /' || true
+	echo "--- a verbose login (pwd only):"
+	printf 'pwd\nbye\n' > "$work/probe.sftp"
+	sshpass -e sftp -v "${sshOptions[@]}" -b "$work/probe.sftp" "$SFTP_USER@$SFTP_HOST" 2>&1 | grep -v '^debug1: Reading configuration' | sed 's/^/  /' || true
+}
+
 if [ -n "${SFTP_COMMAND:-}" ]; then
 	"$SFTP_COMMAND" "$batch"
-elif ! sshpass -e sftp "${sshOptions[@]}" -b "$batch" "$SFTP_USER@$SFTP_HOST"; then
-	echo "::error::The upload failed. A verbose login follows (what the server offered and answered):"
-	printf 'pwd
-bye
-' > "$work/probe.sftp"
-	sshpass -e sftp -v "${sshOptions[@]}" -b "$work/probe.sftp" "$SFTP_USER@$SFTP_HOST" 2>&1 |
-		grep -Ei "authenticat|permission|denied|password|connected|remote working|closed|error" || true
-	exit 1
+else
+	status=0
+	sshpass -e sftp "${sshOptions[@]}" -b "$batch" "$SFTP_USER@$SFTP_HOST" > "$work/sftp.log" 2>&1 || status=$?
+	if [ "$status" -ne 0 ]; then explain "$status"; exit 1; fi
 fi
 echo "Done: $uploadCount uploaded, $deleteCount deleted"
 cut -f1 "$uploads" | head -50 | sed 's/^/  /'
