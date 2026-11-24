@@ -65,6 +65,9 @@ AudioEngine.PREDICTION = {
 	-- camera with it: zooming in and out (the user, third person, other players than the host)
 	groundNormal = 0.7,
 	traceRetryLift = 24,
+	-- other cars: your car as drawn stops at their footprints, this share of their bounds (a bit
+	-- under: mirrors stick out, and moving cars' drawn poses are an estimate)
+	carShrink = 0.9,
 }
 local PREDICTION = AudioEngine.PREDICTION
 
@@ -109,6 +112,7 @@ local own = {
 	received = {}, lead = nil, nextMatch = 0, stats = { states = 0, matched = 0, fallback = 0, corrections = 0, correctionSum = 0, largest = 0, clamped = 0 },
 }
 local learners = setmetatable({}, { __mode = "k" })
+local displaced = {}      -- car -> { fromPosition, fromAngles, toPosition, toAngles } (this frame)
 
 local function drivenCar()
 	local player = LocalPlayer()
@@ -144,12 +148,21 @@ local function resetOwn(vehicle)
 	own.received = {}
 end
 
--- what the server's states show of how the car accelerates along its nose
+--[[
+	What the server's states show of how the car accelerates along its nose. Only from a straight
+	run on the same keys: in a turn the speed along the nose also drops by the model's own scrub
+	(Control's forwardChange, which the replay puts on again) and by the nose turning off the
+	velocity, so the throttle bins learned low and the car was predicted short on the next straight;
+	a sample across a key change went into the wrong key's bin
+]]
+local LEARN_MAX_STEER = 0.15
 local function learnFrom(previous, current)
 	if not previous or not own.learner then return end
 	local deltaTime = current.time - previous.time
 	if deltaTime <= 0 or deltaTime > 0.15 or current.impact or previous.impact then return end
 	if current.groundShare < 1 or previous.groundShare < 1 then return end
+	if current.buttons ~= previous.buttons or current.limiter ~= previous.limiter or current.driving ~= previous.driving then return end
+	if math.abs(current.steer) > LEARN_MAX_STEER or math.abs(previous.steer) > LEARN_MAX_STEER or current.drift or previous.drift then return end
 	local before, after = Handling.ForwardSpeed(previous, own.spec), Handling.ForwardSpeed(current, own.spec)
 	local acceleration = (after - before) / deltaTime - Handling.SlopeAcceleration(current, own.spec)
 	local mode = Handling.DriveMode(current.buttons, after, current.driving, current.limiter)
@@ -158,7 +171,9 @@ end
 
 net.Receive("audio_engine_drive", function()
 	local index = net.ReadUInt(13)
-	local state = { command = net.ReadUInt(32), time = net.ReadDouble() }
+	local state = { command = net.ReadUInt(32) }
+	state.commandFraction = net.ReadUInt(8) / 256
+	state.time = net.ReadDouble()
 	state.px, state.py, state.pz = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
 	local pitch, yaw, roll = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
 	Handling.SetAxes(state, Angle(pitch, yaw, roll))
@@ -169,6 +184,10 @@ net.Receive("audio_engine_drive", function()
 	state.drift, state.driving, state.impact = net.ReadBool(), net.ReadBool(), net.ReadBool()
 	state.groundShare, state.controlShare = net.ReadUInt(7) / 100, net.ReadUInt(7) / 100
 	state.buttons, state.limiter = net.ReadUInt(5), net.ReadUInt(2)
+	state.modelOn = net.ReadBool()
+	if net.ReadBool() then state.impactAge = net.ReadUInt(8) / 100 end
+	local blockedFor = net.ReadUInt(8) / 100
+	state.blockedFor = blockedFor > 0 and blockedFor or nil
 
 	local vehicle = drivenCar()
 	if not vehicle or vehicle:EntIndex() ~= index then return end
@@ -184,24 +203,34 @@ net.Receive("audio_engine_drive", function()
 	if #received > RECEIVED then table.remove(received, 1) end
 end)
 
--- the commands the server hasn't run after `number`, into list; count, and how far into the next one the frame is
-local function commandsAfter(number, list)
+--[[
+	The commands the server hasn't run after base.command, into list; count, how far into the next
+	one the frame is, whether the numbers matched, and the buttons for that last part. The server's
+	physics stands base.commandFraction past base.command (Handling.CommandClock), so that much
+	less is replayed
+]]
+local function commandsAfter(base, list)
+	local number = base.command
 	local count = 0
 	if number ~= 0 and newestCommand > number and buttonsOf(number + 1) then
-		local last = own.base and own.base.buttons or 0
+		local last = base.buttons or 0
 		for commandNumber = number + 1, math.min(newestCommand, number + PREDICTION.maxCommands) do
 			count = count + 1
 			last = buttonsOf(commandNumber) or last
 			list[count] = last
 		end
-		return count, clamp((RealTime() - newestCommandAt) / engine.TickInterval(), 0, 1), true
+		local fraction = clamp((RealTime() - newestCommandAt) / engine.TickInterval(), 0, 1) - (base.commandFraction or 0)
+		if fraction < 0 then
+			if count > 0 then count, fraction = count - 1, fraction + 1 else fraction = 0 end
+		end
+		return count, fraction, true, last
 	end
 	-- no command numbers to match (shouldn't happen in multiplayer): one ping of the keys held now
 	local player = LocalPlayer()
 	local buttons = Handling.ButtonsFrom(function(target, key) return target:KeyDown(key) end, player)
 	count = clamp(math.Round(player:Ping() / 1000 / engine.TickInterval()), 0, PREDICTION.maxCommands)
 	for i = 1, count do list[i] = buttons end
-	return count, 0, false
+	return count, 0, false, buttons
 end
 
 local function bodyFromEntity(entity, out)
@@ -226,26 +255,65 @@ local function notCar(entity)
 end
 traceData.filter = notCar
 
+local function sweep(fromPosition, toPosition, offset, height)
+	traceData.start, traceData.endpos = fromPosition + offset + height, toPosition + offset + height
+	util.TraceHull(traceData)
+	return traceResult
+end
+
+--[[
+	How far (0..1) one end of the car (`offset` from its origin) can go from `fromPosition` towards
+	`toPosition` (`distance` apart). The end can already be in something: the server's car against a
+	wall, nose first. That was taken as clear, and the prediction (no walls: still on the throttle)
+	drew the car up to a whole lead deep into the wall. Then the box is swept from the car's middle
+	instead, `pullback` further along the travel, and the end stops where the middle's box would put
+	it. Ground under the box (see groundNormal) isn't a wall: looked at again higher
+]]
+local function endClearShare(fromPosition, toPosition, travelDirection, distance, offset, pullback, up)
+	local result = 1
+	for _, lift in ipairs({ 0, PREDICTION.traceRetryLift }) do
+		local height = up * (PREDICTION.traceHeight + lift)
+		local trace = sweep(fromPosition, toPosition, offset, height)
+		if not trace.Hit then return 1 end
+		if trace.StartSolid then
+			trace = sweep(fromPosition, toPosition + travelDirection * pullback, vector_origin, height)
+			if not trace.Hit then return 1 end
+			if trace.StartSolid then
+				result = 0
+			elseif trace.HitNormal:Dot(up) < PREDICTION.groundNormal then
+				return clamp((trace.Fraction * (distance + pullback) - pullback - 2) / distance, 0, 1)
+			else
+				result = 1
+			end
+		elseif trace.HitNormal:Dot(up) < PREDICTION.groundNormal then
+			return math.max(0, trace.Fraction - 2 / distance)
+		else
+			result = 1
+		end
+	end
+	return result
+end
+
 -- how far (0..1) the car can go from `fromPosition` towards `toPosition` before its leading end
--- (along `direction`, a unit vector) hits something. halfLength/halfWidth in inches, up = its up
+-- (along `direction`, a unit vector) hits something. halfLength/halfWidth in inches, up = its up.
+-- Moving mostly sideways (a slide, a drift) both ends lead: the rear went through walls
+local SIDEWAYS_SHARE = 0.7   -- travel . nose under this share of the travel: both ends traced
 local function clearShare(fromPosition, toPosition, direction, up, halfLength, halfWidth)
 	local travel = toPosition - fromPosition
 	local distance = travel:Length()
 	if distance < 6 then return 1 end
 	traceMins.x, traceMins.y, traceMins.z = -halfWidth, -halfWidth, -PREDICTION.traceHalfHeight
 	traceMaxs.x, traceMaxs.y, traceMaxs.z = halfWidth, halfWidth, PREDICTION.traceHalfHeight
-	local along = direction * (travel:Dot(direction) >= 0 and (halfLength - halfWidth) or -(halfLength - halfWidth))
-	for _, lift in ipairs({ 0, PREDICTION.traceRetryLift }) do
-		local lead = along + up * (PREDICTION.traceHeight + lift)
-		traceData.start, traceData.endpos = fromPosition + lead, toPosition + lead
-		util.TraceHull(traceData)
-		if not traceResult.Hit or traceResult.StartSolid then return 1 end
-		-- ground under the box (see groundNormal): not a wall, look again higher
-		if traceResult.HitNormal:Dot(up) < PREDICTION.groundNormal then
-			return math.max(0, traceResult.Fraction - 2 / distance)
-		end
+	local travelDirection = travel / distance
+	local alongShare = travelDirection:Dot(direction)
+	local reach = halfLength - halfWidth
+	local pullback = reach * math.abs(alongShare)
+	local leading = direction * (alongShare >= 0 and reach or -reach)
+	local share = endClearShare(fromPosition, toPosition, travelDirection, distance, leading, pullback, up)
+	if share > 0 and math.abs(alongShare) < SIDEWAYS_SHARE then
+		share = math.min(share, endClearShare(fromPosition, toPosition, travelDirection, distance, -leading, pullback, up))
 	end
-	return 1
+	return share
 end
 
 -- the car's half length along its nose and half width (inches), per model
@@ -264,9 +332,128 @@ local function sizeOf(vehicle, spec)
 end
 
 ---------------------------------------------------------------------------
+-- other cars: your car as drawn stops at them. The wall trace leaves cars out (your own, the
+-- ones moved over the lead), so the prediction drew your car through a car it was pushing, or a
+-- parked one, by up to the lead (~7 m at 30 m/s) until the server's crash came back. Drawn cars'
+-- footprints (boxes on the ground, carShrink of their bounds) are tested against each other in
+-- plain maths: no traces. Cars yours already overlaps at the server's pose are left out (contact
+-- the server is playing out)
+---------------------------------------------------------------------------
+local carList, nextCarList = {}, 0
+local function jeeps(realNow)
+	if realNow >= nextCarList then
+		nextCarList = realNow + 0.5
+		carList = ents.FindByClass("prop_vehicle_jeep")
+	end
+	return carList
+end
+
+local footprintSizes = {}
+local function footprintSizeOf(vehicle, spec)
+	local model = vehicle:GetModel() or ""
+	local size = footprintSizes[model]
+	if size then return size end
+	local mins, maxs = vehicle:OBBMins(), vehicle:OBBMaxs()
+	local alongY = math.abs(spec.noseY) > math.abs(spec.noseX)
+	local shrink = PREDICTION.carShrink
+	size = {
+		centre = (mins + maxs) * 0.5,
+		halfLength = (alongY and (maxs.y - mins.y) or (maxs.x - mins.x)) * 0.5 * shrink,
+		halfWidth = (alongY and (maxs.x - mins.x) or (maxs.y - mins.y)) * 0.5 * shrink,
+		halfHeight = (maxs.z - mins.z) * 0.5,
+	}
+	footprintSizes[model] = size
+	return size
+end
+
+-- a car's footprint at a pose, into box: centre, nose (unit, flat), half sizes. nil if it stands on its nose
+local function footprint(vehicle, spec, position, angles, box)
+	local size = footprintSizeOf(vehicle, spec)
+	local centre = LocalToWorld(size.centre, angle_zero, position, angles)
+	local forward, right, up = angles:Forward(), angles:Right(), angles:Up()
+	-- (model x = forward, y = left, z = up)
+	local noseX = forward.x * spec.noseX - right.x * spec.noseY + up.x * spec.noseZ
+	local noseY = forward.y * spec.noseX - right.y * spec.noseY + up.y * spec.noseZ
+	local length = math.sqrt(noseX * noseX + noseY * noseY)
+	if length < 0.1 then return nil end
+	box.x, box.y, box.z = centre.x, centre.y, centre.z
+	box.noseX, box.noseY = noseX / length, noseY / length
+	box.halfLength, box.halfWidth, box.halfHeight = size.halfLength, size.halfWidth, size.halfHeight
+	return box
+end
+
+local function radiusAlong(box, axisX, axisY)
+	return box.halfLength * math.abs(box.noseX * axisX + box.noseY * axisY) + box.halfWidth * math.abs(box.noseX * axisY - box.noseY * axisX)
+end
+
+-- two footprints overlap (separating axes: each box's nose and side; and their heights)
+local function overlapping(first, second)
+	if math.abs(first.z - second.z) >= first.halfHeight + second.halfHeight then return false end
+	local deltaX, deltaY = second.x - first.x, second.y - first.y
+	for axis = 1, 4 do
+		local box = axis <= 2 and first or second
+		local axisX, axisY = box.noseX, box.noseY
+		if axis % 2 == 0 then axisX, axisY = -box.noseY, box.noseX end
+		if math.abs(deltaX * axisX + deltaY * axisY) >= radiusAlong(first, axisX, axisY) + radiusAlong(second, axisX, axisY) then return false end
+	end
+	return true
+end
+
+local ownBox, blockerBoxes, blockerActive = {}, {}, {}
+local blockerCount = 0
+
+local function blockedAt(vehicle, spec, share, fromPosition, fromAngles, toPosition, toAngles)
+	local box = footprint(vehicle, spec, LerpVector(share, fromPosition, toPosition), LerpAngle(share, fromAngles, toAngles), ownBox)
+	if not box then return false end
+	for i = 1, blockerCount do
+		if blockerActive[i] and overlapping(box, blockerBoxes[i]) then return true end
+	end
+	return false
+end
+
+-- your car from the server's pose to where it's drawn: the pose it's drawn at, short of the
+-- first car in the way (as drawn this frame), and whether one was
+local function carStop(vehicle, spec, fromPosition, fromAngles, toPosition, toAngles, realNow)
+	local reach = fromPosition:Distance(toPosition)
+	if reach < 6 then return toPosition, toAngles, false end
+	local ownSize = footprintSizeOf(vehicle, spec)
+	blockerCount = 0
+	for _, other in ipairs(jeeps(realNow)) do
+		if IsValid(other) and other ~= vehicle and not other:IsDormant() then
+			local entry = displaced[other]
+			local position = entry and entry.toPosition or other:GetPos()
+			local otherSpec = specOf(other)
+			local otherSize = footprintSizeOf(other, otherSpec)
+			local near = reach + ownSize.halfLength + ownSize.halfWidth + otherSize.halfLength + otherSize.halfWidth
+			if position:DistToSqr(toPosition) < near * near then
+				local box = footprint(other, otherSpec, position, entry and entry.toAngles or other:GetAngles(), blockerBoxes[blockerCount + 1] or {})
+				if box then
+					blockerCount = blockerCount + 1
+					blockerBoxes[blockerCount] = box
+				end
+			end
+		end
+	end
+	if blockerCount == 0 then return toPosition, toAngles, false end
+	local startBox = footprint(vehicle, spec, fromPosition, fromAngles, ownBox)
+	if not startBox then return toPosition, toAngles, false end
+	local any = false
+	for i = 1, blockerCount do
+		blockerActive[i] = not overlapping(startBox, blockerBoxes[i])
+		any = any or blockerActive[i]
+	end
+	if not any or not blockedAt(vehicle, spec, 1, fromPosition, fromAngles, toPosition, toAngles) then return toPosition, toAngles, false end
+	local low, high = 0, 1
+	for _ = 1, 7 do
+		local middle = (low + high) * 0.5
+		if blockedAt(vehicle, spec, middle, fromPosition, fromAngles, toPosition, toAngles) then high = middle else low = middle end
+	end
+	return LerpVector(low, fromPosition, toPosition), LerpAngle(low, fromAngles, toAngles), true
+end
+
+---------------------------------------------------------------------------
 -- drawing cars where they're shown: render origin / angles on the car and what's parented to it
 ---------------------------------------------------------------------------
-local displaced = {}      -- car -> { fromPosition, fromAngles, toPosition, toAngles } (this frame)
 local overridden = {}     -- entity -> frame it was last placed in
 local childrenCache = {}  -- car -> { list, at }
 local updatedFrame = -1
@@ -461,7 +648,6 @@ end
 -- other cars, carried on over the same lead
 ---------------------------------------------------------------------------
 local motions = setmetatable({}, { __mode = "k" })
-local carList, nextCarList = {}, 0
 local othersShare = 0
 local nearby = {}
 -- (the entries are reused: a new table per car per frame was garbage for nothing)
@@ -493,13 +679,9 @@ local function motionOf(vehicle, realNow)
 end
 
 local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
-	if realNow >= nextCarList then
-		nextCarList = realNow + 0.5
-		carList = ents.FindByClass("prop_vehicle_jeep")
-	end
 	table.Empty(nearby)
 	local maxDistanceSqr = PREDICTION.othersDistance * PREDICTION.othersDistance
-	for _, vehicle in ipairs(carList) do
+	for _, vehicle in ipairs(jeeps(realNow)) do
 		if IsValid(vehicle) and vehicle ~= ownVehicle and not vehicle:IsDormant() then
 			local distanceSqr = vehicle:GetPos():DistToSqr(eyePosition)
 			if distanceSqr < maxDistanceSqr then
@@ -738,20 +920,28 @@ local function updateFrame()
 	local running = base ~= nil and own.spec ~= nil
 	othersShare = clamp(othersShare + ((running and othersConVar:GetBool()) and 1 or -1) * frameTime / PREDICTION.easeTime, 0, 1)
 
+	-- the other cars first: your car stops at them as they're drawn (carStop)
+	local player = LocalPlayer()
+	local eyePosition = IsValid(player) and player:EyePos() or vector_origin
+	if othersShare > 0 and own.lead then
+		updateOthers(vehicle, own.lead, frame, realNow, eyePosition)
+	end
+
 	if running then
 		local spec, learner, deltaTime = own.spec, own.learner, engine.TickInterval()
-		local count, fraction, matched = commandsAfter(base.command, own.commands)
+		local count, fraction, matched, fractionButtons = commandsAfter(base, own.commands)
 		local stats = own.stats
 		if matched then stats.matched = stats.matched + 1 else stats.fallback = stats.fallback + 1 end
-		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state)
+		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state, fractionButtons)
 		own.count, own.fraction = count, fraction
 
 		if own.fresh then
 			own.fresh = false
 			if own.shown and own.previousBase then
 				-- where the earlier state put the car for this same moment: the difference is the correction
-				local earlierCount, earlierFraction = commandsAfter(own.previousBase.command, own.earlierCommands)
-				local earlier = Handling.Predict(own.previousBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime, own.earlier, own.earlierState)
+				local earlierCount, earlierFraction, _, earlierButtons = commandsAfter(own.previousBase, own.earlierCommands)
+				local earlier = Handling.Predict(own.previousBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime,
+					own.earlier, own.earlierState, earlierButtons)
 				local before = Handling.SmootherSize(own.smoother)
 				Handling.SmootherAbsorb(own.smoother, earlier, predicted)
 				local jump = math.abs(Handling.SmootherSize(own.smoother) - before)
@@ -776,6 +966,10 @@ local function updateFrame()
 			stats.clamped = stats.clamped + 1
 		end
 		local displayAngles = Handling.AnglesOf(display)
+		-- not through other cars either (as they're drawn: moved over the lead, or parked)
+		local stoppedByCar
+		toPosition, displayAngles, stoppedByCar = carStop(vehicle, spec, basePosition, Handling.AnglesOf(base), toPosition, displayAngles, realNow)
+		if stoppedByCar then stats.carStops = (stats.carStops or 0) + 1 end
 		-- (audio_engine_predict_amount: part of the way from where Source shows the car)
 		local amount = amountConVar:GetFloat()
 		if amount < 1 then
@@ -793,11 +987,6 @@ local function updateFrame()
 		if not vehicle then own.vehicle = nil end
 	end
 
-	local player = LocalPlayer()
-	local eyePosition = IsValid(player) and player:EyePos() or vector_origin
-	if othersShare > 0 and own.lead then
-		updateOthers(vehicle, own.lead, frame, realNow, eyePosition)
-	end
 	-- (after the prediction: it starts from where that draws a car)
 	levelLeaningCars(frame, realNow, eyePosition, frameTime)
 	clearStale(frame)
@@ -970,8 +1159,8 @@ concommand.Add("audio_engine_predict_stats", function()
 	print(string.format("[Audio Engine] prediction %s, car %s | states %d | frames matched %d, fallback %d | replaying %d commands + %.2f",
 		predictionAllowed() and "on" or "off", IsValid(own.vehicle) and tostring(AudioEngine.GetCarConfig(own.vehicle) and AudioEngine.GetCarConfig(own.vehicle).name) or "-",
 		stats.states, stats.matched, stats.fallback, own.count or 0, own.fraction or 0))
-	print(string.format("  corrections %d, mean %.1f in, largest %.1f in | wall stops %d | lead %.0f ms (ping %d, interp %.0f ms) | others %s | learned samples %d",
-		stats.corrections, stats.corrections > 0 and stats.correctionSum / stats.corrections or 0, stats.largest, stats.clamped,
+	print(string.format("  corrections %d, mean %.1f in, largest %.1f in | wall stops %d, car stops %d | lead %.0f ms (ping %d, interp %.0f ms) | others %s | learned samples %d",
+		stats.corrections, stats.corrections > 0 and stats.correctionSum / stats.corrections or 0, stats.largest, stats.clamped, stats.carStops or 0,
 		(own.lead or 0) * 1000, LocalPlayer():Ping(), interpolationDelay() * 1000, othersConVar:GetBool() and "on" or "off", learner and learner.samples or 0))
 	own.stats = { states = 0, matched = 0, fallback = 0, corrections = 0, correctionSum = 0, largest = 0, clamped = 0 }
 end, nil, "Print how the driving prediction is doing (and start counting again)")

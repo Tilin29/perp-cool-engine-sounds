@@ -305,6 +305,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     PlayerButtonDown rides on usercmds and missed presses). A press within 1.5 s of starting can't switch it off (`START_LOCK`: at 150 ms ping a second press did). Getting out leaves it
     idling (`audio_engine_keeprunning` 1, default, not archived: a saved 0 from the old default overrode it); getting back in drives off.
   - The server runs `Drivetrain.StartSequence` and keeps `EnableEngine(false)` until the start-up reaches idle.
+  - Parking brake (`updateParkBrake`, NW2 `audio_parkbrake`, default on = Source's driverless handbrake): getting out with the engine
+    on, it's on if Space is held as you get out, else off; engine off (or starting) in the car, Space toggles it (switching the engine
+    off: on if Space is held then), getting out keeps it. Off = neutral, the car rolls (woken on exit; a released one is released
+    again every Think while driverless). Engine off it's set on Source's controls every Think (+ throttle 0); driving, Space is
+    Source's handbrake and the latch is off. The cluster's handbrake lamp shows it while the engine isn't running.
+    Engine off, Source doesn't steer: sv_handling's tick puts the model's steering (`state.steer`) on with `SetSteering(-steer, 0)`.
+    The user's design; not yet run in game (whether Source re-applies a driverless handbrake by itself is unknown).
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
 - `sv_cruise.lua`: speed limiter (was cruise control). Middle mouse on at exactly the current speed / off; mouse wheel moves the
   limit to the next 5 mph step (`StartCommand`: `cmd:GetMouseWheel()`). The driver's own W drives: from `band` 6 mph under the limit
@@ -371,8 +378,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `contactHold` 0.5 s, `vehicle.audioContactAt`; without it Source's own tyres taking the rotation back tripped it and cars turned much
     less, the user's "used to turn a lot better"; not yet run in game); controlShare 0 on spiked cars,
     `carConfig.stability == false`, or with the convar off. Every ~30 ms (every other tick at 66) an unreliable net `audio_engine_drive` to the
-    driver (only one whose client predicts: not single player / the listen host / userinfo `audio_engine_predict` 0): entity, last command number (server `StartCommand`), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
-    velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state (~60 bytes). No vehicle params set while
+    driver (only one whose client predicts: not single player / the listen host / userinfo `audio_engine_predict` 0): entity, the command clock (`Handling.CommandClock`:
+    one command a tick, drawn to the last command number from `StartCommand`; whole + 1/256ths. GMod's default cl_cmdrate 30 gives the
+    server two commands a packet at 66 tick while physics steps once a tick, so the raw number jumped 2 / 0 and the replay was a tick
+    long / short by turns; test_prediction `150 2`: per-frame jumps 0.10 -> 0.05 m), CurTime as a double (a float is ~0.06 s coarse after days), pos, angles,
+    velocity, yaw rate, steer, drift, drivable, impact, ground/control share, buttons, limiter state, model on, impact age (the replay
+    eases controlShare back with `Handling.ImpactShare` as the server will; it kept the base's), blockedFor (the replay carries on a wall's
+    gentle follow) (~65 bytes). `AudioEngine.SetParams` checks the speed unit once (`speedsInMph`), not on every re-send. No vehicle params set while
     driving, except Source's wheels over FastCarSpeed (`matchSteering`, `AudioEngine.MatchedSteering`): the params get DegreesFast = the model's
     turn x1.1 + 0.5 deg at the car's speed and FastCarSpeed = that speed (`vehicle.audioSteerOverride`, put on by `AudioEngine.SetParams`,
     re-sent through ApplyPerformance every 2 mph / 0.2 deg; off under FastCarSpeed, getting out, model off). Source holds DegreesFast (~8)
@@ -388,7 +400,13 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     keeps each command's buttons by number (skip number 0, it happens); each frame, from the newest state, `Predict` through the commands
     after its number (at most `maxCommands` 32) + the fraction of the next; without matching numbers, one ping of the keys held. A new state's
     jump goes into the smoother (`smoothTime` 0.1 s, 0.04 during an impact, snap over 250 in). `clearShare`: a hull trace from the server's car
-    to the shown one at its leading end (world and props, not cars or players) stops it at a wall; a hit facing up like ground (normal within ~45 deg of the car's up,
+    to the shown one at its leading end (world and props, not cars or players) stops it at a wall. An end already in something
+    (`StartSolid`: the server's car nose against a wall) was taken as clear and the car drawn up to a lead deep into the wall: now swept
+    from the car's middle (`endClearShare`). Travel mostly sideways (|travel . nose| < `SIDEWAYS_SHARE` 0.7): both ends traced. Other cars
+    (`carStop`, after `updateOthers` now): your drawn car stops at their drawn footprints (2D boxes, `carShrink` 0.9 of the bounds, heights
+    checked; parked ones where Source has them), cars already overlapped at the server's pose left out; it drove through a car it pushed
+    or a parked one by the lead. The learner only learns on a straight run on the same keys (|steer| <= 0.15, no drift, buttons/limiter
+    unchanged): turns' scrub was learned as weak throttle. A hit facing up like ground (normal within ~45 deg of the car's up,
     `groundNormal` 0.7) isn't one: traced again `traceRetryLift` 24 in higher (uneven ground pulled the drawn car and camera back by the lead
     and let go the next frame: the camera zoomed in and out for clients, the user). Drawing (poses worked out at CalcView with nothing moved, put on at PreDrawOpaqueRenderables, taken off at PostRender: the render origin moves bones and attachments, and left on, the game's eye-attachment view arrived already moved and the camera ran ~2x the lead ahead, out of sight and shaking, the first multiplayer test): `SetRenderOrigin` + the Entity
     `SetRenderAngles` (Player's is something else) + `InvalidateBoneCache` on the car and its children (pods, lightbar), render bounds widened
@@ -415,7 +433,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     (red server / yellow Source / green shown boxes), `audio_engine_predict_stats`. Not yet run in game: the hook.Call path for CalcView,
     SetRenderOrigin on players in seats, shadows following the render origin and StartCommand's client command numbers in a vehicle are
     the things to check first. Own car's engine sound stays at Source's position (a few metres behind the camera at speed).
-  - `dev/baker/test_prediction.js [ping]`: a "Source" server the client doesn't know (own engine, brakes, tyres, lock, bumps), 150 ms with
+  - `dev/baker/test_prediction.js [ping] [commands a packet]` (2 = cl_cmdrate 30; `NOCLOCK=1`: the raw command number): a "Source" server the client doesn't know (own engine, brakes, tyres, lock, bumps), 150 ms with
     jitter and 3% loss, 144 fps: predicted ~0.2 m off where the server will be vs ~6 m plain, steering shows ~250 ms sooner, corrections
     under 7 cm a frame, an unpredicted crash back within 0.5 m ~80 ms after its state arrives.
   - Speed limiter (`sv_cruise`) still trims horsepower through `ApplyPerformance`, nothing else does now.

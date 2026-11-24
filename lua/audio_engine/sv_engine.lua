@@ -202,6 +202,60 @@ function AudioEngine.ToggleEngine(vehicle)
 	setEngine(vehicle, not vehicle:GetNW2Bool("audio_on", false))
 end
 
+--[[
+	The parking brake (NW2 audio_parkbrake, the cluster's handbrake lamp while the engine is off).
+	  * Getting out with the engine on: on if Space is held as you get out, else off.
+	  * Engine off, in the car: Space switches it on / off (switching the engine off: on if Space is
+	    held then). Getting out keeps it as it is.
+	  * Off, the car is in neutral: it rolls (downhill, pushed). Engine running and driven, Space is
+	    Source's own handbrake as ever.
+	A car nobody has set has it on (Source holds a driverless car's handbrake on). A released one is
+	released again every Think while nobody drives it: Source resets the controls as the driver
+	gets out (after the hook), and may hold a driverless car's handbrake on itself
+]]
+local function parkBrakeOf(vehicle)
+	if vehicle.audioParkBrake == nil then return true end
+	return vehicle.audioParkBrake
+end
+AudioEngine.ParkBrakeOf = parkBrakeOf
+
+local function setParkBrake(vehicle, on)
+	vehicle.audioParkBrake = on
+	if vehicle:GetNW2Bool("audio_parkbrake", true) ~= on then vehicle:SetNW2Bool("audio_parkbrake", on) end
+end
+
+-- the brake (and no throttle: neutral) on Source's controls
+local function applyParkBrake(vehicle, on)
+	if vehicle.SetHandbrake then vehicle:SetHandbrake(on) end
+	if vehicle.SetThrottle then vehicle:SetThrottle(0) end
+end
+
+local function updateParkBrake(vehicle, driver)
+	if not IsValid(driver) then
+		vehicle.audioParkSpace, vehicle.audioParkWasDrivable = nil, nil
+		if not parkBrakeOf(vehicle) then applyParkBrake(vehicle, false) end
+		return
+	end
+	local space = driver:KeyDown(IN_JUMP)
+	local pressed = space and not vehicle.audioParkSpace
+	vehicle.audioParkSpace = space
+	if vehicle.audioDrivable then
+		-- driving: Space is the handbrake, Source's own
+		vehicle.audioParkWasDrivable = true
+		if parkBrakeOf(vehicle) then setParkBrake(vehicle, false) end
+		return
+	end
+	if vehicle.audioParkWasDrivable then
+		-- the engine just went off (or is restarting): on if Space is held
+		vehicle.audioParkWasDrivable = false
+		setParkBrake(vehicle, space)
+	elseif pressed then
+		setParkBrake(vehicle, not parkBrakeOf(vehicle))
+	end
+	-- (every Think: Source doesn't run a disabled engine's controls, so nothing else sets them)
+	applyParkBrake(vehicle, parkBrakeOf(vehicle))
+end
+
 hook.Add("PlayerEnteredVehicle", "audio_engine", function(player, vehicle)
 	if not isOurs(vehicle) then return end
 	trackedVehicles[vehicle] = true
@@ -222,6 +276,14 @@ end)
 
 hook.Add("PlayerLeaveVehicle", "audio_engine", function(player, vehicle)
 	if not trackedVehicles[vehicle] then return end
+	-- the parking brake: engine on, Space held as you get out; engine off, as it was set
+	if vehicle:GetNW2Bool("audio_on", false) then setParkBrake(vehicle, player:KeyDown(IN_JUMP)) end
+	local braked = parkBrakeOf(vehicle)
+	applyParkBrake(vehicle, braked)
+	if not braked then
+		local physics = vehicle:GetPhysicsObject()
+		if IsValid(physics) then physics:Wake() end
+	end
 	if not keepRunningConVar:GetBool() then setEngine(vehicle, false) end
 end)
 
@@ -276,6 +338,7 @@ hook.Add("Think", "audio_engine", function()
 				local succeeded, engineEnabled = pcall(vehicle.IsEngineEnabled, vehicle)
 				if succeeded and engineEnabled ~= wantEnabled then setDrivable(vehicle, wantEnabled) end
 			end
+			updateParkBrake(vehicle, driver)
 		end
 	end
 end)
