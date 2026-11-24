@@ -32,16 +32,12 @@
 local AudioEngine = AUDIO_ENGINE
 local Handling = AudioEngine.Handling
 
--- (userinfo: the server sends the driving state only to clients that use it, sv_handling.lua)
-local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, true,
+local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, false,
 	"1 = the car you drive is shown where it will be when the server runs your keys (no input delay); 0 = as Source shows it")
 -- (a tester asked to dial in how much of it they get)
--- (the user: the default draws half way; the convar's 1 is that, 2 = all the way)
-local AMOUNT_SCALE = 0.5
 local amountConVar = CreateClientConVar("audio_engine_predict_amount", "1", true, false,
-	"How far ahead the prediction draws your car (and the other cars with it): 1 = half way to where the server will have it (default), "
-		.. "2 = all the way (no input delay), 0 = where Source shows it", 0, 2)
-local function predictAmount() return amountConVar:GetFloat() * AMOUNT_SCALE end
+	"How far ahead the prediction draws your car (and the other cars with it): 1 = where the server will have it (no input delay), "
+		.. "0.5 = half way, 0 = where Source shows it", 0, 1)
 local othersConVar = CreateClientConVar("audio_engine_predict_others", "1", true, false,
 	"1 = while you drive with prediction, other moving cars are shown where they are now too, so close driving and crashes line up")
 local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false, false,
@@ -122,7 +118,7 @@ local function drivenCar()
 end
 
 local function predictionAllowed()
-	if not predictConVar:GetBool() or not Handling.predictServerConVar:GetBool() or game.SinglePlayer() then return false end
+	if not predictConVar:GetBool() or game.SinglePlayer() then return false end
 	local player = LocalPlayer()
 	return IsValid(player) and not (player.IsListenServerHost and player:IsListenServerHost())
 end
@@ -180,7 +176,7 @@ net.Receive("audio_engine_drive", function()
 	-- (unreliable: an older one can arrive after a newer one)
 	if base and state.time <= base.time then return end
 	learnFrom(base, state)
-	own.previousBase, own.base, own.fresh, own.baseAt = base, state, true, RealTime()
+	own.previousBase, own.base, own.fresh = base, state, true
 	own.stats.states = own.stats.states + 1
 	local received = own.received
 	received[#received + 1] = { time = state.time, x = state.px, y = state.py, z = state.pz }
@@ -396,16 +392,6 @@ function AudioEngine.PredictedVelocity(vehicle)
 	return own.velocity
 end
 
--- the speed (inches/s) the server's physics gave the car you drive in its latest state, or nil
--- without one in the last 0.3 s (single player, the listen host, prediction off): cl_hud's
--- speedometer. Exact, ~33 a second and a ping old; the positions' speed jittered more the faster
-local SERVER_SPEED_FRESH = 0.3
-function AudioEngine.ServerSpeed(vehicle)
-	local base = own.base
-	if vehicle ~= own.vehicle or not base or not own.baseAt or RealTime() - own.baseAt > SERVER_SPEED_FRESH then return nil end
-	return math.sqrt(base.vx * base.vx + base.vy * base.vy + base.vz * base.vz)
-end
-
 -- where an entity is drawn (other code drawing at a car: cl_police's lights). Its own pose when
 -- it isn't moved
 function AudioEngine.DisplayPose(entity)
@@ -467,13 +453,6 @@ local motions = setmetatable({}, { __mode = "k" })
 local carList, nextCarList = {}, 0
 local othersShare = 0
 local nearby = {}
--- (the entries are reused: a new table per car per frame was garbage for nothing)
-local nearbyEntries = {}
--- a car whose path was clear is traced again only every OTHERS_TRACE_EVERY frames (1-2 hull traces
--- per car per frame for up to 16 cars); one blocked by a wall is traced every frame
-local OTHERS_TRACE_EVERY = 3
-local function nearerFirst(first, second) return first.distanceSqr < second.distanceSqr end
-local turnAngle = Angle(0, 0, 0)
 
 local function motionOf(vehicle, realNow)
 	local position, angles = vehicle:GetPos(), vehicle:GetAngles()
@@ -505,27 +484,20 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 	for _, vehicle in ipairs(carList) do
 		if IsValid(vehicle) and vehicle ~= ownVehicle and not vehicle:IsDormant() then
 			local distanceSqr = vehicle:GetPos():DistToSqr(eyePosition)
-			if distanceSqr < maxDistanceSqr then
-				local index = #nearby + 1
-				local entry = nearbyEntries[index]
-				if not entry then entry = {}; nearbyEntries[index] = entry end
-				entry.vehicle, entry.distanceSqr = vehicle, distanceSqr
-				nearby[index] = entry
-			end
+			if distanceSqr < maxDistanceSqr then nearby[#nearby + 1] = { vehicle = vehicle, distanceSqr = distanceSqr } end
 		end
 	end
-	table.sort(nearby, nearerFirst)
+	table.sort(nearby, function(first, second) return first.distanceSqr < second.distanceSqr end)
 	for i = 1, math.min(#nearby, PREDICTION.othersMax) do
 		local vehicle = nearby[i].vehicle
 		local motion = motionOf(vehicle, realNow)
 		local speed = motion.velocity:Length()
 		local share = clamp((speed - PREDICTION.othersMinSpeed) / (PREDICTION.othersFullSpeed - PREDICTION.othersMinSpeed), 0, 1) * othersShare
 		if share > 0 and motion.samples >= 3 then
-			local carLead = lead * share * predictAmount()
+			local carLead = lead * share * amountConVar:GetFloat()
 			local turn = motion.yawRate * carLead
 			local travel = motion.velocity * carLead
-			turnAngle.y = turn * 0.5
-			travel:Rotate(turnAngle)                         -- along the arc it's turning on
+			travel:Rotate(Angle(0, turn * 0.5, 0))           -- along the arc it's turning on
 			local position, angles = vehicle:GetPos(), vehicle:GetAngles()
 			-- (along the ground only: its bumps carried over the lead made it bob, as your own did)
 			local up = vehicle:GetUp()
@@ -533,190 +505,12 @@ local function updateOthers(ownVehicle, lead, frame, realNow, eyePosition)
 			local toPosition = position + travel
 			local spec = specOf(vehicle)
 			local size = sizeOf(vehicle, spec)
-			local clear = motion.clear or 1
-			if clear < 1 or frame - (motion.clearFrame or -OTHERS_TRACE_EVERY) >= OTHERS_TRACE_EVERY then
-				local nose = vehicle:LocalToWorld(Vector(spec.noseX, spec.noseY, spec.noseZ)) - position
-				clear = clearShare(position, toPosition, nose, up, size.halfLength, size.halfWidth)
-				motion.clear, motion.clearFrame = clear, frame
-			end
+			local nose = vehicle:LocalToWorld(Vector(spec.noseX, spec.noseY, spec.noseZ)) - position
+			local clear = clearShare(position, toPosition, nose, vehicle:GetUp(), size.halfLength, size.halfWidth)
 			if clear < 1 then toPosition = position + travel * clear end
 			displace(vehicle, toPosition, Angle(angles.p, angles.y + turn * clear, angles.r), frame, realNow)
 		end
 	end
-end
-
----------------------------------------------------------------------------
--- drawn less leaning: cars in AudioEngine.CAR_LEAN_LEVEL (sh_carlist.lua) have that share of their
--- lean against the road taken out where they're drawn, turned about the axis of their lower side's
--- wheels on the road, so those stay on it and the raised side comes down. Drawing only: the
--- physics, the server and everyone's collisions are as they were
----------------------------------------------------------------------------
-local LEAN_DISTANCE = 4000      -- inches from your eyes: further out a car is left as it is
-local LEAN_REACH = 96           -- inches the traces look down from each wheel's centre
-local LEAN_FOLLOW = 0.08        -- s: the correction's smoothing (the ground under a wheel jumps at kerbs)
-local LEAN_MAX = math.rad(15)   -- never turned more than this
-local LEAN_INSET = 0.8           -- the corners measured: this share of the body's half length / width out
-local LEAN_START = 24            -- inches above the bottom of the body the traces start
-local leanCars, nextLeanScan = {}, 0
-local leanAngles = setmetatable({}, { __mode = "k" })   -- vehicle -> the correction (radians, + = first side high)
-local leanSeen = setmetatable({}, { __mode = "k" })     -- vehicle -> what the last frame measured (audio_engine_lean_info)
-local cornerLayouts = {}   -- model -> 4 points at the bottom of the body, in the car's space: one side front, back, then the other
-local groundResult = {}
-local groundTrace = { mask = MASK_SOLID, filter = notCar, output = groundResult }
-local wheelPoints, groundPoints = {}, {}
-
--- The corners come from the model's bounds, which are there from the start. (The wheel attachments
--- ride on the wheel bones: read before the car has been drawn they can all be one point, and a
--- layout cached from that corrected nothing.) The long axis is the longer side of the bounds
-local function wheelLayoutOf(vehicle)
-	local model = vehicle:GetModel()
-	local layout = cornerLayouts[model]
-	if layout then return layout end
-	local mins, maxs = vehicle:OBBMins(), vehicle:OBBMaxs()
-	local centreX, centreY = (mins.x + maxs.x) * 0.5, (mins.y + maxs.y) * 0.5
-	local halfX, halfY = (maxs.x - mins.x) * 0.5 * LEAN_INSET, (maxs.y - mins.y) * 0.5 * LEAN_INSET
-	if halfX < 8 or halfY < 8 then return nil end
-	local z = mins.z + LEAN_START
-	if halfY >= halfX then
-		-- long along y: the sides are -x and +x
-		layout = { Vector(centreX - halfX, centreY + halfY, z), Vector(centreX - halfX, centreY - halfY, z),
-			Vector(centreX + halfX, centreY + halfY, z), Vector(centreX + halfX, centreY - halfY, z) }
-	else
-		layout = { Vector(centreX + halfX, centreY - halfY, z), Vector(centreX - halfX, centreY - halfY, z),
-			Vector(centreX + halfX, centreY + halfY, z), Vector(centreX - halfX, centreY + halfY, z) }
-	end
-	cornerLayouts[model] = layout
-	return layout
-end
-
--- point turned about the axis (unit vector) through pivot, by angle (radians)
-local function turnedAbout(point, pivot, axis, angle)
-	local x, y, z = Handling.Rotate(point.x - pivot.x, point.y - pivot.y, point.z - pivot.z, axis.x, axis.y, axis.z, angle)
-	return Vector(pivot.x + x, pivot.y + y, pivot.z + z)
-end
-
-local function levelCar(vehicle, share, frame, realNow, frameTime)
-	local layout = wheelLayoutOf(vehicle)
-	if not layout then return end
-	-- from where it's drawn already (the prediction), else where Source has it
-	local entry = displaced[vehicle]
-	local position = entry and entry.toPosition or vehicle:GetPos()
-	local angles = entry and entry.toAngles or vehicle:GetAngles()
-	local target, onGround = 0, true
-	local seen = leanSeen[vehicle] or {}
-	leanSeen[vehicle] = seen
-	for index = 1, 4 do
-		local wheel = LocalToWorld(layout[index], angle_zero, position, angles)
-		wheelPoints[index] = wheel
-		groundTrace.start, groundTrace.endpos = wheel, wheel - Vector(0, 0, LEAN_REACH)
-		util.TraceLine(groundTrace)
-		if not groundResult.Hit or groundResult.StartSolid then
-			onGround, seen.missed = false, index
-			break
-		end
-		groundPoints[index] = Vector(groundResult.HitPos)
-	end
-	local leftMid, rightMid, axis
-	if onGround then
-		-- each side's height over the road, and the car's long axis from its wheels
-		local leftHeight = (wheelPoints[1].z - groundPoints[1].z + wheelPoints[2].z - groundPoints[2].z) * 0.5
-		local rightHeight = (wheelPoints[3].z - groundPoints[3].z + wheelPoints[4].z - groundPoints[4].z) * 0.5
-		leftMid, rightMid = (wheelPoints[1] + wheelPoints[2]) * 0.5, (wheelPoints[3] + wheelPoints[4]) * 0.5
-		axis = (wheelPoints[1] + wheelPoints[3]) - (wheelPoints[2] + wheelPoints[4])
-		axis:Normalize()
-		local across = rightMid - leftMid
-		local track = (across - axis * across:Dot(axis)):Length()
-		if track > 1 then target = clamp(math.atan((leftHeight - rightHeight) / track) * share, -LEAN_MAX, LEAN_MAX) end
-		seen.leftHeight, seen.rightHeight, seen.track, seen.missed = leftHeight, rightHeight, track, nil
-	end
-	seen.onGround, seen.target, seen.at = onGround, target, realNow
-	-- (off the ground, a jump: eased back to none)
-	local current = leanAngles[vehicle] or 0
-	current = current + (target - current) * math.min(1, frameTime / LEAN_FOLLOW)
-	leanAngles[vehicle] = current
-	seen.current = current
-	if not onGround or math.abs(current) < 0.002 then return end
-	-- about the lower side's wheels on the road: the raised side comes down to it
-	local pivot = current > 0 and (groundPoints[3] + groundPoints[4]) * 0.5 or (groundPoints[1] + groundPoints[2]) * 0.5
-	local raised = current > 0 and leftMid or rightMid
-	local turn = math.abs(current)
-	if turnedAbout(raised, pivot, axis, turn).z > raised.z then turn = -turn end
-	local newPosition = turnedAbout(position, pivot, axis, turn)
-	local forward, up = angles:Forward(), angles:Up()
-	local forwardX, forwardY, forwardZ = Handling.Rotate(forward.x, forward.y, forward.z, axis.x, axis.y, axis.z, turn)
-	local upX, upY, upZ = Handling.Rotate(up.x, up.y, up.z, axis.x, axis.y, axis.z, turn)
-	displace(vehicle, newPosition, Vector(forwardX, forwardY, forwardZ):AngleEx(Vector(upX, upY, upZ)), frame, realNow)
-end
-
-local function levelLeaningCars(frame, realNow, eyePosition, frameTime)
-	local levels = AudioEngine.CAR_LEAN_LEVEL
-	if not levels or next(levels) == nil then return end
-	if realNow >= nextLeanScan then
-		nextLeanScan = realNow + 0.5
-		table.Empty(leanCars)
-		for _, vehicle in ipairs(ents.FindByClass("prop_vehicle_jeep")) do
-			local carConfig = AudioEngine.GetCarConfig(vehicle)
-			local share = carConfig and levels[carConfig.name]
-			if share and share > 0 then leanCars[vehicle] = share end
-		end
-	end
-	local maxDistanceSqr = LEAN_DISTANCE * LEAN_DISTANCE
-	for vehicle, share in pairs(leanCars) do
-		if IsValid(vehicle) and not vehicle:IsDormant() and vehicle:GetPos():DistToSqr(eyePosition) < maxDistanceSqr then
-			levelCar(vehicle, share, frame, realNow, frameTime)
-		end
-	end
-end
-
--- what the lean correction sees on the cars it handles (to check it runs)
-concommand.Add("audio_engine_lean_info", function()
-	if not AudioEngine.CAR_LEAN_LEVEL then
-		print("[Audio Engine] lean correction: AudioEngine.CAR_LEAN_LEVEL is missing: this client has an older sh_carlist.lua loaded "
-			.. "(a Lua refresh reloads only the files that changed). Restart or change the map")
-		return
-	end
-	local levels = AudioEngine.CAR_LEAN_LEVEL
-	print(string.format("[Audio Engine] lean correction: %d car kinds listed, %d such cars in the scan", table.Count(levels), table.Count(leanCars)))
-	for vehicle, share in pairs(leanCars) do
-		local seen = IsValid(vehicle) and leanSeen[vehicle]
-		if not seen then
-			print(string.format("  %s: not measured (too far, out of view or no bounds)", tostring(vehicle)))
-		elseif not seen.onGround then
-			print(string.format("  %s: corner %s found no road under it (%.1f s ago)", tostring(vehicle), tostring(seen.missed), RealTime() - seen.at))
-		else
-			print(string.format("  %s: share %.2f | sides %.1f / %.1f in over the road, %.0f in apart | lean taken out %.1f deg (now %.1f) | %.1f s ago",
-				tostring(vehicle), share, seen.leftHeight or 0, seen.rightHeight or 0, seen.track or 0, math.deg(seen.target or 0),
-				math.deg(seen.current or 0), RealTime() - seen.at))
-		end
-	end
-end, nil, "Print what the drawn lean correction (AudioEngine.CAR_LEAN_LEVEL) measures on the cars near you")
-
--- try a share on the car you sit in, live and on this client only (0 = off, 1 = drawn level)
-concommand.Add("audio_engine_lean_set", function(player, _, arguments)
-	local car = IsValid(player) and AudioEngine.RiddenCar(player)
-	local carConfig = IsValid(car) and AudioEngine.GetCarConfig(car)
-	if not carConfig or not carConfig.name then
-		print("[Audio Engine] lean correction: sit in a car from the car list first")
-		return
-	end
-	local share = tonumber(arguments[1])
-	AudioEngine.CAR_LEAN_LEVEL = AudioEngine.CAR_LEAN_LEVEL or {}
-	if not share then
-		print(string.format("[Audio Engine] lean correction for %s: %s (audio_engine_lean_set <0..1>)", carConfig.name,
-			tostring(AudioEngine.CAR_LEAN_LEVEL[carConfig.name] or 0)))
-		return
-	end
-	share = clamp(share, 0, 1)
-	AudioEngine.CAR_LEAN_LEVEL[carConfig.name] = share > 0 and share or nil
-	nextLeanScan = 0
-	print(string.format("[Audio Engine] lean correction for %s set to %.2f on this client (until a reload; the lasting value is AudioEngine.CAR_LEAN_LEVEL in sh_carlist.lua)", carConfig.name, share))
-end, nil, "Set the drawn lean correction (0..1 of the lean taken out) for the car you sit in, on this client, to try values")
-
--- the car the camera rides with: the one you drive with the prediction, else the one you sit in
-local function cameraCar()
-	if own.vehicle then return own.vehicle end
-	local player = LocalPlayer()
-	return IsValid(player) and AudioEngine.RiddenCar(player) or nil
 end
 
 ---------------------------------------------------------------------------
@@ -780,7 +574,7 @@ local function updateFrame()
 		end
 		local displayAngles = Handling.AnglesOf(display)
 		-- (audio_engine_predict_amount: part of the way from where Source shows the car)
-		local amount = predictAmount()
+		local amount = amountConVar:GetFloat()
 		if amount < 1 then
 			toPosition = LerpVector(amount, vehicle:GetPos(), toPosition)
 			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
@@ -796,13 +590,10 @@ local function updateFrame()
 		if not vehicle then own.vehicle = nil end
 	end
 
-	local player = LocalPlayer()
-	local eyePosition = IsValid(player) and player:EyePos() or vector_origin
 	if othersShare > 0 and own.lead then
-		updateOthers(vehicle, own.lead, frame, realNow, eyePosition)
+		local player = LocalPlayer()
+		updateOthers(vehicle, own.lead, frame, realNow, IsValid(player) and player:EyePos() or vector_origin)
 	end
-	-- (after the prediction: it starts from where that draws a car)
-	levelLeaningCars(frame, realNow, eyePosition, frameTime)
 	clearStale(frame)
 end
 
@@ -810,164 +601,29 @@ end
 -- the camera moves with your car as drawn. hook.Call is wrapped for CalcView only, so whatever
 -- camera the gamemode or another addon makes (first person, third person) is moved after it
 ---------------------------------------------------------------------------
+local ourCalls = setmetatable({}, { __mode = "k" })
 local cameraFrame = -1
 
---[[
-	The vehicle's third-person camera, ours: it orbits the middle of the car as drawn (the base
-	gamemode's orbits the driver's eyes), at a fixed distance (no mouse-wheel zoom: the base one
-	reads the wheel, which is the speed limiter's), from the car's own render bounds. The base
-	camera's distance follows the render bounds, which are widened while the car is drawn moved:
-	as the lean correction came and went the camera jumped in and out
-]]
-local CAMERA_RISE = 0.35        -- the orbit's centre: this share of the car's height over its middle
--- (the user: 1 x the car's render bounds diagonal, the base camera at zoom 0, was too far out)
-local cameraDistanceConVar = CreateClientConVar("audio_engine_camera_distance", "0.7", true, false,
-	"Vehicle third-person camera distance, x the car's size (1 = the base gamemode's at zoom 0); 0 = the gamemode's own camera", 0, 3)
-local CAMERA_WALL_GAP = 4       -- inches kept off a wall behind the camera
-local cameraHull = Vector(CAMERA_WALL_GAP, CAMERA_WALL_GAP, CAMERA_WALL_GAP)
-local cameraResult = {}
-local cameraTrace = { mins = -cameraHull, maxs = cameraHull, mask = MASK_SOLID, filter = notCar, output = cameraResult }
-
-local function thirdPersonOrigin(player, car, angles)
-	local seat = player:GetVehicle()
-	if not IsValid(seat) or not seat.GetThirdPersonMode or not seat:GetThirdPersonMode() then return nil end
-	if player:GetViewEntity() ~= player then return nil end
-	local distance = cameraDistanceConVar:GetFloat()
-	if distance <= 0 then return nil end
-	local bounds = originalBounds[car]
-	local mins, maxs
-	if bounds then mins, maxs = bounds.mins, bounds.maxs else mins, maxs = car:GetRenderBounds() end
-	local radius = (maxs - mins):Length() * distance
-	local centre = car:OBBCenter()
-	centre.z = centre.z + (car:OBBMaxs().z - car:OBBMins().z) * CAMERA_RISE
-	local position, carAngles = AudioEngine.DisplayPose(car)
-	local pivot = LocalToWorld(centre, angle_zero, position, carAngles)
-	cameraTrace.start, cameraTrace.endpos = pivot, pivot - angles:Forward() * radius
-	util.TraceHull(cameraTrace)
-	return cameraResult.HitPos and Vector(cameraResult.HitPos) or cameraTrace.endpos
-end
-
---[[
-	The look direction turns exactly with the car as drawn (the user: the camera turned before the
-	car). The view angles the game hands CalcView are the mouse look (relative to the car) on top of
-	a pose of the car that isn't the one drawn, so they led it. Rebuilt here: the driver's eyes
-	attachment of the car as drawn, then the mouse look (LocalEyeAngles). Only the driver's (a seat's
-	view is its own pod's); roll as the game's (none in the base camera). If that comes out far from
-	the game's angles (another convention than assumed), the game's angles are used, said once.
-]]
-local CAMERA_ANGLE_SANITY = 45  -- degrees: further from the game's look direction than this = don't trust it
-local eyeOffsets = {}           -- model -> the driver's eyes attachment's angles in the car's space (false: none)
-local cameraAnglesWarned = false
-
-local function eyeOffsetOf(car)
-	local model = car:GetModel() or ""
-	local offset = eyeOffsets[model]
-	if offset ~= nil then return offset end
-	local attachmentId = car:LookupAttachment("vehicle_driver_eyes")
-	local attachment = attachmentId and attachmentId > 0 and car:GetAttachment(attachmentId)
-	offset = attachment and car:WorldToLocalAngles(attachment.Ang) or false
-	eyeOffsets[model] = offset
-	return offset
-end
-
-local function cameraAnglesFor(player, car, angles)
-	if not player.LocalEyeAngles or player:GetVehicle() ~= car then return angles, "game's (not the driver)" end
-	local offset = eyeOffsetOf(car)
-	if not offset then return angles, "game's (no eyes attachment)" end
-	local _, carAngles = AudioEngine.DisplayPose(car)
-	local _, eyeAngles = LocalToWorld(vector_origin, offset, vector_origin, carAngles)
-	local _, look = LocalToWorld(vector_origin, player:LocalEyeAngles(), vector_origin, eyeAngles)
-	if math.abs(angles.r) < 0.5 then look.r = 0 end
-	if math.abs(math.AngleDifference(look.y, angles.y)) > CAMERA_ANGLE_SANITY or math.abs(math.AngleDifference(look.p, angles.p)) > CAMERA_ANGLE_SANITY then
-		if not cameraAnglesWarned then
-			cameraAnglesWarned = true
-			print(string.format("[Audio Engine] vehicle camera: the car-locked look direction came out %.0f deg from the game's; using the game's", math.AngleDifference(look.y, angles.y)))
-		end
-		return angles, "game's (too far off)"
-	end
-	return look, "ours"
-end
-
--- audio_engine_camera_log [seconds]: 10 times a second, the yaws the camera and the car come from
--- (temporary: to see what the camera turns ahead of)
-local cameraLogUntil, cameraLogNext = 0, 0
-concommand.Add("audio_engine_camera_log", function(_, _, args)
-	cameraLogUntil = RealTime() + math.Clamp(tonumber(args[1]) or 5, 1, 30)
-	print("[Audio Engine] camera log: t | yaw: car GetAngles, GetRenderAngles, GetNetworkAngles, eyes attachment | camera: game's, ours, mouse (local) | used")
-end, nil, "Print the car's and the camera's yaw while you drive, to see which leads (temporary)")
-
-local function logCamera(player, car, angles, look, used)
-	local now = RealTime()
-	if now > cameraLogUntil or now < cameraLogNext then return end
-	cameraLogNext = now + 0.1
-	local attachmentId = car:LookupAttachment("vehicle_driver_eyes")
-	local attachment = attachmentId and attachmentId > 0 and car:GetAttachment(attachmentId)
-	local networkYaw = car.GetNetworkAngles and car:GetNetworkAngles().y or 0
-	print(string.format("  %6.2f | %7.1f %7.1f %7.1f %7.1f | %7.1f %7.1f %7.1f | %s", cameraLogUntil - now,
-		car:GetAngles().y, car:GetRenderAngles().y, networkYaw, attachment and attachment.Ang.y or 0,
-		angles.y, look and look.y or 0, player.LocalEyeAngles and player:LocalEyeAngles().y or 0, used))
-end
-
-local function cameraAngles(player, car, angles)
-	local result, used = cameraAnglesFor(player, car, angles)
-	logCamera(player, car, angles, result, used)
-	return result
-end
-
--- an error in the prediction must not take every addon's camera with it: CalcView still runs
--- (unmoved), the error is printed once
-local predictionErrorPrinted = false
 local function calcView(originalCall, gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
-	local updated, message = pcall(updateFrame)
-	if not updated and not predictionErrorPrinted then
-		predictionErrorPrinted = true
-		ErrorNoHalt("[audio_engine] driving prediction: " .. tostring(message) .. "\n")
-	end
+	updateFrame()
 	local view = originalCall("CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
-	-- (the car you sit in drawn moved, by the prediction or less leaning: the camera with it)
-	local car = updated and cameraCar()
-	local entry = car and displaced[car]
-	local lookAngles = (type(view) == "table" and view.angles) or angles
-	if IsValid(car) and IsValid(player) and cameraDistanceConVar:GetFloat() > 0 then lookAngles = cameraAngles(player, car, lookAngles) end
-	local thirdPerson = IsValid(car) and IsValid(player) and thirdPersonOrigin(player, car, lookAngles)
-	if not entry and not thirdPerson then return view end
+	local entry = own.vehicle and displaced[own.vehicle]
+	if not entry then return view end
 	-- a copy: some cameras hand back the same table each frame
 	local moved = {}
 	if type(view) == "table" then for key, value in pairs(view) do moved[key] = value end end
 	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
-	if thirdPerson then
-		-- (already from the car as drawn; the look direction is the player's own, not turned with the car)
-		moved.origin, moved.angles, moved.drawviewer = thirdPerson, lookAngles, true
-	else
-		moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
-	end
+	moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
 	cameraFrame = FrameNumber()
 	return moved
 end
-
---[[
-	Our wrappers can end up nested: another addon wrapping hook.Call after us (and calling through
-	to ours), our timer wrapping theirs again, or a Lua refresh wrapping the last load's. Each
-	CalcView then went through calcView twice and the camera moved by the lead twice. So:
-	  * every wrapper we ever made is known (AudioEngine.predictHookCalls, kept over a refresh), and
-	    hook.Call is wrapped again only if it isn't one of ours;
-	  * the wrappers call the newest calcView (AudioEngine.PredictCalcView), not their own load's;
-	  * inside a CalcView we're already moving, the next wrapper down just passes it on.
-]]
-AudioEngine.predictHookCalls = AudioEngine.predictHookCalls or setmetatable({}, { __mode = "k" })
-AudioEngine.PredictCalcView = calcView
-local ourCalls = AudioEngine.predictHookCalls
 
 local function wrapHookCall()
 	if ourCalls[hook.Call] then return end
 	local originalCall = hook.Call
 	local function call(name, gamemodeTable, ...)
-		if name ~= "CalcView" or AudioEngine.predictInCalcView then return originalCall(name, gamemodeTable, ...) end
-		AudioEngine.predictInCalcView = true
-		local succeeded, view = pcall(AudioEngine.PredictCalcView, originalCall, gamemodeTable, ...)
-		AudioEngine.predictInCalcView = false
-		if not succeeded then error(view, 0) end
-		return view
+		if name ~= "CalcView" then return originalCall(name, gamemodeTable, ...) end
+		return calcView(originalCall, gamemodeTable, ...)
 	end
 	ourCalls[call] = true
 	hook.Call = call
@@ -987,7 +643,7 @@ hook.Add("PreDrawOpaqueRenderables", "audio_engine_predict", function()
 		takePlacementsOff()
 		clearStale(frame)
 		return
-	elseif cameraCar() and displaced[cameraCar()] and cameraFrame ~= frame then
+	elseif own.vehicle and displaced[own.vehicle] and cameraFrame ~= frame then
 		table.Empty(displaced)
 		takePlacementsOff()
 		clearStale(frame + 1)
@@ -1019,9 +675,7 @@ hook.Add("PostPlayerDraw", "audio_engine_predict", function(player)
 	player:InvalidateBoneCache()
 end)
 
--- (fullUpdate: the game "removes" every entity on a full update, but they stay: see cl_engine)
-hook.Add("EntityRemoved", "audio_engine_predict", function(entity, fullUpdate)
-	if fullUpdate then return end
+hook.Add("EntityRemoved", "audio_engine_predict", function(entity)
 	displaced[entity], overridden[entity], childrenCache[entity], originalBounds[entity], placements[entity] = nil, nil, nil, nil, nil
 	if own.vehicle == entity then own.vehicle, own.base = nil, nil end
 end)
