@@ -43,6 +43,16 @@ local othersConVar = CreateClientConVar("audio_engine_predict_others", "1", true
 	"1 = while you drive with prediction, other moving cars are shown where they are now too, so close driving and crashes line up")
 local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false, false,
 	"1 = draw the server's car (red), Source's (yellow) and the predicted one (green)")
+-- (temporary, to find what draws the car swaying instead of turning on the test server: each
+-- part of the prediction can be switched off on its own; not saved)
+local wallsConVar = CreateClientConVar("audio_engine_predict_walls", "1", false, false,
+	"Testing: 0 = the drawn car isn't stopped at walls")
+local carStopConVar = CreateClientConVar("audio_engine_predict_carstop", "1", false, false,
+	"Testing: 0 = the drawn car isn't stopped at other cars")
+local smoothingConVar = CreateClientConVar("audio_engine_predict_smoothing", "1", false, false,
+	"Testing: 0 = corrections are shown at once (no smoothing)")
+local newReplayConVar = CreateClientConVar("audio_engine_predict_newreplay", "1", false, false,
+	"Testing: 0 = the replay ignores the server's impact age, wall follow and command fraction (as before 2026-11-24)")
 
 AudioEngine.PREDICTION = {
 	maxCommands = 32,         -- never replays more (~0.5 s at 66 tick: a longer gap shows that late)
@@ -188,6 +198,9 @@ net.Receive("audio_engine_drive", function()
 	if net.ReadBool() then state.impactAge = net.ReadUInt(8) / 100 end
 	local blockedFor = net.ReadUInt(8) / 100
 	state.blockedFor = blockedFor > 0 and blockedFor or nil
+	if not newReplayConVar:GetBool() then
+		state.commandFraction, state.impactAge, state.blockedFor, state.modelOn = 0, nil, nil, nil
+	end
 
 	local vehicle = drivenCar()
 	if not vehicle or vehicle:EntIndex() ~= index then return end
@@ -932,6 +945,7 @@ local function updateFrame()
 		local count, fraction, matched, fractionButtons = commandsAfter(base, own.commands)
 		local stats = own.stats
 		if matched then stats.matched = stats.matched + 1 else stats.fallback = stats.fallback + 1 end
+		if not newReplayConVar:GetBool() then fractionButtons = nil end
 		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state, fractionButtons)
 		own.count, own.fraction = count, fraction
 
@@ -952,7 +966,7 @@ local function updateFrame()
 			end
 		end
 		own.shown = true
-		Handling.SmootherDecay(own.smoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.smoothTime, PREDICTION.snapDistance)
+		Handling.SmootherDecay(own.smoother, smoothingConVar:GetBool() and frameTime or 1000, base.impact and PREDICTION.impactSmoothTime or PREDICTION.smoothTime, PREDICTION.snapDistance)
 		local display = Handling.SmootherApply(own.smoother, predicted, own.display)
 
 		-- not through walls: stop where the leading end would hit something
@@ -961,20 +975,28 @@ local function updateFrame()
 		local noseX, noseY, noseZ = Handling.NoseOf(display, spec)
 		local size = sizeOf(vehicle, spec)
 		local clear = clearShare(basePosition, toPosition, Vector(noseX, noseY, noseZ), Vector(display.cx, display.cy, display.cz), size.halfLength, size.halfWidth)
-		if clear < 1 then
+		if clear < 1 and wallsConVar:GetBool() then
 			toPosition = basePosition + (toPosition - basePosition) * clear
 			stats.clamped = stats.clamped + 1
 		end
 		local displayAngles = Handling.AnglesOf(display)
 		-- not through other cars either (as they're drawn: moved over the lead, or parked)
 		local stoppedByCar
-		toPosition, displayAngles, stoppedByCar = carStop(vehicle, spec, basePosition, Handling.AnglesOf(base), toPosition, displayAngles, realNow)
+		if carStopConVar:GetBool() then
+			toPosition, displayAngles, stoppedByCar = carStop(vehicle, spec, basePosition, Handling.AnglesOf(base), toPosition, displayAngles, realNow)
+		end
 		if stoppedByCar then stats.carStops = (stats.carStops or 0) + 1 end
 		-- (audio_engine_predict_amount: part of the way from where Source shows the car)
 		local amount = amountConVar:GetFloat()
 		if amount < 1 then
 			toPosition = LerpVector(amount, vehicle:GetPos(), toPosition)
 			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
+		end
+		-- (stats: how fast the drawn car turns, next to the server's car)
+		if own.displayAngles and frameTime > 0 then
+			stats.drawnTurn = (stats.drawnTurn or 0) + math.abs(math.AngleDifference(displayAngles.y, own.displayAngles.y))
+			stats.serverTurn = (stats.serverTurn or 0) + math.abs(base.yawRate or 0) * frameTime
+			stats.turnTime = (stats.turnTime or 0) + frameTime
 		end
 		own.displayPosition, own.displayAngles = toPosition, displayAngles
 		own.velocity = own.velocity or Vector()
@@ -1162,5 +1184,9 @@ concommand.Add("audio_engine_predict_stats", function()
 	print(string.format("  corrections %d, mean %.1f in, largest %.1f in | wall stops %d, car stops %d | lead %.0f ms (ping %d, interp %.0f ms) | others %s | learned samples %d",
 		stats.corrections, stats.corrections > 0 and stats.correctionSum / stats.corrections or 0, stats.largest, stats.clamped, stats.carStops or 0,
 		(own.lead or 0) * 1000, LocalPlayer():Ping(), interpolationDelay() * 1000, othersConVar:GetBool() and "on" or "off", learner and learner.samples or 0))
+	local turnTime = stats.turnTime or 0
+	print(string.format("  turning (mean deg/s, either way): drawn %.1f, server's car %.1f | walls %d, carstop %d, smoothing %d, newreplay %d",
+		turnTime > 0 and stats.drawnTurn / turnTime or 0, turnTime > 0 and stats.serverTurn / turnTime or 0,
+		wallsConVar:GetInt(), carStopConVar:GetInt(), smoothingConVar:GetInt(), newReplayConVar:GetInt()))
 	own.stats = { states = 0, matched = 0, fallback = 0, corrections = 0, correctionSum = 0, largest = 0, clamped = 0 }
 end, nil, "Print how the driving prediction is doing (and start counting again)")
