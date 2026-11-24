@@ -69,7 +69,10 @@ local HANDLING_DEFAULTS = {
 	steerReverse = 9,       -- per second through the centre, from one lock to the other
 	lockSlow = 32,          -- front wheel angle at full lock, parking speeds (degrees)
 	lockFast = 5,           -- ... at lockFadeSpeed and over
-	lockFadeSpeed = 30,     -- m/s
+	-- (the user: cars should turn way more from 40 mph and more at 80+. 30 m/s faded the lock to 5 by
+	-- 67 mph and it, not the tyres, capped the turn at 40-60 mph; 52: full lock on a 3.4 m wheelbase
+	-- 110 / 103 / 91 deg/s at 40 / 50 / 60 mph, was 67 / 60 / 49)
+	lockFadeSpeed = 52,     -- m/s
 	lockFadePower = 1.4,    -- (1 - speed / lockFadeSpeed) ^ this blends slow into fast
 	-- the tyres: the most sideways acceleration they hold (g). Turns are capped at it (the yaw
 	-- rate asked never needs more), and a slide loses its sideways speed at it
@@ -99,9 +102,10 @@ local HANDLING_DEFAULTS = {
 	-- alone gave the SLR ~26 deg/s at 80 mph (a 180 in 7 s); the user wanted a tight 180 at 80 mph.
 	-- Every car the same (it was the high-powered ones': the user, lower tiers turned badly at 50 mph,
 	-- the turn shouldn't follow a car's class). 0 = off
-	turnFloor = 53,
+	-- (the user: more at 80 mph and over: 75 deg/s there, 65 at 100, 58 at 120; was 53 / 46 / 40)
+	turnFloor = 75,
 	turnFloorSpeed = 36,    -- m/s (80 mph)
-	turnFloorPower = 0.7,   -- (0.5 left 50-60 mph short, the user)
+	turnFloorPower = 0.66,  -- (0.5 left 50-60 mph short, the user)
 	yawFollow = 8,          -- per second: how firmly the rotation follows the steering
 	minSpeed = 1.5,         -- m/s: under this Source alone (parking, standing)...
 	fadeSpeed = 3,          -- ...fully on minSpeed + this
