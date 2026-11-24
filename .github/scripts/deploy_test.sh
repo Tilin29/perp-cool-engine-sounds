@@ -10,10 +10,14 @@
 #   other addons/*, dev/*, .github/*, .claude/*, dist/*, *.md, .gitignore, .gitattributes: not uploaded
 #   everything else             -> $ADDON_DIR/<path>
 #
-# Environment: SFTP_HOST, SFTP_PORT, SFTP_HOST_KEY (a known_hosts line), SFTP_USER,
-# LFTP_PASSWORD (read by lftp's --env-password), ADDON_DIR, SL65_DIR, BEFORE, AFTER.
+# Environment: SFTP_HOST, SFTP_PORT, SFTP_HOST_KEY (a known_hosts line), SFTP_USER, SFTP_PASSWORD,
+# ADDON_DIR, SL65_DIR, BEFORE, AFTER. SFTP_COMMAND: a stand-in for the upload, to dry-run it.
+#
+# OpenSSH's sftp in batch mode, the password through sshpass. (lftp, the first version, failed with
+# "Login incorrect" where FileZilla logged in with the same details: it drives ssh's password prompt
+# itself.) A failed upload runs a verbose login probe, so the log shows what the server said.
 set -euo pipefail
-: "${SFTP_HOST:?}" "${SFTP_PORT:?}" "${SFTP_HOST_KEY:?}" "${SFTP_USER:?}" "${LFTP_PASSWORD:?}" "${ADDON_DIR:?}" "${SL65_DIR:?}"
+: "${SFTP_HOST:?}" "${SFTP_PORT:?}" "${SFTP_HOST_KEY:?}" "${SFTP_USER:?}" "${SFTP_PASSWORD:?}" "${ADDON_DIR:?}" "${SL65_DIR:?}"
 BEFORE="${BEFORE:-}"
 AFTER="${AFTER:-HEAD}"
 
@@ -46,27 +50,36 @@ uploadCount=$(wc -l < "$uploads"); deleteCount=$(wc -l < "$deletes")
 echo "$uploadCount to upload, $deleteCount to delete"
 if [ "$uploadCount" -eq 0 ] && [ "$deleteCount" -eq 0 ]; then echo "Nothing for the server"; exit 0; fi
 
-# only the pinned host key is accepted
+# only the pinned host key is accepted; the password only (the runner has no keys to offer)
 knownHosts="$work/known_hosts"
-printf '%s\n' "$SFTP_HOST_KEY" > "$knownHosts"
+printf '%s
+' "$SFTP_HOST_KEY" > "$knownHosts"
+sshOptions=(-oBatchMode=no -oStrictHostKeyChecking=yes "-oUserKnownHostsFile=$knownHosts" -oPubkeyAuthentication=no
+	-oPreferredAuthentications=password,keyboard-interactive -oNumberOfPasswordPrompts=1 -oConnectTimeout=30 -P "$SFTP_PORT")
+export SSHPASS="$SFTP_PASSWORD"
 
-script="$work/commands.lftp"
+# sftp batch: a leading "-" lets a command fail (a folder that exists, a file already gone).
+# sftp's mkdir makes one level: every folder on the way is made, parents first (sorted)
+batch="$work/commands.sftp"
 {
-	echo "set sftp:auto-confirm no"
-	echo "set sftp:connect-program \"ssh -a -x -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$knownHosts\""
-	echo "set net:max-retries 3"
-	echo "set net:timeout 30"
-	echo "open --env-password -u \"$SFTP_USER\" sftp://$SFTP_HOST:$SFTP_PORT"
-	# (folders that exist already and files already gone aren't failures)
-	echo "set cmd:fail-exit no"
-	while IFS= read -r folder; do echo "mkdir -p -f \"$folder\""; done < "$folders"
-	while IFS= read -r target; do echo "rm -f \"$target\""; done < "$deletes"
-	echo "set cmd:fail-exit yes"
-	while IFS=$'\t' read -r file target folder; do echo "put -O \"$folder\" \"$file\""; done < "$uploads"
+	awk '{ path = ""; count = split($0, parts, "/"); for (i = 2; i <= count; i++) { path = path "/" parts[i]; print path } }' "$folders" | sort -u |
+		while IFS= read -r folder; do echo "-mkdir \"$folder\""; done
+	while IFS= read -r target; do echo "-rm \"$target\""; done < "$deletes"
+	while IFS=$'	' read -r file target folder; do echo "put \"$file\" \"$target\""; done < "$uploads"
 	echo "bye"
-} > "$script"
+} > "$batch"
 
-"${LFTP:-lftp}" -f "$script"   # (LFTP: a stand-in to dry-run it)
+if [ -n "${SFTP_COMMAND:-}" ]; then
+	"$SFTP_COMMAND" "$batch"
+elif ! sshpass -e sftp "${sshOptions[@]}" -b "$batch" "$SFTP_USER@$SFTP_HOST"; then
+	echo "::error::The upload failed. A verbose login follows (what the server offered and answered):"
+	printf 'pwd
+bye
+' > "$work/probe.sftp"
+	sshpass -e sftp -v "${sshOptions[@]}" -b "$work/probe.sftp" "$SFTP_USER@$SFTP_HOST" 2>&1 |
+		grep -Ei "authenticat|permission|denied|password|connected|remote working|closed|error" || true
+	exit 1
+fi
 echo "Done: $uploadCount uploaded, $deleteCount deleted"
-sed 's/^/  /' "$uploads" | cut -f1 | head -50
+cut -f1 "$uploads" | head -50 | sed 's/^/  /'
 [ "$uploadCount" -le 50 ] || echo "  ... and $((uploadCount - 50)) more"

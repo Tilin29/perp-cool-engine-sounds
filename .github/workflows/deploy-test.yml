@@ -26,8 +26,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install lftp
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq lftp
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
 
       - name: Upload
         env:
@@ -36,7 +36,7 @@ jobs:
           # (the server's key, pinned: nothing is sent to anything else answering at that address)
           SFTP_HOST_KEY: "[gamesfra1178.bisecthosting.com]:2022 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGIRJ1jov2XU9+2knfrsLgHUoB/dXwl7VOqxm9077LCO"
           SFTP_USER: ${{ secrets.TEST_SFTP_USER }}
-          LFTP_PASSWORD: ${{ secrets.TEST_SFTP_PASSWORD }}
+          SFTP_PASSWORD: ${{ secrets.TEST_SFTP_PASSWORD }}
           ADDON_DIR: /garrysmod/addons/cool_engine_sounds_perpcars
           SL65_DIR: /garrysmod/addons/sl65amg_rtu
           # (empty on a manual run: everything is uploaded)
