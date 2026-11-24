@@ -58,22 +58,18 @@ Handling.Clamp = clamp
 Handling.driveModelConVar = Handling.driveModelConVar or CreateConVar("audio_engine_drivemodel", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
 	"1 = the addon's handling model on registered cars (rotation follows the steering, grip limit, handbrake drifts; "
 		.. "sh_handling.lua); 0 = Source's own tyres alone. The driver's prediction runs either way")
--- (off by default: on the dedicated test server it drew cars badly, for every player (swaying, the
--- camera stuttering). 0 = everyone sees their car as Source shows it, as a listen host does)
-Handling.predictServerConVar = Handling.predictServerConVar or CreateConVar("audio_engine_predict_server", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
-	"1 = drivers' clients may draw their car ahead of the server (audio_engine_predict, no input delay); 0 = off for everyone")
 
 ---------------------------------------------------------------------------
 -- settings (per car: AudioEngine.CAR_HANDLING[name] over these; tuned live by the debug menu)
 ---------------------------------------------------------------------------
 local HANDLING_DEFAULTS = {
 	-- steering: A/D are on/off keys, the wheel angle ramps to them
-	steerRate = 7,          -- per second towards the pressed key (centre to full lock in 0.14 s; 4.5 felt slow to turn in)
-	steerReturn = 8,        -- per second back to the centre with no key
+	steerRate = 4.5,        -- per second towards the pressed key (centre to full lock in 0.22 s)
+	steerReturn = 6,        -- per second back to the centre with no key
 	steerReverse = 9,       -- per second through the centre, from one lock to the other
 	lockSlow = 32,          -- front wheel angle at full lock, parking speeds (degrees)
 	lockFast = 5,           -- ... at lockFadeSpeed and over
-	lockFadeSpeed = 40,     -- m/s (90 mph; at 30 the lock, not the tyres, capped the turn at 40-60 mph: the user, "stiff")
+	lockFadeSpeed = 30,     -- m/s
 	lockFadePower = 1.4,    -- (1 - speed / lockFadeSpeed) ^ this blends slow into fast
 	-- the tyres: the most sideways acceleration they hold (g). Turns are capped at it (the yaw
 	-- rate asked never needs more), and a slide loses its sideways speed at it
@@ -94,14 +90,10 @@ local HANDLING_DEFAULTS = {
 	sideHold = 1.15,
 	-- obstructed: when the car turned less than it was set to last tick by over blockedYaw deg/s
 	-- (+ blockedShare of it), something solid holds it (a wall, a car): for blockedTime s the turn
-	-- only follows at yawFollow, as before the every-tick hold, instead of forcing it again.
-	-- Only while the car touches something from the side (body.touching: a side collision within
-	-- contactHold s, sv_handling): without it Source's own tyres pulling the rotation back counted
-	-- as a wall and the car kept dropping to the gentle follow (it turned much less)
+	-- only follows at yawFollow, as before the every-tick hold, instead of forcing it again
 	blockedYaw = 15,
 	blockedShare = 0.5,
 	blockedTime = 0.3,
-	contactHold = 0.5,      -- s a side collision counts as touching
 	-- turn floor (arcade): the keys' full-lock turn never under turnFloor deg/s at turnFloorSpeed,
 	-- x (turnFloorSpeed / speed) ^ turnFloorPower elsewhere (still the lock's at most). The tyres' grip
 	-- alone gave the SLR ~26 deg/s at 80 mph (a 180 in 7 s); the user wanted a tight 180 at 80 mph.
@@ -110,7 +102,7 @@ local HANDLING_DEFAULTS = {
 	turnFloor = 53,
 	turnFloorSpeed = 36,    -- m/s (80 mph)
 	turnFloorPower = 0.7,   -- (0.5 left 50-60 mph short, the user)
-	yawFollow = 12,         -- per second: how firmly the rotation follows the steering (8: ~0.5 s to the full turn)
+	yawFollow = 8,          -- per second: how firmly the rotation follows the steering
 	minSpeed = 1.5,         -- m/s: under this Source alone (parking, standing)...
 	fadeSpeed = 3,          -- ...fully on minSpeed + this
 	-- handbrake (Space): the rear lets go, the car rotates past what the steering asks
@@ -301,7 +293,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 		-- held against something (a wall: the front corner stopped every tick, slammed round again by
 		-- the next and the car climbed the wall, the user, on the Furai): back to following gently
 		local set = state.yawSet
-		if set and body.touching and abs(body.yawRate - set) > settings.blockedYaw + settings.blockedShare * abs(set) then
+		if set and abs(body.yawRate - set) > settings.blockedYaw + settings.blockedShare * abs(set) then
 			state.blockedFor = settings.blockedTime
 		end
 		if (state.blockedFor or 0) > 0 then
@@ -529,28 +521,7 @@ end
 	the next command the frame is (0..1, with the last buttons). Returns the predicted body (into
 	`out`) and the steering state it ends with.
 ]]
---[[
-	The replay runs Control for every command (up to 32 a frame), and each settings read through
-	SettingsFor's live proxy is a function call: they're read into a plain table once per Predict
-	(a key not in AudioEngine.HANDLING still falls through to the proxy). Per spec, reused.
-]]
-local frozenSpecs = setmetatable({}, { __mode = "k" })
-local function frozenSpecOf(spec)
-	local frozen = frozenSpecs[spec]
-	if not frozen then
-		frozen = { settings = setmetatable({}, { __index = spec.settings }) }
-		frozenSpecs[spec] = frozen
-	end
-	for key, value in pairs(spec) do
-		if key ~= "settings" then frozen[key] = value end
-	end
-	local frozenSettings, liveSettings = frozen.settings, spec.settings
-	for key in pairs(AudioEngine.HANDLING) do frozenSettings[key] = liveSettings[key] end
-	return frozen
-end
-
 function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState)
-	spec = frozenSpecOf(spec)
 	local body = Handling.CopyBody(base, out)
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget

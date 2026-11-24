@@ -37,14 +37,14 @@ AUDIO_ENGINE.PLAYER_SETTINGS = {
 	"audio_engine_volume", "audio_engine_startkey", "audio_engine_roadnoise", "audio_engine_windnoise",
 	"audio_engine_doppler", "audio_engine_passby", "audio_engine_tunnel", "audio_engine_maxcars", "audio_engine_range",
 	"audio_engine_hud", "audio_engine_units", "audio_engine_hud_scale", "audio_engine_cluster",
-	"audio_engine_predict", "audio_engine_predict_amount", "audio_engine_predict_others", "audio_engine_predict_debug", "audio_engine_camera_distance",
+	"audio_engine_predict", "audio_engine_predict_amount", "audio_engine_predict_others", "audio_engine_predict_debug",
 	"audio_engine_samplerate", "audio_engine_genbudget", "audio_engine_maxsounds", "audio_engine_baked",
 	"audio_engine_lightkey", "audio_engine_indicator_volume",
 }
 AUDIO_ENGINE.SERVER_SETTINGS = {
 	"audio_engine_editor", "audio_engine_tuneaccess", "audio_engine_tunecooldown",
 	"audio_engine_mutestock", "audio_engine_muteskid", "audio_engine_mutetyrescrape",
-	"audio_engine_drivemodel", "audio_engine_predict_server", "audio_engine_autostart", "audio_engine_keeprunning", "audio_engine_emotionstart",
+	"audio_engine_drivemodel", "audio_engine_autostart", "audio_engine_keeprunning", "audio_engine_emotionstart",
 	"audio_engine_cruise", "audio_engine_seats",
 }
 
