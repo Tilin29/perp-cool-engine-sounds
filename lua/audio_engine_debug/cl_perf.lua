@@ -29,6 +29,7 @@ local EngineDebug = AudioEngine.Debug
 
 -- (Lua refresh: take the previous load's wrappers off before this one starts)
 if EngineDebug.PerfClient and EngineDebug.PerfClient.Uninstall then EngineDebug.PerfClient.Uninstall() end
+if EngineDebug.PerfClient and IsValid(EngineDebug.PerfClient.clearButton) then EngineDebug.PerfClient.clearButton:Remove() end
 local PERF = {}
 EngineDebug.PerfClient = PERF
 
@@ -450,6 +451,7 @@ local function setHud(turnOn)
 		nextHud, nextSnapshot = SysTime() + HUD_EVERY, 0
 	else
 		accumulators.hud, hudAcc = nil, nil
+		if IsValid(PERF.clearButton) then PERF.clearButton:Remove() end
 	end
 	refresh()
 	net.Start("audio_dbg_perf_sub")
@@ -467,6 +469,17 @@ concommand.Add("audio_engine_perf_hud", function(_, _, args)
 	if wantOn and not allowed() then return end
 	setHud(wantOn)
 end, nil, "Live performance overlay (debug): audio_engine_perf_hud [0/1]")
+
+local clearedAt = -math.huge
+
+-- the 60 s averages, peaks and graphs start again from now
+local function clearHistory()
+	clientHistory, serverHistory = {}, {}
+	clearedAt = SysTime()
+end
+
+concommand.Add("audio_engine_perf_hud_clear", clearHistory, nil,
+	"Clears the performance overlay's last 60 s (averages, peaks, graphs) (debug)")
 
 net.Receive("audio_dbg_perf_stats", function()
 	serverStats = net.ReadTable()
@@ -732,6 +745,49 @@ local function drawHooks(timingSummary, server, left, top, width)
 	return y
 end
 
+--[[
+	The clear button: drawn with the overlay, clickable while the context menu (C) is open, through an
+	invisible DButton on g_ContextMenu over it (a HUDPaint drawing takes no clicks; a context-menu child
+	takes them only with SetMouseInputEnabled). It reads CLEARED for CLEAR_BUTTON.confirmTime after a click.
+]]
+local CLEAR_BUTTON = {
+	width = 104, height = 22, confirmTime = 1,
+	idle = Color(255, 85, 85, 45), hover = Color(255, 85, 85, 110), border = Color(255, 110, 110),
+	confirmed = Color(90, 225, 120, 70),
+}
+
+local function clickableMenuOpen()
+	return IsValid(g_ContextMenu) and g_ContextMenu:IsVisible()
+end
+
+local function placeClearButton(x, y, buttonWidth, buttonHeight)
+	if not clickableMenuOpen() then return end
+	local button = PERF.clearButton
+	if not IsValid(button) then
+		button = vgui.Create("DButton", g_ContextMenu)
+		button:SetText("")
+		button:SetMouseInputEnabled(true)
+		button.Paint = function() end
+		button.DoClick = clearHistory
+		PERF.clearButton = button
+	end
+	button:SetPos(x, y)
+	button:SetSize(buttonWidth, buttonHeight)
+end
+
+local function drawClearButton(x, y, buttonWidth, buttonHeight)
+	placeClearButton(x, y, buttonWidth, buttonHeight)
+	local button = PERF.clearButton
+	local hovered = clickableMenuOpen() and IsValid(button) and button:IsHovered()
+	local confirmed = SysTime() - clearedAt < CLEAR_BUTTON.confirmTime
+	local fill = confirmed and CLEAR_BUTTON.confirmed or hovered and CLEAR_BUTTON.hover or CLEAR_BUTTON.idle
+	draw.RoundedBox(4, x, y, buttonWidth, buttonHeight, confirmed and HUD_COLORS.good or CLEAR_BUTTON.border)
+	draw.RoundedBox(4, x + 1, y + 1, buttonWidth - 2, buttonHeight - 2, HUD_COLORS.background)
+	draw.RoundedBox(4, x + 1, y + 1, buttonWidth - 2, buttonHeight - 2, fill)
+	local label = confirmed and "CLEARED" or "CLEAR 60 s"
+	draw.SimpleText(label, HUD_BOLD_FONT, x + buttonWidth / 2, y + buttonHeight / 2, HUD_COLORS.text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+end
+
 function PERF.Paint()
 	local now = SysTime()
 	if now >= nextSnapshot then
@@ -751,7 +807,11 @@ function PERF.Paint()
 	-- (the height is the last frame's: the panel is drawn before its rows)
 	draw.RoundedBox(6, left - padding, top - padding, width + padding * 2, lastPanelHeight, HUD_COLORS.background)
 	draw.SimpleText("AUDIO ENGINE PERFORMANCE", HUD_BOLD_FONT, left, top, HUD_COLORS.title)
-	draw.SimpleText("audio_engine_perf_hud 0 to close", HUD_SMALL_FONT, left + width, top + scaled(2), HUD_COLORS.dim, TEXT_ALIGN_RIGHT)
+	local buttonWidth, buttonHeight = scaled(CLEAR_BUTTON.width), scaled(CLEAR_BUTTON.height)
+	local buttonLeft, buttonTop = left + width - buttonWidth, top - scaled(2)
+	drawClearButton(buttonLeft, buttonTop, buttonWidth, buttonHeight)
+	local hint = clickableMenuOpen() and "perf_hud 0 closes" or "hold C to click  /  perf_hud 0 closes"
+	draw.SimpleText(hint, HUD_SMALL_FONT, buttonLeft - scaled(10), top + scaled(2), HUD_COLORS.dim, TEXT_ALIGN_RIGHT)
 	local y = drawColumnHeader(left, top + scaled(HUD.rowHeight), width)
 	for _, section in ipairs(SECTIONS) do
 		local history = section.history == "server" and serverHistory or clientHistory
