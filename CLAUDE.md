@@ -649,7 +649,8 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   a console report; `audio_engine_perf_hud` live overlay (server figures once a second to subscribers; `SECTIONS` client / sound / memory /
   server: per figure now, average and peak (worst: lowest fps) over `HISTORY_SECONDS` 60 of 1 s samples + a bar graph of that minute,
   green / amber / red against each figure's good / warn, else the section's colour; then cars by state + the costliest, busiest
-  hooks; scaled with the screen height; smoke-tested in a mock, not yet seen in game); `audio_engine_perf_snapshot`
+  hooks; scaled with the screen height; a CLEAR 60 s button in its header, clickable with C held (an invisible DButton on
+  `g_ContextMenu` over it), or `audio_engine_perf_hud_clear`; smoke-tested in a mock, not yet seen in game); `audio_engine_perf_snapshot`
   cars, patches, memory with no timing; `audio_engine_perf_spawn <n> [car|mixed] [lights] [mph] [grid|race]` / `_clear` stress test.
   race: a column 60 m down the road coming at you, 5 m to your right, zig-zag +-1.4 m, random 8-25 m gaps (`RACE` in sv_perf),
   every car setting off together once all engines started, at 3x the grid's acceleration (21 m/s2): drive-by Doppler / pass-by.
