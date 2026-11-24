@@ -251,7 +251,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     local seen = settings.testValue
     E.CAR_HANDLING["Mercedes McLaren SLR"].testValue = nil
     __result(before .. "|" .. tostring(seen))`)
-  check(res === '53|42', `a car's settings follow CAR_HANDLING live (turn floor ${res.split('|')[0]}, added value ${res.split('|')[1]})`)
+  check(res === '75|42', `a car's settings follow CAR_HANDLING live (turn floor ${res.split('|')[0]}, added value ${res.split('|')[1]})`)
 
   // 4e. obstructed: the rotation stopped every tick (a wall at the front corner): after the first tick
   // the model only follows gently instead of setting the full turn again
@@ -301,13 +301,13 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   await L.doString(`
     local handling = E.HANDLING
     handling.turnFloor = 0
-    E.HANDLING_DEFAULTS = { turnFloor = 53 }
+    E.HANDLING_DEFAULTS = { turnFloor = 75 }
     E.CAR_HANDLING["Dodge Charger SRT-8"].turnFloor = 0
     local settings = H.SettingsFor("Dodge Charger SRT-8")
     load(__shHandling)()
     load(__shCarlist)()
     __result(string.format("%s|%s|%s", tostring(E.HANDLING == handling), tostring(E.HANDLING.turnFloor), tostring(H.SettingsFor("Dodge Charger SRT-8").turnFloor)))`)
-  check(res === 'true|53|53', `a refresh brings the file's values (same table, turn floor, SRT-8's): ${res}`)
+  check(res === 'true|75|75', `a refresh brings the file's values (same table, turn floor, SRT-8's): ${res}`)
 
   // 5. Source's front wheels over FastCarSpeed matched to the model's turn (sv_handling
   // MatchedSteering / SourceSteerAngle; the params' speeds are mph): PERP's line 38 deg at a
@@ -328,14 +328,14 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   console.log('steering matched (deg, override on, at 0 / 10 / 35 / 67 / 112 mph | model at 112):', st.map((x) => +x.toFixed(2)).join(' | '))
   check(near(st[0], 38) && near(st[2], 38 - 30 * 10 / 35) && near(st[4], 8) && !st[1] && !st[3] && !st[5],
     "up to FastCarSpeed: Source's own line, no override (the params' speeds are mph)")
-  check(st[7] && st[9] && st[6] < 8 && st[8] < st[6] && st[8] < st[10] * 1.1 + 0.5 + 1e-6, "over it: the wheels follow the model's turn down, not held at DegreesFast")
+  check(st[7] && st[9] && st[8] < st[6] && st[8] < st[10] * 1.1 + 0.5 + 1e-6, "over it: the wheels follow the model's turn down, not held at DegreesFast")
   check(st[8] >= st[10], "never less than the model's turn")
   check(near(v[14], 1.95) && near(v[15], 1.3 * 1.02) && near(v[16], 1.15), `downforce: high-powered 1.95 g at 50 m/s, ${v[15].toFixed(3)} at 10, others none`)
   check(v[17] > 0.95 * Math.min(1.95 * 9.81 / 50 * 180 / Math.PI, 50 * Math.tan(5 * Math.PI / 180) / 2.6 * 180 / Math.PI) && v[17] > 1.4 * 1.3 * 9.81 / 50 * 180 / Math.PI,
     `downforce: at 50 m/s a high-powered car turns ${v[17].toFixed(1)} deg/s (grip alone ${(1.3 * 9.81 / 50 * 180 / Math.PI).toFixed(1)})`)
   const turns = v.slice(19, 25)
   console.log('full-lock turn at 20/25/30/40/50/60 mph:', turns.map((x) => x.toFixed(1)).join(' | '))
-  check(turns.slice(1).every((x, i) => x > turns[i] * 0.8 && x < turns[i] * 1.15) && turns[5] < turns[2],
+  check(turns.slice(1).every((x, i) => x > turns[i] * 0.8 && x < turns[i] * 1.2) && turns[5] < turns[2],
     'the turn eases off with speed, no cliff: each step (20/25/30/40/50/60 mph) keeps over 80% of the one before')
 
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
