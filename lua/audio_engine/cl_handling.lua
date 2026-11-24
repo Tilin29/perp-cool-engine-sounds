@@ -847,6 +847,47 @@ local function thirdPersonOrigin(player, car, angles)
 	return cameraResult.HitPos and Vector(cameraResult.HitPos) or cameraTrace.endpos
 end
 
+--[[
+	The look direction turns exactly with the car as drawn (the user: the camera turned before the
+	car). The view angles the game hands CalcView are the mouse look (relative to the car) on top of
+	a pose of the car that isn't the one drawn, so they led it. Rebuilt here: the driver's eyes
+	attachment of the car as drawn, then the mouse look (LocalEyeAngles). Only the driver's (a seat's
+	view is its own pod's); roll as the game's (none in the base camera). If that comes out far from
+	the game's angles (another convention than assumed), the game's angles are used, said once.
+]]
+local CAMERA_ANGLE_SANITY = 45  -- degrees: further from the game's look direction than this = don't trust it
+local eyeOffsets = {}           -- model -> the driver's eyes attachment's angles in the car's space (false: none)
+local cameraAnglesWarned = false
+
+local function eyeOffsetOf(car)
+	local model = car:GetModel() or ""
+	local offset = eyeOffsets[model]
+	if offset ~= nil then return offset end
+	local attachmentId = car:LookupAttachment("vehicle_driver_eyes")
+	local attachment = attachmentId and attachmentId > 0 and car:GetAttachment(attachmentId)
+	offset = attachment and car:WorldToLocalAngles(attachment.Ang) or false
+	eyeOffsets[model] = offset
+	return offset
+end
+
+local function cameraAngles(player, car, angles)
+	if not player.LocalEyeAngles or player:GetVehicle() ~= car then return angles end
+	local offset = eyeOffsetOf(car)
+	if not offset then return angles end
+	local _, carAngles = AudioEngine.DisplayPose(car)
+	local _, eyeAngles = LocalToWorld(vector_origin, offset, vector_origin, carAngles)
+	local _, look = LocalToWorld(vector_origin, player:LocalEyeAngles(), vector_origin, eyeAngles)
+	if math.abs(angles.r) < 0.5 then look.r = 0 end
+	if math.abs(math.AngleDifference(look.y, angles.y)) > CAMERA_ANGLE_SANITY or math.abs(math.AngleDifference(look.p, angles.p)) > CAMERA_ANGLE_SANITY then
+		if not cameraAnglesWarned then
+			cameraAnglesWarned = true
+			print(string.format("[Audio Engine] vehicle camera: the car-locked look direction came out %.0f deg from the game's; using the game's", math.AngleDifference(look.y, angles.y)))
+		end
+		return angles
+	end
+	return look
+end
+
 -- an error in the prediction must not take every addon's camera with it: CalcView still runs
 -- (unmoved), the error is printed once
 local predictionErrorPrinted = false
@@ -860,7 +901,9 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	-- (the car you sit in drawn moved, by the prediction or less leaning: the camera with it)
 	local car = updated and cameraCar()
 	local entry = car and displaced[car]
-	local thirdPerson = IsValid(car) and IsValid(player) and thirdPersonOrigin(player, car, (type(view) == "table" and view.angles) or angles)
+	local lookAngles = (type(view) == "table" and view.angles) or angles
+	if IsValid(car) and IsValid(player) and cameraDistanceConVar:GetFloat() > 0 then lookAngles = cameraAngles(player, car, lookAngles) end
+	local thirdPerson = IsValid(car) and IsValid(player) and thirdPersonOrigin(player, car, lookAngles)
 	if not entry and not thirdPerson then return view end
 	-- a copy: some cameras hand back the same table each frame
 	local moved = {}
@@ -868,7 +911,7 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
 	if thirdPerson then
 		-- (already from the car as drawn; the look direction is the player's own, not turned with the car)
-		moved.origin, moved.angles, moved.drawviewer = thirdPerson, moved.angles or angles, true
+		moved.origin, moved.angles, moved.drawviewer = thirdPerson, lookAngles, true
 	else
 		moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
 	end
