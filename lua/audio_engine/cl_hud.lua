@@ -85,13 +85,22 @@ local FONTS = {
 	W_Tiny = { 11, 600, false, nil, "Roboto" }, W_Mode = { 20, 600, false, nil, "Roboto" }, W_Message = { 13, 500, false, nil, "Roboto" },
 	-- D3 (H): angled display (Roboto for the design's Inter Tight)
 	H_Num = { 21, 500, false, nil, "Roboto" }, H_Big = { 58, 500, false, nil, "Roboto" }, H_Unit = { 13, 500, false, nil, "Roboto" },
-	H_Gear = { 34, 600, false, 4, "Roboto" }, H_Header = { 13, 600, false, nil, "Roboto" }, H_Row = { 14, 400, false, nil, "Roboto" },
-	H_RowValue = { 14, 600, false, nil, "Roboto" }, H_Message = { 13, 500, false, nil, "Roboto" },
+	-- (the STATUS column: the design's 13-14 px came out at ~9 px in game, smeared, the user: ~17, labels 500 not 400)
+	H_Gear = { 34, 600, false, 4, "Roboto" }, H_Header = { 16, 600, false, nil, "Roboto" }, H_Row = { 17, 500, false, nil, "Roboto" },
+	H_RowValue = { 17, 600, false, nil, "Roboto" }, H_Message = { 16, 500, false, nil, "Roboto" },
+	-- the speed limiter's "LIM 70" badge, per cluster (D3 has a status row instead): ~16 design px, as A's buttons (the
+	-- design's 11-15 px came out at the 9 px floor in game, unreadable: the user)
+	A_Limit = { 16, 700 }, B_Limit = { 17, 700, true }, C_Limit = { 17, 700 }, D_Limit = { 16, 700, false, nil, "Roboto" },
+	G_Limit = { 16, 700 }, V_Limit = { 16, 700 }, F_Limit = { 18, 700 }, W_Limit = { 16, 700, false, nil, "Roboto" },
 }
-local fontScales = {}
+-- the sizes the fonts were made at (per prefix) and the glyphs' measured ink offsets (ink.centredText,
+-- below). One table: the file is at Lua's 200 locals
+local ink = { fontScales = {}, offsets = {}, SIZE = 256, THRESHOLD = 100 }
 local function fontsFor(prefix, scale)
-	if fontScales[prefix] == scale then return end
-	fontScales[prefix] = scale
+	if ink.fontScales[prefix] == scale then return end
+	ink.fontScales[prefix] = scale
+	-- (the measured ink offsets, ink.centredText below, belong to the old sizes)
+	ink.offsets = {}
 	for name, spec in pairs(FONTS) do
 		if name:sub(1, #prefix) == prefix then
 			local size = max(MIN_FONT, floor(spec[1] * scale + 0.5))
@@ -235,6 +244,67 @@ local function textShadowed(value, font, x, y, color, alignX, alignY)
 	draw.SimpleText(value, "AudioHud_" .. font, screenX + pixel, screenY + 2 * pixel, Color(0, 0, 0, 150), alignX, alignY)
 	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, color, alignX, alignY)
 end
+--[[
+	Text centred on its ink, not its box: the classic's and the vintage's gear number sat off centre in
+	its little window (the user). How the game draws a glyph inside its box can't be read from the
+	font file (there the digits are centred), so each glyph is drawn once into a render target and
+	its lit pixels measured; the offset to the ink's middle is kept per font + text (screen px) and
+	cleared when the fonts are made again. Anything failing = no offset
+]]
+function ink.offset(font, value)
+	local byFont = ink.offsets[font]
+	if not byFont then byFont = {}; ink.offsets[font] = byFont end
+	local cached = byFont[value]
+	if cached then return cached[1], cached[2] end
+	local offsetX, offsetY, pushed = 0, 0, false
+	local ok = pcall(function()
+		local size, middle = ink.SIZE, ink.SIZE / 2
+		ink.target = ink.target or GetRenderTargetEx("audio_engine_hud_ink", size, size, RT_SIZE_LITERAL, MATERIAL_RT_DEPTH_NONE, 0, 0, IMAGE_FORMAT_RGBA8888)
+		surface.SetFont(font)
+		local width, height = surface.GetTextSize(value)
+		render.PushRenderTarget(ink.target)
+		pushed = true
+		render.Clear(0, 0, 0, 255, true, true)
+		cam.Start2D()
+		draw.SimpleText(value, font, middle, middle, WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		cam.End2D()
+		render.CapturePixels()
+		local fromX, toX = max(0, floor(middle - width / 2 - 8)), min(size - 1, math.ceil(middle + width / 2 + 8))
+		local fromY, toY = max(0, floor(middle - height / 2 - 8)), min(size - 1, math.ceil(middle + height / 2 + 8))
+		local minX, minY, maxX, maxY = size, size, -1, -1
+		for y = fromY, toY do
+			for x = fromX, toX do
+				if render.ReadPixel(x, y) > ink.THRESHOLD then
+					if x < minX then minX = x end
+					if x > maxX then maxX = x end
+					if y < minY then minY = y end
+					if y > maxY then maxY = y end
+				end
+			end
+		end
+		render.PopRenderTarget()
+		pushed = false
+		if maxX >= 0 then
+			-- (never more than a quarter of the box: a bad read can't throw the text away)
+			offsetX = clamp(middle - (minX + maxX + 1) / 2, -width / 4, width / 4)
+			offsetY = clamp(middle - (minY + maxY + 1) / 2, -height / 4, height / 4)
+		end
+	end)
+	if pushed then render.PopRenderTarget() end
+	if not ok then offsetX, offsetY = 0, 0 end
+	byFont[value] = { offsetX, offsetY }
+	return offsetX, offsetY
+end
+
+-- text centred on its ink at x, y (design px), with an optional glow (the font's _Glow, same offset)
+function ink.centredText(value, font, x, y, color, glowColor)
+	local offsetX, offsetY = ink.offset("AudioHud_" .. font, value)
+	local screenX, screenY = place(x, y)
+	screenX, screenY = floor(screenX + offsetX + 0.5), floor(screenY + offsetY + 0.5)
+	if glowColor then draw.SimpleText(value, "AudioHud_" .. font .. "_Glow", screenX, screenY, glowColor, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER) end
+	draw.SimpleText(value, "AudioHud_" .. font, screenX, screenY, color, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+end
+
 local function textWidth(value, font)
 	surface.SetFont("AudioHud_" .. font)
 	return (surface.GetTextSize(value)) / pixel
@@ -308,6 +378,122 @@ local function outline(x, y, width, height, color)
 	local screenX, screenY = place(x, y)
 	surface.SetDrawColor(color)
 	surface.DrawOutlinedRect(screenX, screenY, width * pixel, height * pixel, max(1, floor(pixel + 0.5)))
+end
+
+-- a rounded box in design px (draw.RoundedBox leaves its corner texture set)
+local function roundedBox(radius, x, y, width, height, color)
+	local screenX, screenY = place(x, y)
+	draw.RoundedBox(max(1, floor(radius * pixel + 0.5)), screenX, screenY, width * pixel, height * pixel, color)
+	draw.NoTexture()
+end
+
+---------------------------------------------------------------------------
+-- the speed limiter on the cluster (sv_cruise.lua, NW2 audio_cruise): every cluster shows "LIM 70"
+-- (the limit in the HUD's units) while a limit is set, filled in the cluster's amber once the car is
+-- held at it, and the round speed dials mark the limit (the design's limiter). One table of
+-- functions: the file is near Lua's 200 locals
+---------------------------------------------------------------------------
+local Limiter = {
+	REACHED_MPH = 1,               -- this far under the limit already counts as held at it
+	INK = rgb("140a02"),           -- the badge's text while lit
+	BORDER = 1.5,                  -- design px
+	DIM_MARK_ALPHA = 170,          -- the mark while the car isn't at the limit
+}
+
+-- where the limit sits on the speed dial, 0..1
+function Limiter.share(info)
+	return clamp(info.limitDial / info.dialSpeed, 0, 1)
+end
+
+-- a rounded box's outline (design px)
+function Limiter.roundedOutline(x, y, width, height, radius, thickness, color)
+	radius = min(radius, width / 2, height / 2)
+	if radius <= thickness then
+		rectangle(x, y, width, thickness, color)
+		rectangle(x, y + height - thickness, width, thickness, color)
+		rectangle(x, y + thickness, thickness, height - 2 * thickness, color)
+		rectangle(x + width - thickness, y + thickness, thickness, height - 2 * thickness, color)
+		return
+	end
+	rectangle(x + radius, y, width - 2 * radius, thickness, color)
+	rectangle(x + radius, y + height - thickness, width - 2 * radius, thickness, color)
+	rectangle(x, y + radius, thickness, height - 2 * radius, color)
+	rectangle(x + width - thickness, y + radius, thickness, height - 2 * radius, color)
+	local function corner(centreX, centreY, fromDegrees)
+		local screenX, screenY = place(centreX, centreY)
+		band(screenX, screenY, radius - thickness, radius, fromDegrees, fromDegrees + 90, color, 10)
+	end
+	corner(x + radius, y + radius, -90)
+	corner(x + width - radius, y + radius, 0)
+	corner(x + width - radius, y + height - radius, 90)
+	corner(x + radius, y + height - radius, 180)
+end
+
+-- the outline of leaningBox's box
+function Limiter.leaningOutline(x, y, width, height, degrees, thickness, color)
+	local shift = math.tan(rad(degrees)) * height * 0.5
+	local inset = thickness / 2
+	local x0, y0 = place(x + shift + inset, y + inset)
+	local x1, y1 = place(x + width + shift - inset, y + inset)
+	local x2, y2 = place(x + width - shift - inset, y + height - inset)
+	local x3, y3 = place(x - shift + inset, y + height - inset)
+	local lineWidth = thickness * pixel
+	line(x0, y0, x1, y1, lineWidth, color)
+	line(x1, y1, x2, y2, lineWidth, color)
+	line(x2, y2, x3, y3, lineWidth, color)
+	line(x3, y3, x0, y0, lineWidth, color)
+end
+
+--[[
+	The badge, centred on centreX, centreY (or its right edge on style.right). style { accent, ink,
+	back (nil = none), border, radius, height, minWidth, font, lean (degrees: C's skewed one) }: ink /
+	back / border while not at the limit; at it, filled with the accent, dark text, a soft glow
+]]
+function Limiter.badge(info, centreX, centreY, style)
+	if not info.limitOn then return end
+	local label = "LIM " .. info.limitValue
+	local width = max(style.minWidth or 0, textWidth(label, style.font) + 16 + 2 * Limiter.BORDER)
+	local height = style.height
+	if style.right then centreX = style.right - width / 2 end
+	local x, y = centreX - width / 2, centreY - height / 2
+	local lit = info.limiting
+	if style.lean then
+		if lit then
+			leaningBox(x - 3, y - 3, width + 6, height + 6, style.lean, faded(style.accent, 45))
+			leaningBox(x, y, width, height, style.lean, style.accent)
+		else
+			if style.back then leaningBox(x, y, width, height, style.lean, style.back) end
+			Limiter.leaningOutline(x, y, width, height, style.lean, Limiter.BORDER, style.border)
+		end
+	elseif lit then
+		roundedBox(style.radius + 5, x - 5, y - 5, width + 10, height + 10, faded(style.accent, 28))
+		roundedBox(style.radius + 2.5, x - 2.5, y - 2.5, width + 5, height + 5, faded(style.accent, 50))
+		roundedBox(style.radius, x, y, width, height, style.accent)
+	else
+		if style.back then roundedBox(style.radius, x, y, width, height, style.back) end
+		Limiter.roundedOutline(x, y, width, height, style.radius, Limiter.BORDER, style.border)
+	end
+	text(label, style.font, centreX, centreY, lit and Limiter.INK or style.ink, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+end
+
+-- a 4 px mark with round ends between two screen points (dimmed while the car isn't at the limit)
+function Limiter.markLine(info, x0, y0, x1, y1, color)
+	if not info.limiting then color = faded(color, Limiter.DIM_MARK_ALPHA) end
+	line(x0, y0, x1, y1, 4 * pixel, color)
+	-- (round ends only on an opaque mark: a see-through one would show the overlaps)
+	if color.a == 255 then
+		disc(x0, y0, 2, color, 12)
+		disc(x1, y1, 2, color, 12)
+	end
+end
+
+-- the limit's mark across a round speed dial: its centre (design px), the gauge angle, from / to radius
+function Limiter.dialMark(info, centreX, centreY, degrees, fromRadius, toRadius, color)
+	if not info.limitOn then return end
+	local x, y = place(centreX, centreY)
+	local x0, y0 = polar(x, y, fromRadius, degrees)
+	local x1, y1 = polar(x, y, toRadius, degrees)
+	Limiter.markLine(info, x0, y0, x1, y1, color)
 end
 
 ---------------------------------------------------------------------------
@@ -819,6 +1005,14 @@ local function readState(player, vehicle, car, deltaTime)
 	state.speedMajor = topSpeed > 190 and 40 or 20
 	state.dialSpeed = clamp(math.ceil(topSpeed * 1.1 / state.speedMajor) * state.speedMajor, usesMph and 80 or 120, usesMph and 260 or 400)
 	state.gear = gearLabel(engineState)
+	-- the speed limiter (sv_cruise.lua): the limit in mph (audio_cruise), shown in the HUD's units;
+	-- held at it once the car is within Limiter.REACHED_MPH of it, or over it (audio_limst 2)
+	local speedLimit = vehicle:GetNW2Float("audio_cruise", 0)
+	state.limitOn = speedLimit > 0 and engineState.on and engineState.phase == "run"
+	state.limitDial = usesMph and speedLimit or speedLimit * 1.609344
+	state.limitValue = floor(state.limitDial + 0.5)
+	state.limiting = state.limitOn and (vehicle:GetNW2Int("audio_limst", 0) == 2
+		or metresPerSecond * 2.23694 >= speedLimit - Limiter.REACHED_MPH)
 	-- the lights: the cluster's own (the controls above), PERP's where it has them, then the hook
 	local own = lightsOf(vehicle)
 	local left, right, hazards = own.indicator == "left", own.indicator == "right", own.hazards or false
@@ -863,11 +1057,15 @@ local A = {
 A.core = mix(A.backlight, WHITE, 0.38)
 A.glow = faded(A.backlight, 170)
 A.dimLabel = mix(A.backlight, WHITE, 0.2, 179)
-A.needleGlow = faded(A.needle, 70)
+A.needleGlow = faded(A.needle, 55)
+A.needleCore = mix(A.needle, WHITE, 0.45)   -- (the design's gradient runs to the needle x 0.3 white at the tip)
 A.redWidth, A.tickGlow = 3.5, 50
 -- the content's box in the design (the 1000 x 460 artboard): centred at the bottom of the screen.
 -- Every 1000 x 460 cluster (A, A3, A4, A5, D) uses it, so they all sit in the same place
 A.left, A.right, A.top, A.bottom = 88, 915, 30, 411
+-- the speed limiter's badge (over the speedometer's middle) and mark (A2's design; A the same)
+A.limiter = { accent = rgb("ffb53a"), ink = Color(255, 120, 90, 179), back = rgb("0a0a0b"), border = rgb("2a2b2e"),
+	radius = 2, height = 26, minWidth = 64, font = "A_Limit" }
 
 -- A2: the classic in an emergency car (artboard A2): a hotter, flatter backlight, lighter trim
 local A2 = setmetatable({
@@ -877,7 +1075,8 @@ local A2 = setmetatable({
 A2.core = mix(A2.backlight, WHITE, 0.08)
 A2.glow = faded(A2.backlight, 85)
 A2.dimLabel = mix(A2.backlight, WHITE, 0.2, 179)
-A2.needleGlow = faded(A2.needle, 70)
+A2.needleGlow = faded(A2.needle, 55)
+A2.needleCore = mix(A2.needle, WHITE, 0.45)
 
 -- the palette the classic is being drawn with (A, or A2 in an emergency car)
 local classic = A
@@ -924,20 +1123,24 @@ local function drawScale(gauge)
 	end
 end
 
+--[[
+	A thin wedge, wide at the tail and a point at the tip. The glow used to be a straight band 4 x
+	halfWidth wide along the whole needle, so the tip looked as wide as the tail and you couldn't
+	read the exact speed (the user): now the glow tapers with the needle, and a bright core line
+	runs out to a sharp tip
+]]
+-- (in A's table: the file is at Lua's 200 locals) tip = half width at the tip (design px), glowSpread =
+-- the glow's half width x the needle's at the tail, glowTip = its half width at the tip, coreFrom =
+-- share of the length where the bright core line starts
+A.needleShape = { tip = 0.35, glowSpread = 1.7, glowTip = 1.1, coreFrom = 0.3 }
 local function drawNeedle(centreX, centreY, length, tail, halfWidth, degrees, capRadius)
+	local shape = A.needleShape
 	local x, y = place(centreX, centreY)
-	local tipX, tipY = polar(x, y, length, degrees)
-	local tailX, tailY = polar(x, y, tail, degrees + 180)
-	-- a thin wedge: wide at the tail, a point at the tip
-	local sideX, sideY = cos(rad(degrees)) * halfWidth * pixel, sin(rad(degrees)) * halfWidth * pixel
-	local tipSideX, tipSideY = cos(rad(degrees)) * 0.6 * pixel, sin(rad(degrees)) * 0.6 * pixel
-	line(tailX, tailY, tipX, tipY, halfWidth * 4 * pixel, classic.needleGlow)
-	local list = points(4)
-	list[1].x, list[1].y = tailX - sideX, tailY - sideY
-	list[2].x, list[2].y = tailX + sideX, tailY + sideY
-	list[3].x, list[3].y = tipX + tipSideX, tipY + tipSideY
-	list[4].x, list[4].y = tipX - tipSideX, tipY - tipSideY
-	fillPoly(list, 4, classic.needle)
+	wedge(x, y, -tail, halfWidth * shape.glowSpread, length + 1, shape.glowTip, degrees, classic.needleGlow)
+	wedge(x, y, -tail, halfWidth, length, shape.tip, degrees, classic.needle)
+	-- (the core: from 0.45 x the needle's width there down to the tip's)
+	local coreWidth = halfWidth + (shape.tip - halfWidth) * (shape.coreFrom * length + tail) / (length + tail)
+	wedge(x, y, length * shape.coreFrom, coreWidth * 0.45, length, shape.tip * 0.6, degrees, classic.needleCore)
 	disc(x + 1.5 * pixel, y + 3 * pixel, capRadius, Color(0, 0, 0, 150))
 	disc(x, y, capRadius, classic.cap)
 	disc(x - capRadius * 0.15 * pixel, y - capRadius * 0.2 * pixel, capRadius * 0.55, classic.capLight)
@@ -970,7 +1173,7 @@ local function drawClassic(info, vehicle, police)
 	text("RPM × 1000", "A_Label", 219, 254, classic.dimLabel, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	rectangle(201, 268, 36, 38, rgb("040404"))
 	outline(201, 268, 36, 38, rgb("1f2022"))
-	text(info.gear, "A_Gear", 219, 287, classic.core, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, classic.glow)
+	ink.centredText(info.gear, "A_Gear", 219, 287, classic.core, classic.glow)
 	text(info.unitLabel, "A_Unit", 529, 174, classic.dimLabel, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
 	-- lamps
@@ -983,9 +1186,13 @@ local function drawClassic(info, vehicle, police)
 	if info.right then indicatorGlow(663, 82, 15, classic.green) end
 	ICONS.arrowA(663, 82, 27, lampColor(info.right, classic.green), false)
 
+	-- the speed limiter
+	Limiter.dialMark(info, 529, 220, -135 + Limiter.share(info) * 270, 124, 140, classic.limiter.accent)
+	Limiter.badge(info, 529, 148, classic.limiter)
+
 	-- needles over everything
-	drawNeedle(219, 230, 102, 20, 2.2, -135 + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 270, 11)
-	drawNeedle(529, 220, 140, 26, 2.6, -135 + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 270, 14)
+	drawNeedle(219, 230, 102, 20, 2, -135 + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 270, 11)
+	drawNeedle(529, 220, 140, 26, 2.3, -135 + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 270, 14)
 	drawNeedle(814, 240, 72, 15, 1.9, -60 + clamp(info.fuelShown, 0, 1) * 120, 9)
 	if police then drawPolicePanel(vehicle, police) end
 end
@@ -1064,6 +1271,8 @@ local B = {
 }
 -- in the 400 x 400 dial box (the indicators reach out to -14 and 414)
 B.left, B.right, B.top, B.bottom = -31, 431, 6, 370
+B.limiter = { accent = B.accent, ink = Color(255, 255, 255, 153), border = Color(255, 255, 255, 153),
+	radius = 13, height = 26, minWidth = 70, font = "B_Limit" }
 
 local function drawArc(info)
 	local x, y = place(200, 200)
@@ -1125,6 +1334,8 @@ local function drawArc(info)
 	ICONS.chevrons(-14, 36, 34, info.left and B.green or B.off, true)
 	if info.right then indicatorGlow(414, 36, 17, B.green) end
 	ICONS.chevrons(414, 36, 34, info.right and B.green or B.off, false)
+	-- the speed limiter, over the shift lights
+	Limiter.badge(info, 200, 84, B.limiter)
 end
 
 ---------------------------------------------------------------------------
@@ -1138,6 +1349,9 @@ local C = {
 local C_SEGMENTS = 36
 -- the 680 px column (the indicators reach out to -35 and 715)
 C.left, C.right, C.top, C.bottom = -37, 717, 0, 293
+-- (in the lamp row, 16 px left of the headlights; skewed like the segments)
+C.limiter = { accent = C.accent, ink = Color(255, 255, 255, 153), border = Color(255, 255, 255, 153),
+	height = 26, lean = 8, right = 548, font = "C_Limit" }
 
 local function drawStrip(info)
 	local limiterBlink = info.limiter and RealTime() % 0.14 < 0.07
@@ -1181,6 +1395,7 @@ local function drawStrip(info)
 		leaningBox(48 + segment * 16, rowY - 5, 13, 10, 14, lit and (info.lowFuel and C.accent or C.light) or C.unlit)
 	end
 	textShadowed("F", "C_Label", 212, rowY, C.label, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	Limiter.badge(info, 0, rowY, C.limiter)
 	ICONS.headlights(577, rowY, 26, info.headlights and C.green or C.off, 2.4)
 	ICONS.engine(621, rowY, 30, info.engine and C.accent or C.off, 2.2)
 	ICONS.handbrake(666, rowY, 28, info.handbrake and C.red or C.off, 2.2)
@@ -1202,6 +1417,8 @@ local D_RADIUS = 160
 -- the faces' and centre panel's opacity: barely see-through, as D3 (the user's; the design's 0.92 showed too much)
 local D_FACE_ALPHA = 255 * 0.99
 local D_RPM_X, D_SPEED_X = 220, 780
+D.limiter = { accent = D.amber, ink = Color(255, 255, 255, 140), border = Color(255, 255, 255, 140),
+	radius = 13, height = 26, minWidth = 70, font = "D_Limit" }
 
 -- one of D's dials: track, ticks and numbers, the lit arc to `value`, the needle
 local function modernDial(centreX, max, major, value, fillColor, needleColor, redFrom, label)
@@ -1259,8 +1476,9 @@ local function drawModern(info, vehicle, police)
 	draw.RoundedBox(max(1, floor(10 * pixel)), panelX, panelY, panelWidth * pixel, panelHeight * pixel, faded(D.face, D_FACE_ALPHA))
 	draw.NoTexture()
 
-	-- the rev counter on the left, the speedometer on the right
+	-- the rev counter on the left, the speedometer on the right (the limit's mark under its needle)
 	local revColor = info.rpm >= info.redline and D.red or D.accent
+	Limiter.dialMark(info, D_SPEED_X, 230, -135 + Limiter.share(info) * 270, 166, 180, D.amber)
 	modernDial(D_SPEED_X, info.dialSpeed, info.speedMajor, info.speed, WHITE, WHITE, nil, function(value) return string.format("%d", value) end)
 	modernDial(D_RPM_X, info.dialRpm, info.majorRpm, info.rpm, revColor, info.rpm >= info.redline and D.needleRed or WHITE, info.redline,
 		function(value) return string.format("%d", value / 1000) end)
@@ -1271,6 +1489,7 @@ local function drawModern(info, vehicle, police)
 	text(info.gear, "D_Gear", D_RPM_X, 166, D.accent, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, faded(D.accent, 102))
 	text(info.rpmDigits .. " rpm", "D_Unit", D_RPM_X, 254, D.soft, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	text("×1000 rpm", "D_Small", D_RPM_X, 310, D.faint, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+	Limiter.badge(info, D_SPEED_X, 292, D.limiter)
 
 	if info.left then indicatorGlow(472, 120, 14, D.green) end
 	ICONS.arrowA(472, 120, 28, info.left and D.green or D.off, true)
@@ -1339,6 +1558,8 @@ G.houseAlpha = 255 * 0.99
 G.bevelSeen, G.houseSeen = faded(G.bevel, G.houseAlpha), faded(G.house, G.houseAlpha)
 local G_SWEEP = 125
 local G_RPM_X, G_SPEED_X = 290, 710   -- the rev counter on the left, the speedometer on the right
+G.limiter = { accent = G.amber, ink = G.core, back = rgb("050505"), border = rgb("2a2c2f"),
+	radius = 3, height = 24, minWidth = 64, font = "G_Limit" }
 
 -- the housing: a box between two half circles round the dials' centres
 local function stadium(centreY, radius, color)
@@ -1473,6 +1694,10 @@ local function drawGerman(info, vehicle, police)
 	if info.right then indicatorGlow(576, 106, 13, G.green) end
 	ICONS.arrowA(576, 106, 24, info.right and G.green or G.off, false)
 
+	-- the speed limiter: under the speedometer's middle, its mark on the dial
+	Limiter.dialMark(info, G_SPEED_X, 230, -G_SWEEP + Limiter.share(info) * 2 * G_SWEEP, 146, 155, G.amber)
+	Limiter.badge(info, G_SPEED_X, 268, G.limiter)
+
 	germanNeedle(G_SPEED_X, 230, 142, 26, 2.6, -G_SWEEP + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 2 * G_SWEEP, 17)
 	germanNeedle(G_RPM_X, 230, 142, 26, 2.6, -G_SWEEP + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 2 * G_SWEEP, 17)
 	germanNeedle(G_RPM_X, 336, 36, 6, 1.4, -50 + clamp(info.fuelShown, 0, 1) * 100, 6)
@@ -1491,6 +1716,8 @@ local V = {
 }
 V.faceLight = mix(V.face, WHITE, 0.25)
 V.faceDark = mix(V.face, BLACK, 0.18)
+V.limiter = { accent = rgb("e8a63a"), ink = rgb("cfc8b4"), back = rgb("151514"), border = rgb("8c8f93"),
+	radius = 2, height = 24, minWidth = 72, font = "V_Limit" }
 
 local function vintageDial(gauge)
 	local x, y = place(gauge.cx, gauge.cy)
@@ -1563,18 +1790,24 @@ local function drawVintage(info)
 	text("R.P.M. × 1000", "V_Label", 219, 168, V.ink, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	rectangle(205, 268, 28, 32, V.gearRim)
 	rectangle(207, 270, 24, 28, V.gearBack)
-	text(info.gear, "V_Gear", 219, 284, V.gearText, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+	ink.centredText(info.gear, "V_Gear", 219, 284, V.gearText)
 	text("GEAR", "V_Label", 219, 306, V.ink, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	text(info.usesMph and "M.P.H." or "KM/H", "V_Unit", 529, 160, V.ink, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 	text("FUEL", "V_Label", 814, 196, V.ink, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
-	jewel(395, 82, info.left, V.green, function(x, y, color) ICONS.arrowA(x, y, 14, color, true) end)
-	jewel(663, 82, info.right, V.green, function(x, y, color) ICONS.arrowA(x, y, 14, color, false) end)
-	jewel(489, 286, info.headlights, V.green, function(x, y, color) ICONS.headlights(x, y, 15, color, 2.6) end)
-	jewel(529, 286, info.handbrake, V.redLamp, function(x, y, color) ICONS.handbrake(x, y, 16, color, 2.6) end)
-	jewel(569, 286, info.engine, V.amber, function(x, y, color) ICONS.engine(x, y, 16, color, 2.6) end)
-	jewel(814, 286, info.lowFuel, V.amber, function(x, y, color) ICONS.fuel(x, y, 12, color, 2.6) end)
+	-- (the symbols ~20 % over the design's 12-16 px, which were too small in game: the user; the
+	-- jewel's glass is 20 across)
+	jewel(395, 82, info.left, V.green, function(x, y, color) ICONS.arrowA(x, y, 17, color, true) end)
+	jewel(663, 82, info.right, V.green, function(x, y, color) ICONS.arrowA(x, y, 17, color, false) end)
+	jewel(489, 286, info.headlights, V.green, function(x, y, color) ICONS.headlights(x, y, 18, color, 2.6) end)
+	jewel(529, 286, info.handbrake, V.redLamp, function(x, y, color) ICONS.handbrake(x, y, 19, color, 2.6) end)
+	jewel(569, 286, info.engine, V.amber, function(x, y, color) ICONS.engine(x, y, 19, color, 2.6) end)
+	jewel(814, 286, info.lowFuel, V.amber, function(x, y, color) ICONS.fuel(x, y, 15, color, 2.6) end)
 	jewel(219, 198, info.share > 0.92, V.redLamp)
+
+	-- the speed limiter: its mark in the needle's red, the badge over the lamps
+	Limiter.dialMark(info, 529, 220, -135 + Limiter.share(info) * 270, 124, 140, V.tip)
+	Limiter.badge(info, 529, 252, V.limiter)
 
 	vintageNeedle(219, 230, 100, 22, 2.6, -135 + clamp(info.rpm, 0, info.dialRpm) / info.dialRpm * 270, 9)
 	vintageNeedle(529, 220, 138, 28, 3, -135 + clamp(info.speed, 0, info.dialSpeed) / info.dialSpeed * 270, 11)
@@ -1592,6 +1825,7 @@ F.ghost = mix(F.vfd, BLACK, 0.82)
 F.dim = mix(F.vfd, BLACK, 0.3)
 F.scale = mix(F.vfd, BLACK, 0.25)
 F.amberGhost = mix(F.amber, BLACK, 0.82)
+F.limiter = { accent = F.amber, ink = F.dim, border = F.dim, radius = 3, height = 28, minWidth = 72, font = "F_Limit" }
 local F_BLOCKS, F_CENTRE_X, F_CENTRE_Y, F_RADIUS = 40, 500, 372, 290
 
 local function drawDigital(info)
@@ -1627,6 +1861,7 @@ local function drawDigital(info)
 	local speedText = string.format("%3d", min(999, info.speedDigits))
 	for digit = 1, 3 do sevenSegment(402 + (digit - 1) * 70, 186, 56, 104, 11, speedText:sub(digit, digit), F.vfd, F.ghost) end
 	text(info.usesMph and "MPH" or "KM/H", "F_Unit", 616, 266, F.vfd, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, faded(F.vfd, 140))
+	Limiter.badge(info, 652, 206, F.limiter)
 	text("GEAR", "F_Label", 186, 252, F.dim, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
 	sevenSegment(190, 272, 40, 72, 8, info.gear, F.amber, F.amberGhost)
 
@@ -1670,6 +1905,8 @@ local W_PANEL_RADIUS = 28
 W.panelFace = mix(W.face, W.faceIn, 0.25)
 W.blueDim = mix(W.blue, rgb("05070a"), 0.8)
 W.orangeDim = mix(W.orange, rgb("05070a"), 0.8)
+W.limiter = { accent = W.amber, ink = Color(255, 255, 255, 140), border = Color(255, 255, 255, 140),
+	radius = 12, height = 24, minWidth = 66, font = "W_Limit" }
 local W_CENTRE_Y, W_BARS = 226, 64
 -- the rev ring on the left, the speed (and fuel) on the right
 local W_RPM_X, W_SPEED_X = 262, 738   -- (the faces 8 px from the centre panel: compact, the user's; were 230, 770)
@@ -1677,13 +1914,6 @@ local W_RPM_X, W_SPEED_X = 262, 738   -- (the faces 8 px from the centre panel: 
 local W_BLOCK, W_MESSAGE, W_READY, W_GAP = 36, 29, 16, 8
 -- design px: the centre panel's inner box, between its top row (to 140) and its lamp row (from 311), 8 from each
 local W_BOX_TOP, W_BOX_BOTTOM = 148, 303
-
--- a rounded box in design px (draw.RoundedBox leaves its corner texture set)
-local function roundedBox(radius, x, y, width, height, color)
-	local screenX, screenY = place(x, y)
-	draw.RoundedBox(max(1, floor(radius * pixel + 0.5)), screenX, screenY, width * pixel, height * pixel, color)
-	draw.NoTexture()
-end
 
 -- a ring of W_BARS bars from -135 to 135 degrees, lit up to `share` (red from `redFrom`, a share too)
 local function wideBars(centreX, share, onColor, dimColor, redFrom)
@@ -1742,6 +1972,9 @@ local function drawWide(info, vehicle, police)
 	text("E", "W_Label", W_SPEED_X - 36, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	text("F", "W_Label", W_SPEED_X + 36, 292, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
 	ICONS.fuel(W_SPEED_X, 292, 16, info.lowFuel and W.amber or W.off, 2.4)
+	-- the speed limiter: its mark just outside the speed bars, the badge under the speed
+	Limiter.dialMark(info, W_SPEED_X, W_CENTRE_Y, -135 + Limiter.share(info) * 270, 124, 136, W.amber)
+	Limiter.badge(info, W_SPEED_X, 268, W.limiter)
 
 	-- read-outs
 	text(info.unitLabel, "W_Label", W_SPEED_X, 176, W.white, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
@@ -1836,6 +2069,7 @@ local H = {
 	minor = Color(255, 255, 255, 102), off = Color(255, 255, 255, 46), fuelOff = Color(255, 255, 255, 41),
 	unit = Color(255, 255, 255, 166), header = Color(255, 255, 255, 179), rowLabel = Color(255, 255, 255, 191),
 	grey = Color(255, 255, 255, 128), divider = Color(255, 255, 255, 31), rule = Color(255, 255, 255, 20),
+	fuelTrack = Color(255, 255, 255, 36),
 }
 H.accentLight = mix(H.accent, WHITE, 0.35)
 H.accentGlow = faded(H.accent, 153)
@@ -2069,6 +2303,13 @@ local function drawHex(info, vehicle, police)
 	hexLitAndNeedle(H.speedPath, speedShare)
 	hexScale(H.rpmPath, info.dialRpm, info.majorRpm, info.majorRpm / 2, function(value) return string.format("%d", value / 1000) end, info.redline)
 	hexScale(H.speedPath, info.dialSpeed, info.speedMajor, info.speedMajor / 2, function(value) return string.format("%d", value) end)
+	-- the speed limiter's mark, outside the speed scale's ticks
+	if info.limitOn then
+		local x, y, normalX, normalY = hexPathAt(H.speedPath, Limiter.share(info))
+		local x0, y0 = place(x - normalX * 13, y - normalY * 13)
+		local x1, y1 = place(x - normalX * 24, y - normalY * 24)
+		Limiter.markLine(info, x0, y0, x1, y1, H.amber)
+	end
 	rectangle(400, 112, 1, 252, H.rule)
 	rectangle(600, 112, 1, 252, H.rule)
 
@@ -2121,7 +2362,28 @@ local function drawHex(info, vehicle, police)
 		local tone = sirenTone(vehicle)
 		statusRow("Siren", tone ~= "" and tone or "OFF", tone ~= "" and H.amber or H.grey, tone ~= "")
 	end
-	statusRow("Fuel", string.format("%d%%", floor(fuel * 100 + 0.5)), info.lowFuel and H.amber or WHITE, false)
+	-- the fuel row, its level as a bar along its foot (the design's latest: 4 px taller than a row)
+	local fuelColor = info.lowFuel and H.amber or WHITE
+	text("Fuel", "H_Row", 421, rowY + 15.5, H.rowLabel, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+	text(string.format("%d%%", floor(fuel * 100 + 0.5)), "H_RowValue", 579, rowY + 15.5, fuelColor, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+	roundedBox(2, 421, rowY + 27, 158, 4, H.fuelTrack)
+	if fuel > 0.005 then
+		roundedBox(4, 419, rowY + 25, 158 * fuel + 4, 8, faded(fuelColor, 45))
+		roundedBox(2, 421, rowY + 27, 158 * fuel, 4, fuelColor)
+	end
+	rowY = rowY + 41
+	-- the speed limiter: the limit, the row filled amber while the car is held at it
+	if info.limitOn then
+		local lit = info.limiting
+		if lit then
+			roundedBox(8, 407, rowY - 5, 186, 41, faded(H.amber, 28))
+			roundedBox(3, 412, rowY, 176, 31, H.amber)
+		end
+		text("Limiter", "H_Row", 421, rowY + 15.5, lit and Limiter.INK or H.rowLabel, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+		text(info.limitValue .. " " .. string.lower(info.unitLabel), "H_RowValue", 579, rowY + 15.5, lit and Limiter.INK or WHITE,
+			TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
+		rowY = rowY + 37
+	end
 	local message = info.engine and "Check engine" or (info.lowFuel and "Low fuel" or "")
 	if message ~= "" then
 		rectangle(412, rowY, 176, 30, H.messageBack)
@@ -2196,12 +2458,11 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	draw.NoTexture()
 	cluster.draw(info, vehicle, police)
 
-	-- status above the cluster: the ignition prompt, the speed limiter, the light mode
+	-- status above the cluster: the ignition prompt, the light mode
 	statusFont(screenScale)
 	local _, topY = place(0, box.top)
 	topY = topY - 10 * screenScale
 	local leftX = place(box.left, 0)
-	local rightX = place(box.right, 0)
 	local engineState = car.engineState
 	if not engineState.on or engineState.phase ~= "run" then
 		local message
@@ -2214,12 +2475,7 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 		end
 		draw.SimpleText(message, "AudioHud_Status", ScrW() / 2, topY, engineState.on and SIREN_AMBER or WHITE, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
 	end
-	-- speed limiter (sv_cruise.lua): the limit, in the HUD's units
-	local speedLimit = vehicle:GetNW2Float("audio_cruise", 0)
-	if speedLimit > 0 and engineState.on and engineState.phase == "run" then
-		local limitText = info.usesMph and string.format("LIMIT %d mph", floor(speedLimit + 0.5)) or string.format("LIMIT %d km/h", floor(speedLimit * 1.609344 + 0.5))
-		draw.SimpleText(limitText, "AudioHud_Status", rightX, topY, B.green, TEXT_ALIGN_RIGHT, TEXT_ALIGN_BOTTOM)
-	end
+	-- (the speed limiter is on the cluster itself: Limiter)
 	-- police lights (sv_police.lua), with the word other addons add through audio_engine/lights-label
 	-- (the siren's tone); a cluster with light controls shows them itself in an emergency car
 	local lightLabel = AudioEngine.LIGHT_MODES[vehicle:GetNW2Int("audio_lights", 0)]
@@ -2230,4 +2486,4 @@ hook.Add("HUDPaint", "audio_engine_hud", function()
 	end
 end)
 
-hook.Add("OnScreenSizeChanged", "audio_engine_hud", function() fontScales, statusFontScale = {}, nil end)
+hook.Add("OnScreenSizeChanged", "audio_engine_hud", function() ink.fontScales, ink.offsets, statusFontScale = {}, {}, nil end)
