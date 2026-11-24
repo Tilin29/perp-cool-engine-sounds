@@ -817,7 +817,9 @@ local cameraFrame = -1
 	as the lean correction came and went the camera jumped in and out
 ]]
 local CAMERA_RISE = 0.35        -- the orbit's centre: this share of the car's height over its middle
-local CAMERA_DISTANCE = 1       -- x the car's render bounds diagonal (the base camera at zoom 0)
+-- (the user: 1 x the car's render bounds diagonal, the base camera at zoom 0, was too far out)
+local cameraDistanceConVar = CreateClientConVar("audio_engine_camera_distance", "0.7", true, false,
+	"Vehicle third-person camera distance, x the car's size (1 = the base gamemode's at zoom 0); 0 = the gamemode's own camera", 0, 3)
 local CAMERA_WALL_GAP = 4       -- inches kept off a wall behind the camera
 local cameraHull = Vector(CAMERA_WALL_GAP, CAMERA_WALL_GAP, CAMERA_WALL_GAP)
 local cameraResult = {}
@@ -827,10 +829,12 @@ local function thirdPersonOrigin(player, car, angles)
 	local seat = player:GetVehicle()
 	if not IsValid(seat) or not seat.GetThirdPersonMode or not seat:GetThirdPersonMode() then return nil end
 	if player:GetViewEntity() ~= player then return nil end
+	local distance = cameraDistanceConVar:GetFloat()
+	if distance <= 0 then return nil end
 	local bounds = originalBounds[car]
 	local mins, maxs
 	if bounds then mins, maxs = bounds.mins, bounds.maxs else mins, maxs = car:GetRenderBounds() end
-	local radius = (maxs - mins):Length() * CAMERA_DISTANCE
+	local radius = (maxs - mins):Length() * distance
 	local centre = car:OBBCenter()
 	centre.z = centre.z + (car:OBBMaxs().z - car:OBBMins().z) * CAMERA_RISE
 	local position, carAngles = AudioEngine.DisplayPose(car)
