@@ -178,6 +178,29 @@ function Handling.TurnLimit(settings, speed)
 	return limit
 end
 
+-- how much of the model runs `age` s after an impact (nil = none): 0 for impactHold, then back to
+-- 1 over impactEase. The server sends the age, so the driver's replay eases back as the server will
+function Handling.ImpactShare(settings, age)
+	if not age then return 1 end
+	return clamp((age - settings.impactHold) / settings.impactEase, 0, 1)
+end
+
+--[[
+	The command the car's physics stands at, for the driver's replay (server, once a tick). Source
+	runs every user command in a packet at once (GMod's default cl_cmdrate 30: two a packet at 66
+	tick) but the car's physics steps once a tick, so the last command's number jumped by 2 one tick
+	and stood still the next, and the replay was a tick too long or too short by turns (a small
+	correction each time it flipped). This clock moves one command a tick and is drawn to the
+	real number, so it stands at their average; it's sent with its fraction. A gap of more than
+	CLOCK_SNAP commands (a lag spike, a new driver) is taken at once
+]]
+local CLOCK_PULL, CLOCK_SNAP = 0.1, 4
+function Handling.CommandClock(clock, number)
+	if not clock or abs(number - clock) > CLOCK_SNAP then return number end
+	clock = clock + 1
+	return clock + (number - clock) * CLOCK_PULL
+end
+
 function Handling.Lock(settings, speed)
 	local share = 1 - min(1, speed / settings.lockFadeSpeed)
 	return settings.lockFast + (settings.lockSlow - settings.lockFast) * share ^ settings.lockFadePower
@@ -520,10 +543,11 @@ local function step(body, state, buttons, spec, learner, base, deltaTime)
 end
 
 --[[
-	base: the server's state (a body + steer, drift, driving, limiter, impact), commands: the
-	buttons of each command after the one it ran, in order (count of them), fraction: how far into
-	the next command the frame is (0..1, with the last buttons). Returns the predicted body (into
-	`out`) and the steering state it ends with.
+	base: the server's state (a body + steer, drift, driving, limiter, impact; optional impactAge s
+	since an impact, modelOn, blockedFor), commands: the buttons of each command after the one it
+	ran, in order (count of them), fraction: how far into the next command the frame is (0..1, with
+	fractionButtons, else the last buttons). Returns the predicted body (into `out`) and the
+	steering state it ends with.
 ]]
 --[[
 	The replay runs Control for every command (up to 32 a frame), and each settings read through
@@ -545,16 +569,27 @@ local function frozenSpecOf(spec)
 	return frozen
 end
 
-function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState)
+function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState, fractionButtons)
 	spec = frozenSpecOf(spec)
 	local body = Handling.CopyBody(base, out)
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
-	-- (no walls in the prediction: never obstructed; the server's state carries the result)
-	state.yawSet, state.blockedFor = nil, nil
-	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime) end
+	-- (no walls in the prediction: never newly obstructed. One the server is in carries on, it was
+	-- held hard every replayed tick while the server followed gently: bigger corrections scraping walls)
+	state.yawSet, state.blockedFor = nil, base.blockedFor
+	-- after an impact the model eases back in on the server: so does the replay (it kept the base's share)
+	local impactAge, settings = base.impactAge, spec.settings
+	local modelOn = base.modelOn ~= false
+	for i = 1, count do
+		if impactAge then
+			impactAge = impactAge + deltaTime
+			body.controlShare = modelOn and Handling.ImpactShare(settings, impactAge) or 0
+		end
+		step(body, state, commands[i], spec, learner, base, deltaTime)
+	end
 	if fraction > 0 then
-		local buttons = count > 0 and commands[count] or base.buttons or 0
+		local buttons = fractionButtons or (count > 0 and commands[count]) or base.buttons or 0
+		if impactAge then body.controlShare = modelOn and Handling.ImpactShare(settings, impactAge + deltaTime * fraction) or 0 end
 		local savedSteer, savedDrift, savedTarget, savedSet, savedBlocked = state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor
 		step(body, state, buttons, spec, learner, base, deltaTime * fraction)
 		state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor = savedSteer, savedDrift, savedTarget, savedSet, savedBlocked

@@ -1017,7 +1017,9 @@ local function readState(player, vehicle, car, deltaTime)
 	local own = lightsOf(vehicle)
 	local left, right, hazards = own.indicator == "left", own.indicator == "right", own.hazards or false
 	local headlights, fuel = own.headlights or false, nil
+	-- (engine off or starting: the parking brake, sv_engine.lua; driving, Space)
 	local handbrake = player:KeyDown(IN_JUMP)
+	if not engineState.on or engineState.phase ~= "run" then handbrake = vehicle:GetNW2Bool("audio_parkbrake", true) end
 	if vehicle.IsIndicating and vehicle.GetIndicatorDirection then
 		local indicating, leftward = vehicle:IsIndicating(), vehicle:GetIndicatorDirection()
 		left, right = indicating and leftward or false, indicating and not leftward or false
