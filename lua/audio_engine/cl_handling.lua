@@ -119,7 +119,7 @@ local function drivenCar()
 end
 
 local function predictionAllowed()
-	if not predictConVar:GetBool() or game.SinglePlayer() then return false end
+	if not predictConVar:GetBool() or not Handling.predictServerConVar:GetBool() or game.SinglePlayer() then return false end
 	local player = LocalPlayer()
 	return IsValid(player) and not (player.IsListenServerHost and player:IsListenServerHost())
 end

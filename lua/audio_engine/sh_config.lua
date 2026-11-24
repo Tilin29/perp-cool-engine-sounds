@@ -44,7 +44,7 @@ AUDIO_ENGINE.PLAYER_SETTINGS = {
 AUDIO_ENGINE.SERVER_SETTINGS = {
 	"audio_engine_editor", "audio_engine_tuneaccess", "audio_engine_tunecooldown",
 	"audio_engine_mutestock", "audio_engine_muteskid", "audio_engine_mutetyrescrape",
-	"audio_engine_drivemodel", "audio_engine_autostart", "audio_engine_keeprunning", "audio_engine_emotionstart",
+	"audio_engine_drivemodel", "audio_engine_predict_server", "audio_engine_autostart", "audio_engine_keeprunning", "audio_engine_emotionstart",
 	"audio_engine_cruise", "audio_engine_seats",
 }
 

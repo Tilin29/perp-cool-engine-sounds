@@ -315,7 +315,7 @@ local function keyDown(player, key) return player:KeyDown(key) end
 	server can read it). cl_handling turns itself off in the same cases.
 ]]
 local function wantsState(driver)
-	if game.SinglePlayer() or driver:IsListenServerHost() then return false end
+	if game.SinglePlayer() or driver:IsListenServerHost() or not Handling.predictServerConVar:GetBool() then return false end
 	return driver:GetInfoNum("audio_engine_predict", 1) ~= 0
 end
 
