@@ -58,8 +58,9 @@ Handling.Clamp = clamp
 Handling.driveModelConVar = Handling.driveModelConVar or CreateConVar("audio_engine_drivemodel", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
 	"1 = the addon's handling model on registered cars (rotation follows the steering, grip limit, handbrake drifts; "
 		.. "sh_handling.lua); 0 = Source's own tyres alone. The driver's prediction runs either way")
--- (0 = everyone sees their car as Source shows it, as a listen host does)
-Handling.predictServerConVar = Handling.predictServerConVar or CreateConVar("audio_engine_predict_server", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
+-- (off by default: on the dedicated test server it drew cars badly, for every player (swaying, the
+-- camera stuttering). 0 = everyone sees their car as Source shows it, as a listen host does)
+Handling.predictServerConVar = Handling.predictServerConVar or CreateConVar("audio_engine_predict_server", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
 	"1 = drivers' clients may draw their car ahead of the server (audio_engine_predict, no input delay); 0 = off for everyone")
 
 ---------------------------------------------------------------------------
