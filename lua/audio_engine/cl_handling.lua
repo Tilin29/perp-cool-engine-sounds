@@ -421,9 +421,39 @@ local function place(entity, position, angles, frame, pad)
 	overridden[entity] = frame
 end
 
+--[[
+	The front wheels and the steering wheel follow the "vehicle_steer" pose, which Source sets from
+	its steering on the server: on your own car they turned ~a ping + interp after the drawn car did
+	(the user: the model doesn't animate the steering the way you see it, but the server's way).
+	While the car is drawn predicted, the pose is the prediction's steering (Source: -1 left .. 1
+	right; the model's steer is + left), put back once the frame is drawn
+]]
+local STEER_POSE = "vehicle_steer"
+local steerPose = nil   -- { entity, index, value (the pose's own units), restore }
+
+local function putSteerPose()
+	local vehicle, value = own.vehicle, own.steerPose
+	if not value or not IsValid(vehicle) or not displaced[vehicle] then return end
+	local index = vehicle:LookupPoseParameter(STEER_POSE)
+	if not index or index < 0 then return end
+	local low, high = vehicle:GetPoseParameterRange(index)
+	if not low or high <= low then return end
+	-- (the client reads a pose as 0..1 of its range and sets it in the range's own units)
+	local restore = low + vehicle:GetPoseParameter(STEER_POSE) * (high - low)
+	vehicle:SetPoseParameter(STEER_POSE, clamp(value, -1, 1) * math.max(math.abs(low), math.abs(high)))
+	steerPose = { entity = vehicle, restore = restore }
+end
+
+local function takeSteerPoseOff()
+	if not steerPose then return end
+	if IsValid(steerPose.entity) then steerPose.entity:SetPoseParameter(STEER_POSE, steerPose.restore) end
+	steerPose = nil
+end
+
 local function putPlacementsOn()
 	if placementsOn then return end
 	placementsOn = true
+	putSteerPose()
 	for entity, placement in pairs(placements) do
 		if IsValid(entity) then
 			entity:SetRenderOrigin(placement.position)
@@ -434,6 +464,7 @@ local function putPlacementsOn()
 end
 
 local function takePlacementsOff()
+	takeSteerPoseOff()
 	if placementsOn then
 		for entity in pairs(placements) do
 			if IsValid(entity) then
@@ -694,6 +725,7 @@ local function updateFrame()
 			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
 		end
 		own.displayPosition, own.displayAngles = toPosition, displayAngles
+		own.steerPose = -(own.state.steer or 0)
 		-- (for the readout: Source's pose now, before anything is drawn moved)
 		own.sourcePosition, own.sourceYaw = vehicle:GetPos(), vehicle:GetAngles().y
 		own.velocity = own.velocity or Vector()
