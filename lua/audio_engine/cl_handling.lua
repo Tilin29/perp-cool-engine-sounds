@@ -41,7 +41,7 @@ local amountConVar = CreateClientConVar("audio_engine_predict_amount", "1", true
 local othersConVar = CreateClientConVar("audio_engine_predict_others", "1", true, false,
 	"1 = while you drive with prediction, other moving cars are shown where they are now too, so close driving and crashes line up")
 local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false, false,
-	"1 = draw the server's car (red), Source's (yellow) and the predicted one (green)")
+	"1 = draw the server's car (red), Source's (yellow) and the predicted one (green), and what the prediction does on screen")
 
 AudioEngine.PREDICTION = {
 	maxCommands = 32,         -- never replays more (~0.5 s at 66 tick: a longer gap shows that late)
@@ -644,6 +644,7 @@ hook.Add("PreDrawOpaqueRenderables", "audio_engine_predict", function()
 		clearStale(frame)
 		return
 	elseif own.vehicle and displaced[own.vehicle] and cameraFrame ~= frame then
+		own.stats.cameraMissed = (own.stats.cameraMissed or 0) + 1
 		table.Empty(displaced)
 		takePlacementsOff()
 		clearStale(frame + 1)
@@ -692,6 +693,51 @@ hook.Add("PostDrawTranslucentRenderables", "audio_engine_predict_debug", functio
 	render.DrawWireframeBox(Vector(base.px, base.py, base.pz), Handling.AnglesOf(base), mins, maxs, RED, false)
 	render.DrawWireframeBox(vehicle:GetPos(), vehicle:GetAngles(), mins, maxs, YELLOW, false)
 	if own.displayPosition then render.DrawWireframeBox(own.displayPosition, own.displayAngles, mins, maxs, GREEN, false) end
+end)
+
+-- the same on screen, per second (audio_engine_predict_debug 1): a screenshot from the real server
+-- says what the prediction does there (offline tests passed while it felt bad in game)
+local live = { at = 0, lines = {} }
+local function liveLine(format, ...) live.lines[#live.lines + 1] = string.format(format, ...) end
+local function updateLive(realNow)
+	local stats, last = own.stats, live.last
+	local seconds = realNow - live.at
+	if last and seconds < 1 then return end
+	local snapshot = { states = stats.states, matched = stats.matched, fallback = stats.fallback, corrections = stats.corrections,
+		correctionSum = stats.correctionSum, clamped = stats.clamped, cameraMissed = stats.cameraMissed or 0 }
+	live.last, live.at = snapshot, realNow
+	-- (the console command starts the counts again)
+	if not last or snapshot.states < last.states or snapshot.matched < last.matched or snapshot.fallback < last.fallback then return end
+	local function per(key) return (snapshot[key] - last[key]) / seconds end
+	table.Empty(live.lines)
+	local vehicle = own.vehicle
+	local frames = per("matched") + per("fallback")
+	liveLine("prediction %s | states from server %.0f/s (want ~33)", predictionAllowed() and "ON" or "OFF", per("states"))
+	liveLine("frames matched %.0f%%, fallback %.0f%% | replaying %d commands + %.2f",
+		frames > 0 and per("matched") / frames * 100 or 0, frames > 0 and per("fallback") / frames * 100 or 0, own.count or 0, own.fraction or 0)
+	liveLine("lead %.0f ms | ping %d + interp %.0f = %.0f ms",
+		(own.lead or 0) * 1000, LocalPlayer():Ping(), interpolationDelay() * 1000, LocalPlayer():Ping() + interpolationDelay() * 1000)
+	local corrections = snapshot.corrections - last.corrections
+	liveLine("corrections %.0f/s, mean %.1f in | wall stops %.0f%% of frames | camera not moved %.0f%% of frames",
+		corrections / seconds, corrections > 0 and (snapshot.correctionSum - last.correctionSum) / corrections or 0,
+		frames > 0 and per("clamped") / frames * 100 or 0, frames > 0 and per("cameraMissed") / frames * 100 or 0)
+	if IsValid(vehicle) and own.displayPosition and own.base then
+		local speed = math.sqrt(own.base.vx * own.base.vx + own.base.vy * own.base.vy)
+		local ahead = (own.displayPosition - vehicle:GetPos()):Length()
+		liveLine("drawn %.1f m ahead of Source's car (speed x lead = %.1f m) | turned %.1f deg from it",
+			ahead * 0.01905, speed * (own.lead or 0) * 0.01905, math.abs(math.NormalizeAngle(own.displayAngles.y - vehicle:GetAngles().y)))
+	end
+end
+
+hook.Add("HUDPaint", "audio_engine_predict_debug", function()
+	if not debugConVar:GetBool() then return end
+	updateLive(RealTime())
+	local y = ScrH() * 0.3
+	for _, line in ipairs(live.lines) do
+		draw.SimpleTextOutlined(line, "DermaDefaultBold", 20, y, color_white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, 1, color_black)
+		y = y + 16
+	end
+	if #live.lines == 0 then draw.SimpleTextOutlined("prediction: waiting for a second of driving", "DermaDefaultBold", 20, y, color_white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, 1, color_black) end
 end)
 
 concommand.Add("audio_engine_predict_stats", function()
