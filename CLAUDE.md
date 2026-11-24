@@ -507,7 +507,9 @@ the engine's generic `audio_engine/lights-label` hook (cl_hud; the engine still 
   the same moment, the unheard one at `PARTNER_VOLUME` 0.001 and the same pitch, so the swap is a cross-fade and the tone carries on;
   dropped past `PARTNER_DROP_RANGE` when you're not in it or if the game drops it; a car got into without one still restarts the tone)
   (driver or a seat parented to the car, and the view on the player: watching through a camera = outside, as the engine). Doppler from its own speed sampling (every siren car within `TRACK_MARGIN` 1.2 x the audible range, audio_engine_range at its siren level, tracked while silent too, `velocityTracks`, and a tone starts at its Doppler pitch: started at the plain pitch with an empty track, it swept to the Doppler one as it faded in, a "water drop" each time a passing siren started, the user, 30-car race; positions >= 0.05 s apart, gaps > 0.3 s and teleports
-  dropped, smoothed), the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
+  dropped, smoothed); a siren already sounding when you start or stop hearing it (into / out of the budget, dormancy, first seen)
+  fades over `HEARD_FADE` 0.5 s, not the tone's attack / release (the user: a "water drop" per car joining; `lastSoundingTone`),
+  a tone switched on or changed keeps `CONFIG.attack`, the listener's too (the view entity or ply:EyePos(): global EyePos() in Think jittered), the pitch eased at 14/s,
   none inside the car. Tones are generated an octave low (rate sr/2) and played at pitch 200: Source pitch is whole percent, and on
   the near-pure tone 1 % Doppler steps were audible; so the pitch stays within 150..255 (-5..+4 semitones). Key `police_siren_tonekey` (q; alt/shift/ctrl = left one),
   `police_siren_volume`, `audio_engine_police_doppler` (0-2, x CONFIG.doppler 0.375: the user rescaled twice so the cvar's 1 is what they liked,
@@ -626,7 +628,10 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   NW2 setters (`audio_*`/`siren_*`, changes only), net.Start/Send, and `AudioEngine.PerfCar` (cl_engine's per-car timing point, a nil check
   otherwise) go on only while a capture or the overlay runs and come off after; the server's poll timer exists only then; a Lua
   refresh takes the old wrappers off (`EngineDebug.PerfClient/PerfServer.Uninstall`). `audio_engine_perf [s] [client|server|both]` prints
-  a console report; `audio_engine_perf_hud` live overlay (server figures once a second to subscribers); `audio_engine_perf_snapshot`
+  a console report; `audio_engine_perf_hud` live overlay (server figures once a second to subscribers; `SECTIONS` client / sound / memory /
+  server: per figure now, average and peak (worst: lowest fps) over `HISTORY_SECONDS` 60 of 1 s samples + a bar graph of that minute,
+  green / amber / red against each figure's good / warn, else the section's colour; then cars by state + the costliest, busiest
+  hooks; scaled with the screen height; smoke-tested in a mock, not yet seen in game); `audio_engine_perf_snapshot`
   cars, patches, memory with no timing; `audio_engine_perf_spawn <n> [car|mixed] [lights] [mph] [grid|race]` / `_clear` stress test.
   race: a column 60 m down the road coming at you, 5 m to your right, zig-zag +-1.4 m, random 8-25 m gaps (`RACE` in sv_perf),
   every car setting off together once all engines started, at 3x the grid's acceleration (21 m/s2): drive-by Doppler / pass-by.
