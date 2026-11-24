@@ -155,6 +155,83 @@ local function learnFrom(previous, current)
 	Handling.Learn(own.learner, mode, (before + after) * 0.5, acceleration)
 end
 
+---------------------------------------------------------------------------
+-- audio_engine_predict_record [seconds]: writes data/audio_engine_predict_log.csv. A row "S" per
+-- state from the server: what this client's replay from the previous state said the car would be
+-- at the same command, next to what the server says (the error the smoother then hides). A row "F"
+-- per frame: the yaw drawn, the prediction's own, Source's, and the smoother's offset
+---------------------------------------------------------------------------
+local record = nil   -- { untilTime, rows, startTime }
+local recordCommands, recordBody, recordReplayState = {}, {}, {}
+local DEG = 180 / math.pi
+local function keysText(buttons)
+	buttons = buttons or 0
+	local text = ""
+	for _, pair in ipairs({ { 1, "W" }, { 2, "S" }, { 4, "A" }, { 8, "D" }, { 16, "_" } }) do
+		if math.floor(buttons / pair[1]) % 2 == 1 then text = text .. pair[2] end
+	end
+	return text == "" and "-" or text
+end
+local function yawOf(body) return math.deg(math.atan2(body.ay, body.ax)) end
+-- the travel direction against the nose (deg, + = sliding to the right of it), and the speed (mph)
+local function slipOf(body, spec)
+	local noseX, noseY, _, rightX, rightY = Handling.NoseOf(body, spec)
+	local forward, side = body.vx * noseX + body.vy * noseY, body.vx * rightX + body.vy * rightY
+	local speed = math.sqrt(body.vx * body.vx + body.vy * body.vy)
+	if speed < 50 then return 0, speed / 17.6 end
+	return math.deg(math.atan2(side, math.abs(forward))), speed / 17.6
+end
+local function recordRow(row)
+	if record then record.rows[#record.rows + 1] = row end
+end
+
+local function recordState(previous, state)
+	if not record or not previous or not own.spec then return end
+	local count = 0
+	for number = previous.command + 1, math.min(state.command, previous.command + PREDICTION.maxCommands) do
+		count = count + 1
+		recordCommands[count] = buttonsOf(number) or recordCommands[count - 1] or previous.buttons or 0
+	end
+	local predicted, predictedState = Handling.Predict(previous, recordCommands, count, 0, own.spec, own.learner, engine.TickInterval(), recordBody, recordReplayState)
+	local noseX, noseY, _, rightX, rightY = Handling.NoseOf(state, own.spec)
+	local errorX, errorY = predicted.px - state.px, predicted.py - state.py
+	local serverSlip, mph = slipOf(state, own.spec)
+	local predictedSlip = slipOf(predicted, own.spec)
+	local serverYaw, predictedYaw = yawOf(state), yawOf(predicted)
+	recordRow(string.format("S,%.3f,%d,%d,%s,%s,%.0f,%.2f,%.2f,%.1f,%.1f,%.1f,%.1f,%.2f,%.2f,%.2f,%.1f,%.1f,%.1f,%.1f,%.2f,%.2f",
+		state.time - record.startTime, state.command, count, keysText(state.buttons), keysText(recordCommands[count] or previous.buttons),
+		mph, state.steer, predictedState.steer or 0, state.yawTarget or 0, predictedState.yawTarget or 0, state.yawRate, predicted.yawRate,
+		serverYaw, predictedYaw, math.NormalizeAngle(predictedYaw - serverYaw),
+		errorX * noseX + errorY * noseY, errorX * rightX + errorY * rightY, serverSlip, predictedSlip,
+		state.controlShare, state.groundShare))
+end
+
+local function recordFrame(realNow, predicted, display, vehicle, keys)
+	if not record then return end
+	if realNow > record.untilTime then
+		local lines = { "kind,time,command,replayed,keys_server,keys_client,mph,steer_server,steer_client,yawtarget_server,yawtarget_client,"
+			.. "yawrate_server,yawrate_client,yaw_server,yaw_client,yaw_error,pos_error_forward_in,pos_error_side_in,slip_server,slip_client,control,ground",
+			"# F rows: kind,time,keys,mph,yaw_drawn,yaw_predicted,yaw_source,drawn_minus_source,smoother_in,smoother_yaw_deg,lead_ms,commands" }
+		for _, row in ipairs(record.rows) do lines[#lines + 1] = row end
+		file.Write("audio_engine_predict_log.csv", table.concat(lines, "\n"))
+		print(string.format("[Audio Engine] prediction log: %d rows -> garrysmod/data/audio_engine_predict_log.csv", #record.rows))
+		record = nil
+		return
+	end
+	local drawnYaw, sourceYaw = own.displayAngles and own.displayAngles.y or 0, vehicle:GetAngles().y
+	local _, mph = slipOf(predicted, own.spec)
+	recordRow(string.format("F,%.3f,%s,%.0f,%.1f,%.1f,%.1f,%.1f,%.1f,%.2f,%.0f,%d",
+		CurTime() - record.startTime, keysText(keys), mph, drawnYaw, yawOf(predicted), sourceYaw,
+		math.NormalizeAngle(drawnYaw - sourceYaw), Handling.SmootherSize(own.smoother), (own.smoother.rz or 0) * DEG,
+		(own.lead or 0) * 1000, own.count or 0))
+end
+
+concommand.Add("audio_engine_predict_record", function(_, _, args)
+	local seconds = math.Clamp(tonumber(args[1]) or 15, 1, 120)
+	record = { untilTime = RealTime() + seconds, rows = {}, startTime = CurTime() }
+	print(string.format("[Audio Engine] recording the prediction for %d s: drive, turn, let go", seconds))
+end, nil, "audio_engine_predict_record [seconds]: log the server's states against this client's prediction to data/audio_engine_predict_log.csv")
+
 net.Receive("audio_engine_drive", function()
 	local index = net.ReadUInt(13)
 	local state = { command = net.ReadUInt(32), time = net.ReadDouble() }
@@ -175,6 +252,7 @@ net.Receive("audio_engine_drive", function()
 	local base = own.base
 	-- (unreliable: an older one can arrive after a newer one)
 	if base and state.time <= base.time then return end
+	recordState(base, state)
 	learnFrom(base, state)
 	own.previousBase, own.base, own.fresh = base, state, true
 	own.stats.states = own.stats.states + 1
@@ -598,6 +676,7 @@ local function updateFrame()
 		own.velocity:SetUnpacked(predicted.vx, predicted.vy, predicted.vz)
 		own.velocityAt = realNow
 		displace(vehicle, toPosition, own.displayAngles, frame, realNow)
+		if record then recordFrame(realNow, predicted, display, vehicle, own.count > 0 and own.commands[own.count] or base.buttons) end
 		updateLead(vehicle, base.time + (count + fraction) * deltaTime, realNow, frameTime)
 	else
 		own.shown = false
