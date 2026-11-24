@@ -329,12 +329,16 @@ end
 -- seconds (0..2.55) as a byte in hundredths
 local function writeHundredths(seconds) net.WriteUInt(math.Clamp(math.Round((seconds or 0) * 100), 0, 255), 8) end
 
+-- (temporary, to find what draws the car swaying instead of turning on the test server)
+local clockConVar = CreateConVar("audio_engine_predict_clock", "1", FCVAR_NONE,
+	"Testing: 0 = the driver's state carries the last command number as it is (no command clock)", 0, 1)
+
 local function sendState(vehicle, driver, body, state, buttons, impact, impactAge, modelHere)
 	if not wantsState(driver) then return end
 	net.Start("audio_engine_drive", true)
 	net.WriteUInt(vehicle:EntIndex(), 13)
 	-- (the command the car's physics stands at: Handling.CommandClock, whole part + 1/256ths)
-	local clock = math.max(0, state.commandClock or driver.audioCommandNumber or 0)
+	local clock = math.max(0, (clockConVar:GetBool() and state.commandClock) or driver.audioCommandNumber or 0)
 	local whole = math.floor(clock)
 	net.WriteUInt(whole % 4294967296, 32)
 	net.WriteUInt(math.min(255, math.floor((clock - whole) * 256)), 8)
