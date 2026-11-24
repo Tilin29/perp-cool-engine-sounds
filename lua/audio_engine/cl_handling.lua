@@ -185,6 +185,29 @@ local function recordRow(row)
 	if record then record.rows[#record.rows + 1] = row end
 end
 
+-- how much of the predicted rotation the server's car really turned from the previous state to
+-- this one (Handling.LearnYaw: the prediction turns the car that much less)
+local yawCommands, yawBody, yawState = {}, {}, {}
+local function learnYaw(previous, state)
+	if not previous or not own.spec or not own.learner or state.impact or previous.impact then return end
+	if state.groundShare < 1 or previous.groundShare < 1 or state.drift or previous.drift then return end
+	if state.command <= previous.command or state.command - previous.command > PREDICTION.maxCommands then return end
+	local count = 0
+	for number = previous.command + 1, state.command do
+		count = count + 1
+		yawCommands[count] = buttonsOf(number) or yawCommands[count - 1] or previous.buttons or 0
+	end
+	local predicted = Handling.Predict(previous, yawCommands, count, 0, own.spec, own.learner, engine.TickInterval(), yawBody, yawState)
+	local previousYaw = math.deg(math.atan2(previous.ay, previous.ax))
+	local predictedTurn = math.NormalizeAngle(math.deg(math.atan2(predicted.ay, predicted.ax)) - previousYaw)
+	-- (too little turn to measure, or turning the other way: a kerb, a bump)
+	if math.abs(predictedTurn) < 0.3 then return end
+	local serverTurn = math.NormalizeAngle(math.deg(math.atan2(state.ay, state.ax)) - previousYaw)
+	if serverTurn * predictedTurn <= 0 then return end
+	local forwardSpeed = Handling.ForwardSpeed(previous, own.spec)
+	Handling.LearnYaw(own.learner, forwardSpeed, Handling.YawShareAt(own.learner, forwardSpeed) * serverTurn / predictedTurn)
+end
+
 local function recordState(previous, state)
 	if not record or not previous or not own.spec then return end
 	local count = 0
@@ -253,6 +276,7 @@ net.Receive("audio_engine_drive", function()
 	-- (unreliable: an older one can arrive after a newer one)
 	if base and state.time <= base.time then return end
 	recordState(base, state)
+	learnYaw(base, state)
 	learnFrom(base, state)
 	own.previousBase, own.base, own.fresh = base, state, true
 	own.stats.states = own.stats.states + 1
@@ -809,8 +833,13 @@ local function updateLive(realNow)
 	liveLine("prediction %s | states from server %.0f/s (want ~33)", predictionAllowed() and "ON" or "OFF", per("states"))
 	liveLine("frames matched %.0f%%, fallback %.0f%% | replaying %d commands + %.2f",
 		frames > 0 and per("matched") / frames * 100 or 0, frames > 0 and per("fallback") / frames * 100 or 0, own.count or 0, own.fraction or 0)
-	liveLine("lead %.0f ms | ping %d + interp %.0f = %.0f ms",
-		(own.lead or 0) * 1000, LocalPlayer():Ping(), interpolationDelay() * 1000, LocalPlayer():Ping() + interpolationDelay() * 1000)
+	liveLine("lead %.0f ms | ping %d + interp %.0f = %.0f ms | server tick %.0f",
+		(own.lead or 0) * 1000, LocalPlayer():Ping(), interpolationDelay() * 1000, LocalPlayer():Ping() + interpolationDelay() * 1000, 1 / engine.TickInterval())
+	if own.learner and own.learner.yawShares then
+		local shares = {}
+		for band, share in ipairs(own.learner.yawShares) do shares[band] = string.format("%.2f", share) end
+		liveLine("turn the server's car really makes, per 22 mph band: %s (%d samples)", table.concat(shares, " "), own.learner.yawSamples or 0)
+	end
 	local corrections = snapshot.corrections - last.corrections
 	liveLine("corrections %.0f/s, mean %.1f in | wall stops %.0f%% of frames | camera not moved %.0f%% of frames",
 		corrections / seconds, corrections > 0 and (snapshot.correctionSum - last.correctionSum) / corrections or 0,

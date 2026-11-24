@@ -357,7 +357,7 @@ Handling.Rotate = rotate
 	through Control's grip), as in the real thing. stopping: the acceleration only slows the car
 	(brakes, rolling resistance): it doesn't drive it backwards.
 ]]
-function Handling.Integrate(body, spec, acceleration, deltaTime, stopping)
+function Handling.Integrate(body, spec, acceleration, deltaTime, stopping, yawShare)
 	local ground = body.groundShare
 	-- gravity minus what the ground holds up (g . up taken out on the ground)
 	local gravityAlongUp = -GRAVITY_INCHES * body.cz
@@ -385,7 +385,8 @@ function Handling.Integrate(body, spec, acceleration, deltaTime, stopping)
 		body.vx, body.vy, body.vz = body.vx - body.cx * upSpeed, body.vy - body.cy * upSpeed, body.vz - body.cz * upSpeed
 	end
 	body.px, body.py, body.pz = body.px + body.vx * deltaTime, body.py + body.vy * deltaTime, body.pz + body.vz * deltaTime
-	local turn = body.yawRate * RAD * deltaTime
+	-- (yawShare: how much of the yaw rate the car really turns between ticks, learned, Handling.YawShareAt)
+	local turn = body.yawRate * RAD * deltaTime * (yawShare or 1)
 	if turn ~= 0 then
 		local ux, uy, uz = body.cx, body.cy, body.cz
 		body.ax, body.ay, body.az = rotate(body.ax, body.ay, body.az, ux, uy, uz, turn)
@@ -511,10 +512,44 @@ end
 Handling.ForwardSpeed = forwardSpeedOf
 
 -- one predicted command: the server's order (physics, then the model)
+--[[
+	How much of the yaw rate the model sets the car really turns before the next tick (client,
+	learned per speed band from the server's states). The model puts the car on its turn every
+	tick, but Source's own tyres take some of it back in between: on the test server (22 tick)
+	the car turned 65-89% of what the prediction drew, more of a shortfall the faster it went
+	(dev log, 2026-11-24). Drawn at the full rate, the car turned further than the server's,
+	was pulled back by every state: the user's "turn and then the vehicle snaps", drift-like
+	(the prediction's rotation is scaled by it; its yaw rate, the server's, is kept)
+]]
+local YAW_BAND = 10        -- m/s per speed band
+local YAW_BANDS = 8
+local YAW_LEARN_RATE = 0.25
+local function yawBandOf(speed) return clamp(floor(abs(speed) / YAW_BAND) + 1, 1, YAW_BANDS) end
+
+function Handling.YawShareAt(learner, speed)
+	local shares = learner and learner.yawShares
+	return shares and shares[yawBandOf(speed)] or 1
+end
+
+-- sample: the server's turn over a replay / the replay's own (made with the share learned then)
+function Handling.LearnYaw(learner, speed, sample)
+	if not learner then return end
+	local shares = learner.yawShares
+	if not shares then
+		shares = {}
+		for band = 1, YAW_BANDS do shares[band] = 1 end
+		learner.yawShares = shares
+	end
+	local band = yawBandOf(speed)
+	shares[band] = clamp(shares[band] + (clamp(sample, 0.4, 1.2) - shares[band]) * YAW_LEARN_RATE, 0.4, 1.2)
+	learner.yawSamples = (learner.yawSamples or 0) + 1
+end
+
 local function step(body, state, buttons, spec, learner, base, deltaTime)
 	local forwardSpeed = forwardSpeedOf(body, spec)
 	local mode = Handling.DriveMode(buttons, forwardSpeed, base.driving, base.limiter)
-	Handling.Integrate(body, spec, Handling.LearnedAcceleration(learner, mode, forwardSpeed), deltaTime, STOPPING[mode])
+	Handling.Integrate(body, spec, Handling.LearnedAcceleration(learner, mode, forwardSpeed), deltaTime, STOPPING[mode],
+		Handling.YawShareAt(learner, forwardSpeed))
 	local yawChange, sideChange, _, forwardChange = Handling.Control(body, state, buttons, spec, deltaTime)
 	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 end
