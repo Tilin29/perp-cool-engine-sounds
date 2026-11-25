@@ -35,13 +35,17 @@ const PING = Number(process.argv[2] || 150)
     function CreateConVar() return { GetBool = function() return true end } end`)
   await L.doString(fs.readFileSync(path.join(ADDON, 'lua', 'audio_engine', 'sh_handling.lua'), 'utf8'))
   await L.doString(`PING = ${PING}`)
+  // TICK (default 66; the test server runs 22), FPS (default 144): commands are made at the start of a
+  // frame, as the game makes them. OLDCLOCK=1: the replay's length from the newest command's frame and
+  // the server's raw command number, as before the command clocks
+  await L.doString(`TICK = ${Number(process.env.TICK || 66)} FPS = ${Number(process.env.FPS || 144)} OLDCLOCK = ${['1','client'].includes(process.env.OLDCLOCK || '')} OLDSERVERCLOCK = ${['1','server'].includes(process.env.OLDCLOCK || '')}`)
   // SOURCE_STEER=script: Source's wheels at a script's own rates (3/s), as before sv_handling matched them
   await L.doString(`SOURCE_STEER_SCRIPT = ${process.env.SOURCE_STEER === 'script'}`)
   // SOURCE_PULL: how hard Source's tyres pull the yaw rate to their own turn between ticks (per s)
   await L.doString(`SOURCE_PULL = ${Number(process.env.SOURCE_PULL || 2.5)}`)
   await L.doString(String.raw`
     local H = AUDIO_ENGINE.Handling
-    local DT = 1 / 66
+    local DT = 1 / TICK
     local UP = PING / 2000            -- one way, s
     local INTERP = 0.1
     local seed = 12345
@@ -122,35 +126,55 @@ const PING = Number(process.argv[2] || 150)
       return { px = a.px + (b.px - a.px) * share, py = a.py + (b.py - a.py) * share, yaw = a.yaw + ((b.yaw - a.yaw + 540) % 360 - 180) * share }
     end
 
-    local function commandsAfter(number, list, now)
-      local count = 0
-      local last = client.base.buttons
-      for n = number + 1, math.min(client.newest, number + 32) do
+    -- (as cl_handling's)
+    local clientClock = H.NewClientClock()
+    local function commandsAfter(base, list, now)
+      local number, count = base.command, 0
+      local last = base.buttons
+      if OLDCLOCK then
+        for n = number + 1, math.min(client.newest, number + 32) do
+          count = count + 1
+          last = client.history[n] or last
+          list[count] = last
+        end
+        return count, math.max(0, math.min(1, (now - client.newestAt) / DT)), last
+      end
+      local span = H.ClientClockNow(clientClock, now, DT, client.newest) - number - (base.commandFraction or 0)
+      span = math.max(0, math.min(32, span))
+      local whole = math.floor(span)
+      for n = number + 1, number + whole do
         count = count + 1
         last = client.history[n] or last
         list[count] = last
       end
-      return count, math.max(0, math.min(1, (now - client.newestAt) / DT))
+      return count, span - whole, client.history[number + whole + 1] or last
     end
 
-    local stats = { predicted = {}, plain = {}, predictedYaw = {}, plainYaw = {}, jump = 0 }
+    local stats = { predicted = {}, plain = {}, predictedYaw = {}, plainYaw = {}, jump = 0, wobble = {} }
     local response = { pressAt = nil, predicted = nil, plain = nil }
     local lastDisplay
     local samples = {}
     local serverTime, clientTime, nextTick, nextFrame, tickIndex = 0, 0, 0, 0, 0
-    local FRAME = 1 / 144
+    local FRAME = 1 / FPS
+    local nextServerTick = 0
     truth[0] = { px = 0, py = 0, yaw = 90 }
     local endTime = 22
 
     while clientTime < endTime do
-      -- the client makes a command each tick and sends it
-      if clientTime >= nextTick then
-        tickIndex = tickIndex + 1
-        nextTick = nextTick + DT
-        local buttons = keysAt(clientTime)
-        client.history[tickIndex] = buttons
-        client.newest, client.newestAt = tickIndex, clientTime
-        toServer[#toServer + 1] = { arrive = clientTime + UP + jitter(), number = tickIndex, buttons = buttons }
+      -- the client makes the commands whose ticks have come at the start of a frame, and sends them
+      if clientTime >= nextFrame then
+        while nextTick <= clientTime do
+          tickIndex = tickIndex + 1
+          nextTick = nextTick + DT
+          local buttons = keysAt(clientTime)
+          client.history[tickIndex] = buttons
+          client.newest, client.newestAt = tickIndex, clientTime
+          H.ClientClockSeen(clientClock, tickIndex, clientTime, DT)
+          toServer[#toServer + 1] = { arrive = clientTime + UP + jitter(), number = tickIndex, buttons = buttons }
+        end
+      end
+      if clientTime >= nextServerTick then
+        nextServerTick = nextServerTick + DT
         -- the server's tick, one up-latency behind the client's clock (as Source keeps them)
         serverTime = clientTime
         local latest
@@ -162,6 +186,7 @@ const PING = Number(process.argv[2] || 150)
         end
         if latest then server.command, server.buttons = latest.number, latest.buttons end
         serverTick(serverTime)
+        if server.command > 0 then server.clock = OLDSERVERCLOCK and server.command or H.CommandClock(server.clock, server.command) end
         -- a crash nobody predicted: at 13 s the car stops dead against something (the model lets go, as
         -- sv_handling's impact callback makes it, easing back after impactHold + impactEase)
         if serverTime >= 13 and not server.crashed then
@@ -178,9 +203,11 @@ const PING = Number(process.argv[2] || 150)
         end
         local serverTickIndex = math.floor(serverTime / DT + 0.5)
         truth[serverTickIndex] = { px = server.body.px, py = server.body.py, yaw = yawOf(server.body) }
-        if serverTickIndex % 2 == 0 and random() > 0.03 then
+        if serverTickIndex % math.max(1, math.floor(0.03 / DT + 0.5)) == 0 and random() > 0.03 then
           local state = H.CopyBody(server.body)
-          state.command, state.time, state.steer, state.drift = server.command, serverTime, server.state.steer, server.state.drift
+          local clock = server.clock or 0
+          state.command, state.commandFraction = math.floor(clock), clock - math.floor(clock)
+          state.time, state.steer, state.drift = serverTime, server.state.steer, server.state.drift
           state.driving, state.limiter, state.impact, state.buttons = true, 0, impact, server.buttons
           toClient[#toClient + 1] = { arrive = serverTime + UP + jitter(), state = state }
         end
@@ -206,13 +233,13 @@ const PING = Number(process.argv[2] || 150)
         nextFrame = nextFrame + FRAME
         local base = client.base
         if base then
-          local count, fraction = commandsAfter(base.command, client.commands, clientTime)
-          local predicted = H.Predict(base, client.commands, count, fraction, spec, client.learner, DT, client.predicted, client.state)
+          local count, fraction, lastButtons = commandsAfter(base, client.commands, clientTime)
+          local predicted = H.Predict(base, client.commands, count, fraction, spec, client.learner, DT, client.predicted, client.state, lastButtons)
           if client.fresh then
             client.fresh = false
             if client.shown and client.previous then
-              local c2, f2 = commandsAfter(client.previous.command, client.earlierCommands, clientTime)
-              local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState)
+              local c2, f2, b2 = commandsAfter(client.previous, client.earlierCommands, clientTime)
+              local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState, b2)
               H.SmootherAbsorb(client.smoother, earlier, predicted)
             end
           end
@@ -226,6 +253,8 @@ const PING = Number(process.argv[2] || 150)
               local speed = math.sqrt(display.vx ^ 2 + display.vy ^ 2)
               local moved = math.sqrt((display.px - lastDisplay.px) ^ 2 + (display.py - lastDisplay.py) ^ 2)
               stats.jump = math.max(stats.jump, math.abs(moved - speed * FRAME))
+              -- (how unevenly the car moves frame to frame at speed: what the camera shows as stutter)
+              if speed > 20 / H.INCH then stats.wobble[#stats.wobble + 1] = math.abs(moved / FRAME - speed) / speed end
             end
             lastDisplay = { px = display.px, py = display.py }
           end
@@ -275,16 +304,18 @@ const PING = Number(process.argv[2] || 150)
     local p, q, py, qy = summary(stats.predicted), summary(stats.plain), summary(stats.predictedYaw), summary(stats.plainYaw)
     __result(string.format('%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.3f|%.3f|%.1f|%d',
       p.mean, p.p95, p.worst, q.mean, q.p95, q.worst, py.mean, py.p95, py.worst, qy.mean, qy.p95, qy.worst,
-      response.predicted or -1, response.plain or -1, stats.jump, client.learner.samples) .. string.format('|%.3f|%.1f', stats.crashOff or 0, stats.crashWorst or 0) .. string.format('|%.2f|%.2f|%.2f|%.2f', stats.releaseYaw or 0, stats.turnYaw or 0, stats.turnYawAt or 0, stats.releaseYawAt or 0))`)
-  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt] = result.split('|').map(Number)
+      response.predicted or -1, response.plain or -1, stats.jump, client.learner.samples) .. string.format('|%.3f|%.1f', stats.crashOff or 0, stats.crashWorst or 0) .. string.format('|%.2f|%.2f|%.2f|%.2f', stats.releaseYaw or 0, stats.turnYaw or 0, stats.turnYawAt or 0, stats.releaseYawAt or 0)
+      .. (function() local w = summary(stats.wobble) return string.format('|%.4f|%.4f', w.mean, w.p95) end)())`)
+  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt, wobbleMean, wobble95] = result.split('|').map(Number)
   const m = (inch) => (inch * 0.0254).toFixed(2) + ' m'
-  console.log(`ping ${PING} ms, 3% of states lost, ${samples} acceleration samples learned`)
+  console.log(`ping ${PING} ms, ${process.env.TICK || 66} tick, ${process.env.FPS || 144} fps${process.env.OLDCLOCK ? ' (old clocks)' : ''}, 3% of states lost, ${samples} acceleration samples learned`)
   console.log(`  position off where the server will be:  predicted mean ${m(pm)}, 95% ${m(p95)}, worst ${m(pw)}`)
   console.log(`                                          plain Source mean ${m(qm)}, 95% ${m(q95)}, worst ${m(qw)}`)
   console.log(`  heading off:                            predicted mean ${pym.toFixed(1)} deg, 95% ${py95.toFixed(1)}, worst ${pyw.toFixed(1)}`)
   console.log(`                                          plain Source mean ${qym.toFixed(1)} deg, 95% ${qy95.toFixed(1)}, worst ${qyw.toFixed(1)}`)
   console.log(`  steering key to 2 deg turned on screen: predicted ${(rp * 1000).toFixed(0)} ms, plain Source ${(rq * 1000).toFixed(0)} ms`)
   console.log(`  heading off, steering held / 0.4 s after letting go: worst ${turnYaw.toFixed(1)} (at ${turnYawAt.toFixed(1)} s) / ${releaseYaw.toFixed(1)} (at ${releaseYawAt.toFixed(1)} s) deg`)
+  console.log(`  frame-to-frame speed unevenness over 20 m/s: mean ${(wobbleMean * 100).toFixed(1)}%, 95% ${(wobble95 * 100).toFixed(1)}%`)
   console.log(`  largest correction jump in one frame:   ${m(jump)} (outside the crash)`)
   console.log(`  a crash at 13 s nobody predicted:       up to ${m(crashWorst)} off, back within 0.5 m after ${(crashOff * 1000).toFixed(0)} ms`)
   const failures = []

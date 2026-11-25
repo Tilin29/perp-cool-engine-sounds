@@ -326,7 +326,11 @@ local function keyDown(player, key) return player:KeyDown(key) end
 local function sendState(vehicle, driver, body, state, buttons, impact)
 	net.Start("audio_engine_drive", true)
 	net.WriteUInt(vehicle:EntIndex(), 13)
-	net.WriteUInt((driver.audioCommandNumber or 0) % 4294967296, 32)
+	-- (the command the car's physics stands at: Handling.CommandClock, whole part + 1/256ths)
+	local clock = driver.audioCommandClock or driver.audioCommandNumber or 0
+	local whole = math.floor(clock)
+	net.WriteUInt(whole % 4294967296, 32)
+	net.WriteUInt(math.min(255, math.floor((clock - whole) * 256)), 8)
 	net.WriteDouble(CurTime())   -- (a float is ~0.06 s coarse after 11 days up)
 	net.WriteFloat(body.px) net.WriteFloat(body.py) net.WriteFloat(body.pz)
 	local angles = vehicle:GetAngles()
@@ -474,7 +478,12 @@ hook.Add("Tick", "audio_engine_handling", function()
 	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
 		if IsValid(vehicle) then
 			local driver = vehicle:GetDriver()
-			if IsValid(driver) then drive(vehicle, driver, modelOn, deltaTime, now, sendNow) end
+			if IsValid(driver) then
+				if driver.audioCommandNumber then
+					driver.audioCommandClock = Handling.CommandClock(driver.audioCommandClock, driver.audioCommandNumber)
+				end
+				drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
+			end
 		end
 	end
 end)
