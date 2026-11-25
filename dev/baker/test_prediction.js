@@ -38,6 +38,10 @@ const PING = Number(process.argv[2] || 150)
   // TICK (default 66; the test server runs 22), FPS (default 144): commands are made at the start of a
   // frame, as the game makes them. OLDCLOCK=1: the replay's length from the newest command's frame and
   // the server's raw command number, as before the command clocks
+  await L.doString(`PATHLOG = ${!!process.env.PATHLOG}`)
+  // WORLD=0: the replay without its world (road, walls), as before; the server's car still rides the road.
+  // The road has a dip at x = -2600 (~80 mph) and a crest at x = -4100 (~87 mph, the car flies)
+  await L.doString(`WORLD = ${process.env.WORLD !== '0'}`)
   await L.doString(`TICK = ${Number(process.env.TICK || 66)} FPS = ${Number(process.env.FPS || 144)} OLDCLOCK = ${['1','client'].includes(process.env.OLDCLOCK || '')} OLDSERVERCLOCK = ${['1','server'].includes(process.env.OLDCLOCK || '')}`)
   // SOURCE_STEER=script: Source's wheels at a script's own rates (3/s), as before sv_handling matched them
   await L.doString(`SOURCE_STEER_SCRIPT = ${process.env.SOURCE_STEER === 'script'}`)
@@ -62,6 +66,17 @@ const PING = Number(process.argv[2] || 150)
     }
     local function keysAt(t) local k = 0 for _, e in ipairs(SCRIPT) do if t >= e[1] then k = e[2] end end return k end
     local function has(b, k) return math.floor(b / k) % 2 == 1 end
+
+    -- the road (inches): a dip and a crest across the car's path, the same for the server and the client's traces
+    local function roadAt(x, y)
+      return -50 * math.exp(-((x + 2600) / 300) ^ 2) + 60 * math.exp(-((x + 4100) / 200) ^ 2)
+    end
+    local HALF = 2.7 / H.INCH * 0.5
+    local function rideRoad(body, deltaTime)
+      local nx, ny, nz = H.NoseOf(body, spec)
+      H.RoadResponse(body, spec, roadAt(body.px + nx * HALF, body.py + ny * HALF), roadAt(body.px - nx * HALF, body.py - ny * HALF), HALF, 0, deltaTime)
+    end
+    local clientWorld = { move = function(body, fromX, fromY, fromZ, deltaTime) rideRoad(body, deltaTime) end }
 
     -- "Source": what the client doesn't know (a different engine, brakes, its own tyre forces and lock)
     local function sourceAcceleration(buttons, forward)
@@ -105,6 +120,7 @@ const PING = Number(process.argv[2] || 150)
       body.vx, body.vy = body.vx + rx * push, body.vy + ry * push
       local mode = H.DriveMode(buttons, forward, true, 0)
       H.Integrate(body, spec, sourceAcceleration(buttons, forward), DT, H.STOPPING[mode])
+      rideRoad(body, DT)
       -- then the handling model, as sv_handling.lua runs it
       local yawChange, sideChange, _, forwardChange = H.Control(body, server.state, buttons, spec, DT)
       H.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
@@ -123,7 +139,8 @@ const PING = Number(process.argv[2] || 150)
       local a, b = truth[low], truth[low + 1]
       if not a or not b then return nil end
       local share = index - low
-      return { px = a.px + (b.px - a.px) * share, py = a.py + (b.py - a.py) * share, yaw = a.yaw + ((b.yaw - a.yaw + 540) % 360 - 180) * share }
+      return { px = a.px + (b.px - a.px) * share, py = a.py + (b.py - a.py) * share, pz = (a.pz or 0) + ((b.pz or 0) - (a.pz or 0)) * share,
+        yaw = a.yaw + ((b.yaw - a.yaw + 540) % 360 - 180) * share, air = a.air or b.air }
     end
 
     -- (as cl_handling's)
@@ -157,7 +174,7 @@ const PING = Number(process.argv[2] || 150)
     local serverTime, clientTime, nextTick, nextFrame, tickIndex = 0, 0, 0, 0, 0
     local FRAME = 1 / FPS
     local nextServerTick = 0
-    truth[0] = { px = 0, py = 0, yaw = 90 }
+    truth[0] = { px = 0, py = 0, pz = 0, yaw = 90 }
     local endTime = 22
 
     while clientTime < endTime do
@@ -202,7 +219,8 @@ const PING = Number(process.argv[2] || 150)
           impact = share < 1
         end
         local serverTickIndex = math.floor(serverTime / DT + 0.5)
-        truth[serverTickIndex] = { px = server.body.px, py = server.body.py, yaw = yawOf(server.body) }
+        truth[serverTickIndex] = { px = server.body.px, py = server.body.py, pz = server.body.pz, yaw = yawOf(server.body), air = server.body.groundShare < 1 }
+        if PATHLOG and (server.body.groundShare < 1 or serverTickIndex % math.floor(TICK / 2) == 0) then print(string.format("t=%.1f x=%.0f y=%.0f v=%.0f mph z=%.0f air=%s", serverTime, server.body.px, server.body.py, math.sqrt(server.body.vx ^ 2 + server.body.vy ^ 2) * H.INCH * 2.237, server.body.pz, tostring(server.body.groundShare < 1))) end
         if serverTickIndex % math.max(1, math.floor(0.03 / DT + 0.5)) == 0 and random() > 0.03 then
           local state = H.CopyBody(server.body)
           local clock = server.clock or 0
@@ -234,12 +252,12 @@ const PING = Number(process.argv[2] || 150)
         local base = client.base
         if base then
           local count, fraction, lastButtons = commandsAfter(base, client.commands, clientTime)
-          local predicted = H.Predict(base, client.commands, count, fraction, spec, client.learner, DT, client.predicted, client.state, lastButtons)
+          local predicted = H.Predict(base, client.commands, count, fraction, spec, client.learner, DT, client.predicted, client.state, lastButtons, WORLD and clientWorld or nil)
           if client.fresh then
             client.fresh = false
             if client.shown and client.previous then
               local c2, f2, b2 = commandsAfter(client.previous, client.earlierCommands, clientTime)
-              local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState, b2)
+              local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState, b2, WORLD and clientWorld or nil)
               H.SmootherAbsorb(client.smoother, earlier, predicted)
             end
           end
@@ -247,7 +265,8 @@ const PING = Number(process.argv[2] || 150)
           H.SmootherDecay(client.smoother, FRAME, base.impact and 0.04 or 0.1, 250)
           local display = H.SmootherApply(client.smoother, predicted, client.display)
           if clientTime > 1 then
-            samples[#samples + 1] = { t = clientTime, px = display.px, py = display.py, yaw = yawOf(display) }
+            samples[#samples + 1] = { t = clientTime, px = display.px, py = display.py, pz = display.pz, yaw = yawOf(display),
+              underRoad = roadAt(display.px, display.py) - display.pz }
             if lastDisplay and (clientTime < 12.9 or clientTime > 14.5) then
               -- jump on screen beyond the car's own motion this frame
               local speed = math.sqrt(display.vx ^ 2 + display.vy ^ 2)
@@ -278,6 +297,12 @@ const PING = Number(process.argv[2] || 150)
           if off > 0.5 / H.INCH then stats.crashOff = sample.t - 13 - UP end
           stats.crashWorst = math.max(stats.crashWorst or 0, off)
         end
+        -- over the dip and the crest (6.8 .. 9.6 s): height off the server's, and how far into the road the car is drawn
+        if sample.t > 6.8 and sample.t < 9.6 then
+          stats.heightOff = math.max(stats.heightOff or 0, math.abs(sample.pz - reference.pz))
+          stats.intoRoad = math.max(stats.intoRoad or 0, sample.underRoad)
+          stats.heightSum, stats.heightCount = (stats.heightSum or 0) + math.abs(sample.pz - reference.pz), (stats.heightCount or 0) + 1
+        end
         -- just after a steering key is let go: how far the car shown is off the server's (the "snap")
         local keysNow, keysBefore = keysAt(sample.t), keysAt(sample.t - 0.4)
         if math.floor(keysBefore / 4) % 4 ~= 0 and math.floor(keysNow / 4) % 4 == 0 and not has(keysNow, J)
@@ -305,8 +330,9 @@ const PING = Number(process.argv[2] || 150)
     __result(string.format('%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.3f|%.3f|%.1f|%d',
       p.mean, p.p95, p.worst, q.mean, q.p95, q.worst, py.mean, py.p95, py.worst, qy.mean, qy.p95, qy.worst,
       response.predicted or -1, response.plain or -1, stats.jump, client.learner.samples) .. string.format('|%.3f|%.1f', stats.crashOff or 0, stats.crashWorst or 0) .. string.format('|%.2f|%.2f|%.2f|%.2f', stats.releaseYaw or 0, stats.turnYaw or 0, stats.turnYawAt or 0, stats.releaseYawAt or 0)
-      .. (function() local w = summary(stats.wobble) return string.format('|%.4f|%.4f', w.mean, w.p95) end)())`)
-  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt, wobbleMean, wobble95] = result.split('|').map(Number)
+      .. (function() local w = summary(stats.wobble) return string.format('|%.4f|%.4f', w.mean, w.p95) end)()
+      .. string.format('|%.1f|%.1f|%.1f', stats.heightOff or 0, (stats.heightSum or 0) / math.max(1, stats.heightCount or 0), stats.intoRoad or 0))`)
+  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt, wobbleMean, wobble95, heightOff, heightMean, intoRoad] = result.split('|').map(Number)
   const m = (inch) => (inch * 0.0254).toFixed(2) + ' m'
   console.log(`ping ${PING} ms, ${process.env.TICK || 66} tick, ${process.env.FPS || 144} fps${process.env.OLDCLOCK ? ' (old clocks)' : ''}, 3% of states lost, ${samples} acceleration samples learned`)
   console.log(`  position off where the server will be:  predicted mean ${m(pm)}, 95% ${m(p95)}, worst ${m(pw)}`)
@@ -315,6 +341,7 @@ const PING = Number(process.argv[2] || 150)
   console.log(`                                          plain Source mean ${qym.toFixed(1)} deg, 95% ${qy95.toFixed(1)}, worst ${qyw.toFixed(1)}`)
   console.log(`  steering key to 2 deg turned on screen: predicted ${(rp * 1000).toFixed(0)} ms, plain Source ${(rq * 1000).toFixed(0)} ms`)
   console.log(`  heading off, steering held / 0.4 s after letting go: worst ${turnYaw.toFixed(1)} (at ${turnYawAt.toFixed(1)} s) / ${releaseYaw.toFixed(1)} (at ${releaseYawAt.toFixed(1)} s) deg`)
+  console.log(`  over the dip and the crest: height off the server's mean ${m(heightMean)}, worst ${m(heightOff)}; drawn into the road up to ${m(Math.max(0, intoRoad))}`)
   console.log(`  frame-to-frame speed unevenness over 20 m/s: mean ${(wobbleMean * 100).toFixed(1)}%, 95% ${(wobble95 * 100).toFixed(1)}%`)
   console.log(`  largest correction jump in one frame:   ${m(jump)} (outside the crash)`)
   console.log(`  a crash at 13 s nobody predicted:       up to ${m(crashWorst)} off, back within 0.5 m after ${(crashOff * 1000).toFixed(0)} ms`)
@@ -323,6 +350,7 @@ const PING = Number(process.argv[2] || 150)
   if (!(rp >= 0 && rq > 0 && rp < rq - PING / 1000 * 0.6)) failures.push('steering does not show clearly sooner')
   if (!(jump < 6)) failures.push('a correction jumped more than 6 inches in one frame')
   if (!(crashOff < PING / 1000 + 0.35)) failures.push('the crash took too long to show')
+  if (process.env.WORLD !== '0' && !(heightOff < 8 && intoRoad < 2)) failures.push('over the dip and crest the car is drawn more than 8 inches off the server\'s height or 2 into the road')
   if (!process.env.SOURCE_STEER && !process.env.SOURCE_PULL && !(turnYaw < 2 && releaseYaw < 2))
     failures.push('the heading is off by 2 degrees or more in a turn or as the key is let go')
   if (failures.length) { console.log('FAILED: ' + failures.join('; ')); process.exit(1) }

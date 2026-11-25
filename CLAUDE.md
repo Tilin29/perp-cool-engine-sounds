@@ -425,10 +425,21 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     stutter, the user; test_prediction `TICK=22 FPS=50`: frame-to-frame speed unevenness 22% -> 2.5%, `OLDCLOCK=1|client|server` for the old ways).
     Other cars' lead = yours + (how much later than yours Source draws them): `drawnLag`, GetNetworkOrigin - GetPos along the velocity,
     smoothed 1 s (the user: at 100 mph a car length behind); the debug readout shows both.
-    The road (`followGround`): each axle of a drawn car (yours on the ground, the nearest `GROUND_CARS` 6 moved ones) is put as high over
-    the road under it as Source has it where Source has the car (4 TraceLines a car, world only, differences over 60 in or a car
-    40 in up not followed): the prediction went on along the slope, into the road in dips and past crests (the user).
-    The wall trace's StartSolid sweep and carStop (24th, lost in the 11-20 rollback) are back. Not yet run in game.
+    The replay has a world (`Handling.Predict`'s last argument, `ownWorld` in cl_handling: `world.move` after each step's motion):
+    the road (`Handling.RoadResponse`: put on it at `own.clearance`, learned from the states, pitched along it, no speed into it;
+    it flies where the road drops away more than gravity pulls it down in the step (x1.2 + 0.05 in) and lands on it) and walls
+    (`Handling.WallResponse`: the leading end's box swept each step, stopped at the wall, speed into it off with a 0.1 bounce,
+    0.3 scrub, a hit over impactSpeed lets go of the model for the rest of the replay); 1 hull + 2 line traces a step, your car
+    only. It ran through everything and was cut short afterwards along the line from the server's car, changing frame to frame:
+    into walls then a snap, stopping short, shaking against them, pinned to the road over crests the server's car flew off (the user).
+    test_prediction has a dip and a crest (`WORLD=0` for none): height off the server's 0.90 m -> 0.05 m.
+    The nearest `GROUND_CARS` 6 moved other cars still get `followGround` (their axles put as high over the road as Source has them).
+    The stop at other cars (carStop) eases: the share of the way let go closes over `CAR_STOP_CLOSE` 0.03 s, opens over 0.25 s.
+    Shadows: the placements (and riders' render origins) go on at the end of calcView with MarkShadowAsDirty, not at
+    PreDrawOpaqueRenderables (shadows are drawn before it: they stayed where Source has the car, the user). Sound: after the frame
+    your car's position is moved to where it was drawn for the sound update (`audio_engine_predict_sound` 1), put back on Think /
+    the next update / cl_engine's Think (`AudioEngine.PredictSoundBack`) unless the game set it since; other cars' sounds stay at
+    Source's (the siren's and horn's Doppler sample positions). Not yet run in game.
     Drawn less leaning (drawing only, the user's: not the handling): cars in `AudioEngine.CAR_LEAN_LEVEL[name]` (sh_carlist, share of the
     lean taken out; the Defender 0.6, not yet seen in game: SpringConstant 10, no anti-roll bar, it leaned right over under the model's
     cornering and its inside wheels hung off the road) within 4000 in: 4 traces down from the body's corners (its OBB, 80% out, 24 in

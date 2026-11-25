@@ -40,6 +40,8 @@ local amountConVar = CreateClientConVar("audio_engine_predict_amount", "1", true
 		.. "0.5 = half way, 0 = where Source shows it", 0, 1)
 local othersConVar = CreateClientConVar("audio_engine_predict_others", "1", true, false,
 	"1 = while you drive with prediction, other moving cars are shown where they are now too, so close driving and crashes line up")
+local soundConVar = CreateClientConVar("audio_engine_predict_sound", "1", true, false,
+	"1 = your car's sounds come from where it's drawn (its position is moved there for the sound update after the frame); 0 = from where Source has it")
 local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false, false,
 	"1 = draw the server's car (red), Source's (yellow) and the predicted one (green), and what the prediction does on screen")
 
@@ -141,6 +143,7 @@ end
 
 local function resetOwn(vehicle)
 	own.vehicle, own.base, own.previousBase, own.fresh, own.shown, own.steerPose = vehicle, nil, nil, false, false, nil
+	own.clearance, own.carShare = nil, nil
 	own.spec = IsValid(vehicle) and specOf(vehicle) or nil
 	if IsValid(vehicle) and not learners[vehicle] then
 		learners[vehicle] = Handling.NewLearner(vehicle:GetNW2Float("audio_pwr", 120), vehicle:GetNW2Float("audio_vmax", 180) / 3.6)
@@ -555,6 +558,31 @@ local function takeSteerPoseOff()
 	steerPose = nil
 end
 
+-- a pose in Source's frame of the car -> the same pose on the car as shown
+local function mapPose(entry, position, angles)
+	local localPosition, localAngles = WorldToLocal(position, angles, entry.fromPosition, entry.fromAngles)
+	return LocalToWorld(localPosition, localAngles, entry.toPosition, entry.toAngles)
+end
+
+--[[
+	Sounds come from an entity's position, not where it's drawn: your car's engine stayed where
+	Source has it, a lead behind (the user). After the frame is drawn the car's position is moved
+	to where it was drawn, for the sound update at the frame's end, and put back before anything
+	else this addon runs (Think, the next frame's update) unless the game has set it since
+]]
+local soundMove = nil   -- { entity, moved (where it was put), source (where Source had it) }
+
+local function putSoundBack()
+	local move = soundMove
+	if not move then return end
+	soundMove = nil
+	local entity = move.entity
+	if IsValid(entity) and entity:GetPos():DistToSqr(move.moved) < 0.01 then entity:SetPos(move.source) end
+end
+
+-- players riding a moved car, moved with it (render origin) while the placements are on
+local movedPlayers = {}
+
 local function putPlacementsOn()
 	if placementsOn then return end
 	placementsOn = true
@@ -564,12 +592,31 @@ local function putPlacementsOn()
 			entity:SetRenderOrigin(placement.position)
 			setRenderAngles(entity, placement.angles)
 			entity:InvalidateBoneCache()
+			-- (its shadow is worked out again where it's drawn)
+			entity:MarkShadowAsDirty()
+		end
+	end
+	for _, rider in ipairs(player.GetAll()) do
+		local car = AudioEngine.RiddenCar(rider)
+		local entry = car and displaced[car]
+		if entry then
+			rider:SetRenderOrigin((mapPose(entry, rider:GetPos(), rider:GetAngles())))
+			rider:InvalidateBoneCache()
+			rider:MarkShadowAsDirty()
+			movedPlayers[rider] = true
 		end
 	end
 end
 
 local function takePlacementsOff()
 	takeSteerPoseOff()
+	for rider in pairs(movedPlayers) do
+		if IsValid(rider) then
+			rider:SetRenderOrigin(nil)
+			rider:InvalidateBoneCache()
+		end
+	end
+	table.Empty(movedPlayers)
 	if placementsOn then
 		for entity in pairs(placements) do
 			if IsValid(entity) then
@@ -599,11 +646,6 @@ local function childrenOf(vehicle, now)
 	return list
 end
 
--- a pose in Source's frame of the car -> the same pose on the car as shown
-local function mapPose(entry, position, angles)
-	local localPosition, localAngles = WorldToLocal(position, angles, entry.fromPosition, entry.fromAngles)
-	return LocalToWorld(localPosition, localAngles, entry.toPosition, entry.toAngles)
-end
 
 local function displace(vehicle, toPosition, toAngles, frame, now)
 	local entry = { fromPosition = vehicle:GetPos(), fromAngles = vehicle:GetAngles(), toPosition = toPosition, toAngles = toAngles }
@@ -813,8 +855,10 @@ local function carStop(vehicle, spec, fromPosition, fromAngles, toPosition, toAn
 		local middle = (low + high) * 0.5
 		if blockedAt(vehicle, spec, middle, fromPosition, fromAngles, toPosition, toAngles) then high = middle else low = middle end
 	end
-	return LerpVector(low, fromPosition, toPosition), LerpAngle(low, fromAngles, toAngles), true
+	return LerpVector(low, fromPosition, toPosition), LerpAngle(low, fromAngles, toAngles), true, low
 end
+local CAR_STOP_CLOSE = 0.03   -- s: a stop at a car closes in this...
+local CAR_STOP_OPEN = 0.25    -- ...and lets go over this
 
 ---------------------------------------------------------------------------
 -- the road under a car as drawn. The prediction carries a car on along the slope it was on:
@@ -891,6 +935,67 @@ local function followGround(spec, sourcePosition, sourceAngles, toPosition, toAn
 	end
 	angles:RotateAroundAxis(axis, tilt * rotateSign)
 	return position, angles
+end
+
+---------------------------------------------------------------------------
+-- the replay's world (your car): each step the road under it and the walls in its way
+-- (Handling.RoadResponse / WallResponse; one hull trace and two road traces a step). It used to
+-- run through everything and be cut short afterwards along the straight line from the server's
+-- car, which changed frame to frame: the drawn car went into walls, stopped short, shook against
+-- them, and was pinned to the road over crests the server's car flew off (the user)
+---------------------------------------------------------------------------
+local CLEARANCE_LEARN = 0.2
+local worldSpec, worldSize = nil, nil
+local wallStart, wallEnd, wallUp = Vector(), Vector(), Vector()
+local ownWorld = {}
+
+function ownWorld.move(body, fromX, fromY, fromZ, deltaTime)
+	local spec, size = worldSpec, worldSize
+	local noseX, noseY, noseZ = Handling.NoseOf(body, spec)
+	-- walls: the leading end's box from where it was to where it is now (as clearShare)
+	local travelX, travelY, travelZ = body.px - fromX, body.py - fromY, body.pz - fromZ
+	local distance = math.sqrt(travelX * travelX + travelY * travelY + travelZ * travelZ)
+	if distance > 0.5 then
+		local reach = (size.halfLength - size.halfWidth) * ((travelX * noseX + travelY * noseY + travelZ * noseZ) >= 0 and 1 or -1)
+		local lift = PREDICTION.traceHeight
+		local offsetX, offsetY, offsetZ = noseX * reach + body.cx * lift, noseY * reach + body.cy * lift, noseZ * reach + body.cz * lift
+		traceMins.x, traceMins.y, traceMins.z = -size.halfWidth, -size.halfWidth, -PREDICTION.traceHalfHeight
+		traceMaxs.x, traceMaxs.y, traceMaxs.z = size.halfWidth, size.halfWidth, PREDICTION.traceHalfHeight
+		wallStart:SetUnpacked(fromX + offsetX, fromY + offsetY, fromZ + offsetZ)
+		wallEnd:SetUnpacked(body.px + offsetX, body.py + offsetY, body.pz + offsetZ)
+		traceData.start, traceData.endpos = wallStart, wallEnd
+		util.TraceHull(traceData)
+		wallUp:SetUnpacked(body.cx, body.cy, body.cz)
+		if traceResult.Hit and not traceResult.StartSolid and traceResult.HitNormal:Dot(wallUp) < PREDICTION.groundNormal then
+			local share = math.max(0, traceResult.Fraction - 1 / distance)
+			Handling.WallResponse(body, spec, fromX + travelX * share, fromY + travelY * share, fromZ + travelZ * share,
+				traceResult.HitNormal.x, traceResult.HitNormal.y)
+		end
+	end
+	-- the road under the axles
+	local clearance = own.clearance
+	if not clearance then return end
+	local half = spec.wheelbase / Handling.INCH * 0.5
+	local roadZ = body.pz - clearance
+	local front = roadHeight(body.px + noseX * half, body.py + noseY * half, roadZ + noseZ * half)
+	local rear = front and roadHeight(body.px - noseX * half, body.py - noseY * half, roadZ - noseZ * half)
+	if rear and math.abs(front - rear) < half then
+		Handling.RoadResponse(body, spec, front, rear, half, clearance, deltaTime)
+	end
+end
+
+-- how high the car's origin rides over the road, from a server state on its wheels
+local function learnClearance(spec, state)
+	if state.groundShare < 1 then return end
+	local half = spec.wheelbase / Handling.INCH * 0.5
+	local noseX, noseY, noseZ = Handling.NoseOf(state, spec)
+	local guess = own.clearance or 20
+	local front = roadHeight(state.px + noseX * half, state.py + noseY * half, state.pz - guess + noseZ * half)
+	local rear = front and roadHeight(state.px - noseX * half, state.py - noseY * half, state.pz - guess - noseZ * half)
+	if not rear then return end
+	local clearance = state.pz - (front + rear) * 0.5
+	if clearance < -20 or clearance > 80 then return end
+	own.clearance = own.clearance and own.clearance + (clearance - own.clearance) * CLEARANCE_LEARN or clearance
 end
 
 ---------------------------------------------------------------------------
@@ -991,6 +1096,7 @@ local function updateFrame()
 	if updatedFrame == frame then return end
 	updatedFrame = frame
 	-- (everything at Source's pose while the new poses are worked out)
+	putSoundBack()
 	takePlacementsOff()
 	local realNow = RealTime()
 	local frameTime = clamp(realNow - lastRealTime, 0, 0.1)
@@ -1014,7 +1120,9 @@ local function updateFrame()
 		local count, fraction, matched, fractionButtons = commandsAfter(base, own.commands)
 		local stats = own.stats
 		if matched then stats.matched = stats.matched + 1 else stats.fallback = stats.fallback + 1 end
-		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state, fractionButtons)
+		worldSpec, worldSize = spec, sizeOf(vehicle, spec)
+		if own.fresh then learnClearance(spec, base) end
+		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state, fractionButtons, ownWorld)
 		own.count, own.fraction = count, fraction
 
 		if own.fresh then
@@ -1022,7 +1130,7 @@ local function updateFrame()
 			if own.shown and own.previousBase then
 				-- where the earlier state put the car for this same moment: the difference is the correction
 				local earlierCount, earlierFraction, _, earlierButtons = commandsAfter(own.previousBase, own.earlierCommands)
-				local earlier = Handling.Predict(own.previousBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime, own.earlier, own.earlierState, earlierButtons)
+				local earlier = Handling.Predict(own.previousBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime, own.earlier, own.earlierState, earlierButtons, ownWorld)
 				local before = Handling.SmootherSize(own.smoother)
 				Handling.SmootherAbsorb(own.smoother, earlier, predicted)
 				local jump = math.abs(Handling.SmootherSize(own.smoother) - before)
@@ -1036,28 +1144,23 @@ local function updateFrame()
 		Handling.SmootherDecay(own.smoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.smoothTime, PREDICTION.snapDistance)
 		local display = Handling.SmootherApply(own.smoother, predicted, own.display)
 
-		-- not through walls: stop where the leading end would hit something
+		-- (walls and the road are in the replay: ownWorld)
 		local basePosition = Vector(base.px, base.py, base.pz)
 		local toPosition = Vector(display.px, display.py, display.pz)
-		local noseX, noseY, noseZ = Handling.NoseOf(display, spec)
-		local size = sizeOf(vehicle, spec)
-		local clear = clearShare(basePosition, toPosition, Vector(noseX, noseY, noseZ), Vector(display.cx, display.cy, display.cz), size.halfLength, size.halfWidth)
-		if clear < 1 then
-			toPosition = basePosition + (toPosition - basePosition) * clear
-			stats.clamped = stats.clamped + 1
-		end
 		local displayAngles = Handling.AnglesOf(display)
-		-- not through other cars either (as they're drawn: moved over the lead, or parked)
-		local stoppedByCar
-		toPosition, displayAngles, stoppedByCar = carStop(vehicle, spec, basePosition, Handling.AnglesOf(base), toPosition, displayAngles, realNow)
-		if stoppedByCar then stats.carStops = (stats.carStops or 0) + 1 end
-		-- on the road under it (over crests, into dips)
-		if base.groundShare >= 1 then
-			own.ground = own.ground or {}
-			toPosition, displayAngles = followGround(spec, vehicle:GetPos(), vehicle:GetAngles(), toPosition, displayAngles, own.ground, frameTime)
-		else
-			own.ground = nil
+		-- not through other cars (as they're drawn: moved over the lead, or parked). The share of
+		-- the way it's let go closes quickly at a stop and eases back up after, instead of jumping
+		-- frame to frame (it shook against cars)
+		local baseAngles = Handling.AnglesOf(base)
+		local _, _, stoppedByCar, carShare = carStop(vehicle, spec, basePosition, baseAngles, toPosition, displayAngles, realNow)
+		local wanted = stoppedByCar and carShare or 1
+		local current = own.carShare or 1
+		own.carShare = current + (wanted - current) * math.min(1, frameTime / (wanted < current and CAR_STOP_CLOSE or CAR_STOP_OPEN))
+		if own.carShare < 0.999 then
+			toPosition = LerpVector(own.carShare, basePosition, toPosition)
+			displayAngles = LerpAngle(own.carShare, baseAngles, displayAngles)
 		end
+		if stoppedByCar then stats.carStops = (stats.carStops or 0) + 1 end
 		-- (audio_engine_predict_amount: part of the way from where Source shows the car)
 		local amount = amountConVar:GetFloat()
 		if amount < 1 then
@@ -1113,6 +1216,9 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
 	own.cameraShift = moved.origin:Distance((type(view) == "table" and view.origin) or origin)
 	cameraFrame = FrameNumber()
+	-- on now that the camera is worked out: the shadows (the car's, its riders') are drawn before
+	-- PreDrawOpaqueRenderables and were left where Source has the car (the user)
+	putPlacementsOn()
 	return moved
 end
 
@@ -1151,28 +1257,23 @@ hook.Add("PreDrawOpaqueRenderables", "audio_engine_predict", function()
 	putPlacementsOn()
 end)
 
-hook.Add("PostRender", "audio_engine_predict", takePlacementsOff)
+hook.Add("PostRender", "audio_engine_predict", function()
+	takePlacementsOff()
+	putSoundBack()
+	local vehicle = own.vehicle
+	local entry = vehicle and displaced[vehicle]
+	if not entry or cameraFrame ~= FrameNumber() or not soundConVar:GetBool() then return end
+	local source = vehicle:GetPos()
+	vehicle:SetPos(entry.toPosition)
+	soundMove = { entity = vehicle, moved = vehicle:GetPos(), source = source }
+end)
+hook.Add("Think", "audio_engine_predict_sound", putSoundBack)
+AudioEngine.PredictSoundBack = putSoundBack
 
 ---------------------------------------------------------------------------
 -- drivers and passengers sit in the car as drawn
 ---------------------------------------------------------------------------
-local movedPlayers = {}
-hook.Add("PrePlayerDraw", "audio_engine_predict", function(player)
-	local car = AudioEngine.RiddenCar(player)
-	local entry = car and displaced[car]
-	if not entry then return end
-	local position = mapPose(entry, player:GetPos(), player:GetAngles())
-	player:SetRenderOrigin(position)
-	player:InvalidateBoneCache()
-	movedPlayers[player] = true
-end)
-
-hook.Add("PostPlayerDraw", "audio_engine_predict", function(player)
-	if not movedPlayers[player] then return end
-	movedPlayers[player] = nil
-	player:SetRenderOrigin(nil)
-	player:InvalidateBoneCache()
-end)
+-- (put on with the cars' placements: putPlacementsOn)
 
 hook.Add("EntityRemoved", "audio_engine_predict", function(entity)
 	displaced[entity], overridden[entity], childrenCache[entity], originalBounds[entity], placements[entity] = nil, nil, nil, nil, nil
