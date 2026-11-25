@@ -448,6 +448,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `cameraSmoothTime` 0.6 s, the car over `smoothTime` 0.1 (`own.cameraSmoother`, `own.cameraEntry` used by calcView): it moved
     rigidly with the car, so every correction moved the view, twitchy at higher ping (the user); test_prediction's "corrections
     moving the camera" at 300 ms: 3.4 -> 2.3 m/s 95th percentile (`OLDCAMERA=1` for the old way). The worst left are handbrake slides.
+    Around a collision (a wall met in the replay, `replayHitWall`, or the server's impact) the camera takes the car's 0.1 s
+    instead (eased in over 0.12 s, held 0.4 s, out over 0.6 s), and it never trails the car by over `CAMERA_LAG_MAX` 30 in /
+    0.1 rad: on/off with the impact flag it stayed at the spot of the crash, then lurched (the user). Not yet run in game.
     The stop at other cars (carStop) eases: the share of the way let go closes over `CAR_STOP_CLOSE` 0.03 s, opens over 0.25 s.
     Shadows: the placements (and riders' render origins) go on at the end of calcView with MarkShadowAsDirty, not at
     PreDrawOpaqueRenderables (shadows are drawn before it: they stayed where Source has the car, the user). Sound: after the frame
@@ -460,9 +463,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     over its bottom; not the wheel attachments: they ride on the wheel bones, read before the car is drawn they can be one point) to the
     road each frame, each side's height over it (`audio_engine_lean_info` prints what it measures; `audio_engine_lean_set <0..1>` tries a share on the car you sit in, this client only, until a reload; works in game, the user), turned about the lower side's wheels on the road (`levelCar`, after the prediction, smoothed 0.08 s);
     the camera follows the car you sit in when it's drawn moved (`cameraCar`).
-    Third-person vehicle camera is ours (`thirdPersonOrigin`, in calcView): it orbits the drawn car's middle (`CAMERA_RISE` 0.35 of its
-    height up), not the driver's eyes (the user's), at a fixed `CAMERA_DISTANCE` 1 x the car's own render bounds diagonal (the base camera
-    at zoom 0), hull-traced off walls. No mouse-wheel zoom (base `GM:VehicleMove` still sets the camera distance, ignored; the wheel is the
+    Third-person vehicle camera is ours (`thirdPersonOrigin`, in calcView; lost in the 11-20 rollback, back since): it orbits the car's
+    middle as the camera has it (`own.cameraEntry`, else as drawn; `CAMERA_RISE` 0.35 of its height up), not the driver's eyes (the user's),
+    at the base camera's distance setting held at `CAMERA_ZOOM` 0.7 (the user's: render bounds diagonal x 1.7), hull-traced off walls:
+    pulled in at once, back out over `CAMERA_REACH_RETURN` 0.25 s. No mouse-wheel zoom (base `GM:VehicleMove` still sets the camera distance, ignored; the wheel is the
     speed limiter's). The base camera's distance follows the render bounds, which widenBounds pads while a car is drawn moved: the lean
     correction coming and going made the camera jump in and out (the user's "flickers"). The camera: `hook.Call` is wrapped for "CalcView" only
     (re-wrapped every 2 s if a hook library replaced it; every wrapper we made is in `AudioEngine.predictHookCalls`, they call the newest
