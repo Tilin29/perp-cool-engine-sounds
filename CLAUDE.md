@@ -465,7 +465,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     the camera follows the car you sit in when it's drawn moved (`cameraCar`).
     Third-person vehicle camera is ours (`thirdPersonOrigin`, in calcView; lost in the 11-20 rollback, back since): it orbits the car's
     middle as the camera has it (`own.cameraEntry`, else as drawn; `CAMERA_RISE` 0.35 of its height up), not the driver's eyes (the user's),
-    at the base camera's distance setting held at `CAMERA_ZOOM` 0.7 (the user's: render bounds diagonal x 1.7), hull-traced off walls:
+    at `CAMERA_DISTANCE` 0.7 x the car's render bounds diagonal (the user's; 1.7 was too far), looking as turned with the drawn car
+    (the player's own look direction follows Source's car a ping late: the car swung left/right in the frame), hull-traced off walls:
     pulled in at once, back out over `CAMERA_REACH_RETURN` 0.25 s. No mouse-wheel zoom (base `GM:VehicleMove` still sets the camera distance, ignored; the wheel is the
     speed limiter's). The base camera's distance follows the render bounds, which widenBounds pads while a car is drawn moved: the lean
     correction coming and going made the camera jump in and out (the user's "flickers"). The camera: `hook.Call` is wrapped for "CalcView" only
