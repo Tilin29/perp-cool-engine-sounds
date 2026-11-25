@@ -453,7 +453,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     0.1 rad: on/off with the impact flag it stayed at the spot of the crash, then lurched (the user). Not yet run in game.
     The stop at other cars (carStop) eases: the share of the way let go closes over `CAR_STOP_CLOSE` 0.03 s, opens over 0.25 s.
     Shadows: the placements (and riders' render origins) go on at the end of calcView with MarkShadowAsDirty, not at
-    PreDrawOpaqueRenderables (shadows are drawn before it: they stayed where Source has the car, the user). Sound: after the frame
+    PreDrawOpaqueRenderables (shadows are drawn before it: they stayed where Source has the car, the user). Riders are also SetPos'd there for the frame
+    (put back at takePlacementsOff unless the game set them since): a player's shadow is cast from its position, the driver's fell
+    behind by the lead (the user). Sound: after the frame
     your car's position is moved to where it was drawn for the sound update (`audio_engine_predict_sound` 1), put back on Think /
     the next update / cl_engine's Think (`AudioEngine.PredictSoundBack`) unless the game set it since; other cars' sounds stay at
     Source's (the siren's and horn's Doppler sample positions). Not yet run in game.
