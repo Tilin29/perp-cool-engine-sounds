@@ -587,13 +587,8 @@ local function putSoundBack()
 	if IsValid(entity) and entity:GetPos():DistToSqr(move.moved) < 0.01 then entity:SetPos(move.source) end
 end
 
---[[
-	Players riding a moved car, moved with it while the placements are on: the render origin for
-	the model, and their position too (put back once the frame is drawn, unless the game set it
-	since): a player's shadow is cast from where the player is, not where it's drawn, and the
-	driver's shadow fell behind the car by the lead (the user)
-]]
-local movedPlayers = {}   -- rider -> { source (their position), moved (where it was put) }
+-- players riding a moved car, moved with it (render origin) while the placements are on
+local movedPlayers = {}
 
 local function putPlacementsOn()
 	if placementsOn then return end
@@ -612,23 +607,19 @@ local function putPlacementsOn()
 		local car = AudioEngine.RiddenCar(rider)
 		local entry = car and displaced[car]
 		if entry then
-			local source = rider:GetPos()
-			local moved = (mapPose(entry, source, rider:GetAngles()))
-			rider:SetPos(moved)
-			rider:SetRenderOrigin(moved)
+			rider:SetRenderOrigin((mapPose(entry, rider:GetPos(), rider:GetAngles())))
 			rider:InvalidateBoneCache()
 			rider:MarkShadowAsDirty()
-			movedPlayers[rider] = { source = source, moved = rider:GetPos() }
+			movedPlayers[rider] = true
 		end
 	end
 end
 
 local function takePlacementsOff()
 	takeSteerPoseOff()
-	for rider, move in pairs(movedPlayers) do
+	for rider in pairs(movedPlayers) do
 		if IsValid(rider) then
 			rider:SetRenderOrigin(nil)
-			if rider:GetPos():DistToSqr(move.moved) < 0.01 then rider:SetPos(move.source) end
 			rider:InvalidateBoneCache()
 		end
 	end
@@ -1366,12 +1357,14 @@ local cameraFrame = -1
 --[[
 	The vehicle's third-person camera, ours (it was, then lost in the 11-20 rollback): it orbits
 	the middle of the car as the camera follows it (own.cameraEntry: the slower smoothing), at a
-	fixed distance: the base camera's zoom (`GetCameraDistance`, moved by the mouse wheel, which
-	is the speed limiter's) held at CAMERA_ZOOM 0.7 (the user), from the car's own render bounds
-	(they're widened while it's drawn moved). Pulled in at once by a wall behind it, back out over
+	fixed distance (no mouse-wheel zoom: the wheel is the speed limiter's), CAMERA_DISTANCE x the
+	car's own render bounds diagonal (they're widened while it's drawn moved; the user: 0.7, 1.7 was
+	too far). The look direction turns with the car as drawn, as the base camera mapped onto it did
+	(the player's own, which follows Source's car a ping late, swung the car left and right in the
+	frame in turns, the user). Pulled in at once by a wall behind it, back out over
 	CAMERA_REACH_RETURN (the base camera jumped in and out against walls in a crash)
 ]]
-local CAMERA_ZOOM = 0.7             -- the base camera's distance setting: diagonal x (1 + this)
+local CAMERA_DISTANCE = 0.7         -- x the car's render bounds diagonal
 local CAMERA_RISE = 0.35            -- the orbit's centre: this share of the car's height over its middle
 local CAMERA_WALL_GAP = 4           -- inches kept off a wall behind the camera
 local CAMERA_REACH_RETURN = 0.25    -- s: back out after a wall let go
@@ -1394,14 +1387,14 @@ local function thirdPersonOrigin(player, angles)
 	local bounds = originalBounds[car]
 	local mins, maxs
 	if bounds then mins, maxs = bounds.mins, bounds.maxs else mins, maxs = car:GetRenderBounds() end
-	local radius = (maxs - mins):Length() * (1 + CAMERA_ZOOM)
+	local radius = (maxs - mins):Length() * CAMERA_DISTANCE
 	local centre = car:OBBCenter()
 	centre.z = centre.z + (car:OBBMaxs().z - car:OBBMins().z) * CAMERA_RISE
 	local pivot = car:LocalToWorld(centre)
 	-- (where the camera has the car: its own smoothing for your predicted car, else as drawn)
 	local entry = displaced[car]
 	if car == own.vehicle and own.cameraEntryFrame == FrameNumber() and own.cameraEntry then entry = own.cameraEntry end
-	if entry then pivot = mapPose(entry, pivot, angle_zero) end
+	if entry then pivot, angles = mapPose(entry, pivot, angles) end
 	cameraTrace.start, cameraTrace.endpos = pivot, pivot - angles:Forward() * radius
 	util.TraceHull(cameraTrace)
 	local share = cameraResult.StartSolid and 0 or (cameraResult.Fraction or 1)
@@ -1414,7 +1407,7 @@ local function thirdPersonOrigin(player, angles)
 	else
 		cameraReach.share = cameraReach.share + (share - cameraReach.share) * (1 - math.exp(-deltaTime / CAMERA_REACH_RETURN))
 	end
-	return pivot - angles:Forward() * (radius * cameraReach.share)
+	return pivot - angles:Forward() * (radius * cameraReach.share), angles
 end
 
 local function calcView(originalCall, gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
@@ -1422,15 +1415,15 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	local view = withOwnBounds(own.vehicle, originalCall, "CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
 	local entry = own.vehicle and displaced[own.vehicle]
 	local viewAngles = (type(view) == "table" and view.angles) or angles
-	local thirdPerson = thirdPersonOrigin(player, viewAngles)
+	local thirdPerson, thirdPersonAngles = thirdPersonOrigin(player, viewAngles)
 	if not entry and not thirdPerson then return view end
 	-- a copy: some cameras hand back the same table each frame
 	local moved = {}
 	if type(view) == "table" then for key, value in pairs(view) do moved[key] = value end end
 	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
 	if thirdPerson then
-		-- (already from the car as the camera has it; the look direction is the player's own)
-		moved.origin, moved.angles, moved.drawviewer = thirdPerson, viewAngles, true
+		-- (already from the car as the camera has it, looking as turned with it)
+		moved.origin, moved.angles, moved.drawviewer = thirdPerson, thirdPersonAngles, true
 		own.cameraShift = 0
 		cameraFrame = FrameNumber()
 		putPlacementsOn()
