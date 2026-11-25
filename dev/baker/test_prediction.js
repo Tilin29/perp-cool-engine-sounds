@@ -42,6 +42,8 @@ const PING = Number(process.argv[2] || 150)
   // WORLD=0: the replay without its world (road, walls), as before; the server's car still rides the road.
   // The road has a dip at x = -2600 (~80 mph) and a crest at x = -4100 (~87 mph, the car flies)
   await L.doString(`WORLD = ${process.env.WORLD !== '0'}`)
+  // BOUNCE: inches the car's body rides over the road in the server's states (springs; default 1)
+  await L.doString(`BOUNCE = ${Number(process.env.BOUNCE ?? 1)}`)
   await L.doString(`TICK = ${Number(process.env.TICK || 66)} FPS = ${Number(process.env.FPS || 144)} OLDCLOCK = ${['1','client'].includes(process.env.OLDCLOCK || '')} OLDSERVERCLOCK = ${['1','server'].includes(process.env.OLDCLOCK || '')}`)
   // SOURCE_STEER=script: Source's wheels at a script's own rates (3/s), as before sv_handling matched them
   await L.doString(`SOURCE_STEER_SCRIPT = ${process.env.SOURCE_STEER === 'script'}`)
@@ -223,6 +225,8 @@ const PING = Number(process.argv[2] || 150)
         if PATHLOG and (server.body.groundShare < 1 or serverTickIndex % math.floor(TICK / 2) == 0) then print(string.format("t=%.1f x=%.0f y=%.0f v=%.0f mph z=%.0f air=%s", serverTime, server.body.px, server.body.py, math.sqrt(server.body.vx ^ 2 + server.body.vy ^ 2) * H.INCH * 2.237, server.body.pz, tostring(server.body.groundShare < 1))) end
         if serverTickIndex % math.max(1, math.floor(0.03 / DT + 0.5)) == 0 and random() > 0.03 then
           local state = H.CopyBody(server.body)
+          -- (the body on its springs: up to BOUNCE inches over the road in the states, as a car in a fast corner)
+          state.pz = state.pz + BOUNCE * math.abs(math.sin(serverTime * 7.3))
           local clock = server.clock or 0
           state.command, state.commandFraction = math.floor(clock), clock - math.floor(clock)
           state.time, state.steer, state.drift = serverTime, server.state.steer, server.state.drift

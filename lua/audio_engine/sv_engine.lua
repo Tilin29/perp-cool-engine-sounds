@@ -209,9 +209,11 @@ end
 	    held then). Getting out keeps it as it is.
 	  * Off, the car is in neutral: it rolls (downhill, pushed). Engine running and driven, Space is
 	    Source's own handbrake as ever.
-	A car nobody has set has it on (Source holds a driverless car's handbrake on). A released one is
-	released again every Think while nobody drives it: Source resets the controls as the driver
-	gets out (after the hook), and may hold a driverless car's handbrake on itself
+	A car nobody has got into has it on (Source holds a driverless car's handbrake on); getting in
+	sets it off until the driver switches it on. A released one is released again (SetHandbrake +
+	ReleaseHandbrake) the tick after getting out and every Think while nobody drives it: Source
+	resets the controls as the driver gets out (after the hook) and holds a driverless car's
+	handbrake on itself
 ]]
 local function parkBrakeOf(vehicle)
 	if vehicle.audioParkBrake == nil then return true end
@@ -224,9 +226,12 @@ local function setParkBrake(vehicle, on)
 	if vehicle:GetNW2Bool("audio_parkbrake", true) ~= on then vehicle:SetNW2Bool("audio_parkbrake", on) end
 end
 
--- the brake (and no throttle: neutral) on Source's controls
+-- the brake (and no throttle: neutral) on Source's controls. Released, ReleaseHandbrake too: Source
+-- holds a driverless jeep's handbrake on itself (getting out with the brake off, the car stayed
+-- braked: the user), and ReleaseHandbrake is GMod's way to let one roll
 local function applyParkBrake(vehicle, on)
 	if vehicle.SetHandbrake then vehicle:SetHandbrake(on) end
+	if not on and vehicle.ReleaseHandbrake then vehicle:ReleaseHandbrake() end
 	if vehicle.SetThrottle then vehicle:SetThrottle(0) end
 end
 
@@ -259,6 +264,9 @@ end
 hook.Add("PlayerEnteredVehicle", "audio_engine", function(player, vehicle)
 	if not isOurs(vehicle) then return end
 	trackedVehicles[vehicle] = true
+	-- (a car nobody has set the brake on: off from here, so it's only on getting out when the
+	-- driver switched it on, or held Space getting out with the engine on: the user's rule)
+	if vehicle.audioParkBrake == nil then setParkBrake(vehicle, false) end
 	local running = vehicle:GetNW2Bool("audio_on", false)
 	if running then
 		-- still idling (audio_engine_keeprunning): drive off straight away, unless it's mid start-up
@@ -283,6 +291,10 @@ hook.Add("PlayerLeaveVehicle", "audio_engine", function(player, vehicle)
 	if not braked then
 		local physics = vehicle:GetPhysicsObject()
 		if IsValid(physics) then physics:Wake() end
+		-- (Source resets the controls after this hook: released again once it has)
+		timer.Simple(0, function()
+			if IsValid(vehicle) and not IsValid(vehicle:GetDriver()) and not parkBrakeOf(vehicle) then applyParkBrake(vehicle, false) end
+		end)
 	end
 	if not keepRunningConVar:GetBool() then setEngine(vehicle, false) end
 end)

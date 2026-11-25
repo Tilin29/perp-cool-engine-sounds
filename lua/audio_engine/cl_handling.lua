@@ -945,40 +945,126 @@ end
 -- them, and was pinned to the road over crests the server's car flew off (the user)
 ---------------------------------------------------------------------------
 local CLEARANCE_LEARN = 0.2
-local worldSpec, worldSize = nil, nil
+local worldSpec, worldWallSize = nil, nil
 local wallStart, wallEnd, wallUp = Vector(), Vector(), Vector()
 local ownWorld = {}
+local replayClearance = nil   -- how high this replay's car rides over the road (ownWorld.begin)
 
-function ownWorld.move(body, fromX, fromY, fromZ, deltaTime)
-	local spec, size = worldSpec, worldSize
-	local noseX, noseY, noseZ = Handling.NoseOf(body, spec)
-	-- walls: the leading end's box from where it was to where it is now (as clearShare)
-	local travelX, travelY, travelZ = body.px - fromX, body.py - fromY, body.pz - fromZ
-	local distance = math.sqrt(travelX * travelX + travelY * travelY + travelZ * travelZ)
-	if distance > 0.5 then
-		local reach = (size.halfLength - size.halfWidth) * ((travelX * noseX + travelY * noseY + travelZ * noseZ) >= 0 and 1 or -1)
-		local lift = PREDICTION.traceHeight
-		local offsetX, offsetY, offsetZ = noseX * reach + body.cx * lift, noseY * reach + body.cy * lift, noseZ * reach + body.cz * lift
-		traceMins.x, traceMins.y, traceMins.z = -size.halfWidth, -size.halfWidth, -PREDICTION.traceHalfHeight
-		traceMaxs.x, traceMaxs.y, traceMaxs.z = size.halfWidth, size.halfWidth, PREDICTION.traceHalfHeight
-		wallStart:SetUnpacked(fromX + offsetX, fromY + offsetY, fromZ + offsetZ)
-		wallEnd:SetUnpacked(body.px + offsetX, body.py + offsetY, body.pz + offsetZ)
-		traceData.start, traceData.endpos = wallStart, wallEnd
-		util.TraceHull(traceData)
-		wallUp:SetUnpacked(body.cx, body.cy, body.cz)
-		if traceResult.Hit and not traceResult.StartSolid and traceResult.HitNormal:Dot(wallUp) < PREDICTION.groundNormal then
-			local share = math.max(0, traceResult.Fraction - 1 / distance)
-			Handling.WallResponse(body, spec, fromX + travelX * share, fromY + travelY * share, fromZ + travelZ * share,
-				traceResult.HitNormal.x, traceResult.HitNormal.y)
-		end
-	end
-	-- the road under the axles
-	local clearance = own.clearance
-	if not clearance then return end
+-- the road under a body's axles: front, rear heights (or nil), half the wheelbase
+local function roadUnder(body, spec, clearance)
 	local half = spec.wheelbase / Handling.INCH * 0.5
+	local noseX, noseY, noseZ = Handling.NoseOf(body, spec)
 	local roadZ = body.pz - clearance
 	local front = roadHeight(body.px + noseX * half, body.py + noseY * half, roadZ + noseZ * half)
 	local rear = front and roadHeight(body.px - noseX * half, body.py - noseY * half, roadZ - noseZ * half)
+	return front, rear, half
+end
+
+--[[
+	A replay rides the road as high as its starting state does (on its wheels, within
+	CLEARANCE_SPREAD of the learned clearance): a car's body moves an inch or two on its springs
+	in a fast corner, and measured against the average the replay took that for the road falling
+	away (the learned one is the fallback)
+]]
+local CLEARANCE_SPREAD = 12
+function ownWorld.begin(body)
+	replayClearance = own.clearance
+	if not replayClearance or body.groundShare < 1 then return end
+	local front, rear = roadUnder(body, worldSpec, replayClearance)
+	if not rear then return end
+	local clearance = body.pz - (front + rear) * 0.5
+	if math.abs(clearance - replayClearance) < CLEARANCE_SPREAD then replayClearance = clearance end
+end
+
+-- the car's ends for the walls: a box as wide as the car (95%), square, at each end
+local wallSizes = {}
+local function wallSizeOf(vehicle, spec)
+	local model = vehicle:GetModel() or ""
+	local size = wallSizes[model]
+	if size then return size end
+	local mins, maxs = vehicle:OBBMins(), vehicle:OBBMaxs()
+	local alongY = math.abs(spec.noseY) > math.abs(spec.noseX)
+	local halfLength = (alongY and (maxs.y - mins.y) or (maxs.x - mins.x)) * 0.5
+	local halfWidth = (alongY and (maxs.x - mins.x) or (maxs.y - mins.y)) * 0.5
+	local half = clamp(math.min(halfWidth * 0.95, halfLength * 0.9), 8, 60)
+	size = { half = half, reach = math.max(0, halfLength - half) }
+	wallSizes[model] = size
+	return size
+end
+
+local function sweepBox(startX, startY, startZ, endX, endY, endZ, half)
+	traceMins.x, traceMins.y, traceMins.z = -half, -half, -PREDICTION.traceHalfHeight
+	traceMaxs.x, traceMaxs.y, traceMaxs.z = half, half, PREDICTION.traceHalfHeight
+	wallStart:SetUnpacked(startX, startY, startZ)
+	wallEnd:SetUnpacked(endX, endY, endZ)
+	traceData.start, traceData.endpos = wallStart, wallEnd
+	util.TraceHull(traceData)
+	return traceResult
+end
+
+local function isWall(result)
+	return result.Hit and result.HitNormal:Dot(wallUp) < PREDICTION.groundNormal
+end
+
+--[[
+	One end of the car (side = 1 the nose's, -1 the tail's) from where it was before the step
+	(position and nose then: a turn swings it too) to where it is: stopped at a wall it meets. An
+	end already in a wall at the start (the server's car flush against it: the box starts solid,
+	and that was taken as clear, so pushing slowly into a wall the drawn car went half into it,
+	the user) finds the wall from the car's middle and keeps no motion into it
+]]
+local function stopEnd(body, spec, size, side, fromX, fromY, fromZ, fromNoseX, fromNoseY, fromNoseZ, noseX, noseY, noseZ)
+	local lift = PREDICTION.traceHeight
+	local liftX, liftY, liftZ = body.cx * lift, body.cy * lift, body.cz * lift
+	local reach = size.reach * side
+	local startX, startY, startZ = fromX + fromNoseX * reach + liftX, fromY + fromNoseY * reach + liftY, fromZ + fromNoseZ * reach + liftZ
+	local endX, endY, endZ = body.px + noseX * reach + liftX, body.py + noseY * reach + liftY, body.pz + noseZ * reach + liftZ
+	local moveX, moveY, moveZ = endX - startX, endY - startY, endZ - startZ
+	local distance = math.sqrt(moveX * moveX + moveY * moveY + moveZ * moveZ)
+	if distance < 0.01 then return false end
+	local result = sweepBox(startX, startY, startZ, endX, endY, endZ, size.half)
+	if result.StartSolid then
+		-- touching already: the wall from the car's middle (a smaller box) out to this end
+		result = sweepBox(fromX + liftX, fromY + liftY, fromZ + liftZ, startX, startY, startZ, size.half * 0.5)
+		if result.StartSolid or not isWall(result) then return false end
+		local normalX, normalY = result.HitNormal.x, result.HitNormal.y
+		local length = math.sqrt(normalX * normalX + normalY * normalY)
+		if length < 0.1 then return false end
+		normalX, normalY = normalX / length, normalY / length
+		local into = moveX * normalX + moveY * normalY
+		if into >= 0 then return false end
+		Handling.WallResponse(body, spec, body.px - normalX * into, body.py - normalY * into, body.pz, normalX, normalY)
+		return true
+	end
+	if not isWall(result) then return false end
+	-- (the car back by the share of this end's move it couldn't make)
+	local share = math.max(0, result.Fraction - 1 / distance)
+	local backX, backY, backZ = (endX - startX) * (1 - share), (endY - startY) * (1 - share), (endZ - startZ) * (1 - share)
+	Handling.WallResponse(body, spec, body.px - backX, body.py - backY, body.pz - backZ, result.HitNormal.x, result.HitNormal.y)
+	return true
+end
+
+local SIDEWAYS_WALL_SHARE = 0.7   -- travel . nose under this share of the travel: both ends
+
+function ownWorld.move(body, fromX, fromY, fromZ, deltaTime, fromNoseX, fromNoseY, fromNoseZ)
+	local spec = worldSpec
+	local noseX, noseY, noseZ = Handling.NoseOf(body, spec)
+	fromNoseX, fromNoseY, fromNoseZ = fromNoseX or noseX, fromNoseY or noseY, fromNoseZ or noseZ
+	-- walls: the leading end, both ends going sideways (or turning on the spot)
+	local size = worldWallSize
+	wallUp:SetUnpacked(body.cx, body.cy, body.cz)
+	local travelX, travelY, travelZ = body.px - fromX, body.py - fromY, body.pz - fromZ
+	local distance = math.sqrt(travelX * travelX + travelY * travelY + travelZ * travelZ)
+	local along = travelX * noseX + travelY * noseY + travelZ * noseZ
+	local leading = along >= 0 and 1 or -1
+	stopEnd(body, spec, size, leading, fromX, fromY, fromZ, fromNoseX, fromNoseY, fromNoseZ, noseX, noseY, noseZ)
+	if math.abs(along) < SIDEWAYS_WALL_SHARE * distance or distance < 0.5 then
+		stopEnd(body, spec, size, -leading, fromX, fromY, fromZ, fromNoseX, fromNoseY, fromNoseZ, noseX, noseY, noseZ)
+	end
+	-- the road under the axles
+	local clearance = replayClearance
+	if not clearance then return end
+	local front, rear, half = roadUnder(body, spec, clearance)
 	if rear and math.abs(front - rear) < half then
 		Handling.RoadResponse(body, spec, front, rear, half, clearance, deltaTime)
 	end
@@ -1120,7 +1206,7 @@ local function updateFrame()
 		local count, fraction, matched, fractionButtons = commandsAfter(base, own.commands)
 		local stats = own.stats
 		if matched then stats.matched = stats.matched + 1 else stats.fallback = stats.fallback + 1 end
-		worldSpec, worldSize = spec, sizeOf(vehicle, spec)
+		worldSpec, worldWallSize = spec, wallSizeOf(vehicle, spec)
 		if own.fresh then learnClearance(spec, base) end
 		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state, fractionButtons, ownWorld)
 		own.count, own.fraction = count, fraction

@@ -601,15 +601,19 @@ end
 	drops away faster than gravity can pull the car after it (a crest at speed), and lands when it
 	comes down to it again
 ]]
--- it flies once the road drops away more than gravity pulls the car down in the step (x TAKEOFF_SHARE,
--- + TAKEOFF_SLACK inches for the traces' noise): at a crest that's the road curving away faster than g
-local TAKEOFF_SHARE, TAKEOFF_SLACK = 1.2, 0.05
+-- it flies once the road under it drops away more than TAKEOFF_GAP inches in a step (a ramp's end, a
+-- ledge). Taken as soon as the road fell away faster than gravity (a gap of ~0.1 inch a step at
+-- 66 tick), the car's own bounce in a fast corner (the body an inch over its average) counted as
+-- flying: no grip, steering or throttle in the replay, the drawn car slowed and ran wide in corners
+-- and was pulled on by every state (the user). A car flying off a smooth crest now shows as flying
+-- once the server's state says so
+local TAKEOFF_GAP = 2
 function Handling.RoadResponse(body, spec, roadFront, roadRear, half, clearance, deltaTime)
 	local nx, ny, nz = noseOf(body, spec)
 	local road = (roadFront + roadRear) * 0.5
 	local gap = body.pz - clearance - road
 	if body.groundShare >= 0.5 then
-		if gap > 0.5 * GRAVITY_INCHES * deltaTime * deltaTime * TAKEOFF_SHARE + TAKEOFF_SLACK then
+		if gap > TAKEOFF_GAP then
 			body.groundShare = 0
 			return
 		end
@@ -666,7 +670,7 @@ end
 
 --[[
 	world (optional, client): the replay's surroundings, world.move(body, fromX, fromY, fromZ,
-	deltaTime) after each step's motion: puts the body on the road under it (or lets it fly off a
+	deltaTime, fromNoseX, fromNoseY, fromNoseZ) after each step's motion (from = before it): puts the body on the road under it (or lets it fly off a
 	crest and land), and stops it at walls (Handling.WallResponse). Without it the replay ran on the
 	slope it started on and through everything: into the road in dips, pinned to it over crests
 	the server's car flew off, into walls, then a snap each time the server's state came back
@@ -675,9 +679,10 @@ local function step(body, state, buttons, spec, learner, base, deltaTime, world)
 	local forwardSpeed = forwardSpeedOf(body, spec)
 	local mode = Handling.DriveMode(buttons, forwardSpeed, base.driving, base.limiter)
 	local fromX, fromY, fromZ = body.px, body.py, body.pz
+	local fromNoseX, fromNoseY, fromNoseZ = noseOf(body, spec)
 	Handling.Integrate(body, spec, Handling.LearnedAcceleration(learner, mode, forwardSpeed), deltaTime, STOPPING[mode],
 		Handling.YawShareAt(learner, forwardSpeed))
-	if world then world.move(body, fromX, fromY, fromZ, deltaTime) end
+	if world then world.move(body, fromX, fromY, fromZ, deltaTime, fromNoseX, fromNoseY, fromNoseZ) end
 	local yawChange, sideChange, _, forwardChange = Handling.Control(body, state, buttons, spec, deltaTime)
 	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 end
@@ -690,6 +695,8 @@ end
 ]]
 function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState, fractionButtons, world)
 	local body = Handling.CopyBody(base, out)
+	-- (the world measures what it needs from where the replay starts: world.begin)
+	if world and world.begin then world.begin(body) end
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
 	-- (no walls in the prediction: never obstructed; the server's state carries the result)
