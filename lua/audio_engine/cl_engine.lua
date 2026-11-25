@@ -1294,6 +1294,8 @@ local function updateCarSafely(car, stepTime)
 	end
 end
 hook.Add("Think", "audio_engine_cars", function()
+	-- (the prediction moves your car's position for the frame's sound update: back first, cl_handling)
+	if AudioEngine.PredictSoundBack then AudioEngine.PredictSoundBack() end
 	local now = RealTime()
 	if now >= nextVehicleScan then
 		nextVehicleScan = now + 0.5

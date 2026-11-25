@@ -593,11 +593,91 @@ function Handling.LearnYaw(learner, speed, sample)
 	learner.yawSamples = (learner.yawSamples or 0) + 1
 end
 
-local function step(body, state, buttons, spec, learner, base, deltaTime)
+--[[
+	The road under a body (pure numbers; the caller traces): roadFront / roadRear = the road's
+	height under the front and rear axle (half = half the wheelbase, inches, along the nose),
+	clearance = how high the car's origin rides over the road. On the ground the body is put on
+	it: height, pitch along the road, no speed into or out of it. It leaves the road where the road
+	drops away faster than gravity can pull the car after it (a crest at speed), and lands when it
+	comes down to it again
+]]
+-- it flies once the road drops away more than gravity pulls the car down in the step (x TAKEOFF_SHARE,
+-- + TAKEOFF_SLACK inches for the traces' noise): at a crest that's the road curving away faster than g
+local TAKEOFF_SHARE, TAKEOFF_SLACK = 1.2, 0.05
+function Handling.RoadResponse(body, spec, roadFront, roadRear, half, clearance, deltaTime)
+	local nx, ny, nz = noseOf(body, spec)
+	local road = (roadFront + roadRear) * 0.5
+	local gap = body.pz - clearance - road
+	if body.groundShare >= 0.5 then
+		if gap > 0.5 * GRAVITY_INCHES * deltaTime * deltaTime * TAKEOFF_SHARE + TAKEOFF_SLACK then
+			body.groundShare = 0
+			return
+		end
+	elseif gap > 0 then
+		return
+	end
+	-- on the road (or landing on it): its height, and its pitch about the car's right
+	body.pz = road + clearance
+	local flat = sqrt(nx * nx + ny * ny)
+	if flat > 0.1 then
+		local wanted = atan2(roadFront - roadRear, 2 * half)
+		local pitch = atan2(nz, flat)
+		local turn = wanted - pitch
+		if abs(turn) > 1e-5 then
+			-- the axis nose x world up (turning about it by + raises the nose)
+			local ux, uy = ny / flat, -nx / flat
+			body.ax, body.ay, body.az = rotate(body.ax, body.ay, body.az, ux, uy, 0, turn)
+			body.bx, body.by, body.bz = rotate(body.bx, body.by, body.bz, ux, uy, 0, turn)
+			body.cx, body.cy, body.cz = rotate(body.cx, body.cy, body.cz, ux, uy, 0, turn)
+		end
+	end
+	-- no speed into the road (a landing stops there) or off it along the car's up
+	local upSpeed = body.vx * body.cx + body.vy * body.cy + body.vz * body.cz
+	body.vx, body.vy, body.vz = body.vx - body.cx * upSpeed, body.vy - body.cy * upSpeed, body.vz - body.cz * upSpeed
+	body.groundShare = 1
+end
+
+--[[
+	A wall the replay ran into: the body put back to where it touched (x, y, z), the speed into the
+	wall (normal nx, ny flat, pointing out of it) taken off with a little bounce, some of the speed
+	along it scrubbed, and a hit hard enough to be an impact on the server lets go of the model for
+	the rest of the replay (the server does that for impactHold s, more than any lead)
+]]
+local WALL_BOUNCE = 0.1
+local WALL_SCRUB = 0.3
+function Handling.WallResponse(body, spec, x, y, z, normalX, normalY)
+	body.px, body.py, body.pz = x, y, z
+	local length = sqrt(normalX * normalX + normalY * normalY)
+	if length < 0.1 then return end
+	normalX, normalY = normalX / length, normalY / length
+	local into = body.vx * normalX + body.vy * normalY
+	if into >= 0 then return end
+	local alongX, alongY = body.vx - normalX * into, body.vy - normalY * into
+	local along = sqrt(alongX * alongX + alongY * alongY)
+	local scrub = along > 0 and max(0, 1 - WALL_SCRUB * -into / along) or 0
+	body.vx = alongX * scrub - normalX * into * WALL_BOUNCE
+	body.vy = alongY * scrub - normalY * into * WALL_BOUNCE
+	local change = -into * (1 + WALL_BOUNCE)
+	if change > spec.settings.impactSpeed then
+		body.controlShare = 0
+		body.yawRate = body.yawRate * 0.3
+	end
+end
+
+--[[
+	world (optional, client): the replay's surroundings, world.move(body, fromX, fromY, fromZ,
+	deltaTime) after each step's motion: puts the body on the road under it (or lets it fly off a
+	crest and land), and stops it at walls (Handling.WallResponse). Without it the replay ran on the
+	slope it started on and through everything: into the road in dips, pinned to it over crests
+	the server's car flew off, into walls, then a snap each time the server's state came back
+]]
+local function step(body, state, buttons, spec, learner, base, deltaTime, world)
 	local forwardSpeed = forwardSpeedOf(body, spec)
 	local mode = Handling.DriveMode(buttons, forwardSpeed, base.driving, base.limiter)
+	local fromX, fromY, fromZ = body.px, body.py, body.pz
 	Handling.Integrate(body, spec, Handling.LearnedAcceleration(learner, mode, forwardSpeed), deltaTime, STOPPING[mode],
 		Handling.YawShareAt(learner, forwardSpeed))
+	if world then world.move(body, fromX, fromY, fromZ, deltaTime) end
 	local yawChange, sideChange, _, forwardChange = Handling.Control(body, state, buttons, spec, deltaTime)
 	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 end
@@ -608,17 +688,17 @@ end
 	the next command the frame is (0..1, with fractionButtons, else the last buttons). Returns the predicted body (into
 	`out`) and the steering state it ends with.
 ]]
-function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState, fractionButtons)
+function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState, fractionButtons, world)
 	local body = Handling.CopyBody(base, out)
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
 	-- (no walls in the prediction: never obstructed; the server's state carries the result)
 	state.yawSet, state.blockedFor = nil, nil
-	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime) end
+	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime, world) end
 	if fraction > 0 then
 		local buttons = fractionButtons or (count > 0 and commands[count]) or base.buttons or 0
 		local savedSteer, savedDrift, savedTarget, savedSet, savedBlocked = state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor
-		step(body, state, buttons, spec, learner, base, deltaTime * fraction)
+		step(body, state, buttons, spec, learner, base, deltaTime * fraction, world)
 		state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor = savedSteer, savedDrift, savedTarget, savedSet, savedBlocked
 	end
 	return body, state
