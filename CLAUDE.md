@@ -419,6 +419,16 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     Your car's `vehicle_steer` pose (wheels, steering wheel) is the predicted steering x Source's wheel share at that speed
     (learned per 5 m/s band), moving at `WHEEL_RATE` 3/s (a script's usual rate): at the model's steerRate 7 the wheels snapped
     to full lock (the user). Not yet seen in game.
+    The replay's length comes from the client's command clock (`Handling.ClientClockSeen/ClientClockNow`: command numbers run at one
+    a tick in real time; the upper envelope of number - time / tick, sinking 0.2 a second), not from the newest command + the time
+    since its frame: commands are made at a frame's start, so at 50 fps the drawn car moved 1 tick one frame and 2 the next (camera
+    stutter, the user; test_prediction `TICK=22 FPS=50`: frame-to-frame speed unevenness 22% -> 2.5%, `OLDCLOCK=1|client|server` for the old ways).
+    Other cars' lead = yours + (how much later than yours Source draws them): `drawnLag`, GetNetworkOrigin - GetPos along the velocity,
+    smoothed 1 s (the user: at 100 mph a car length behind); the debug readout shows both.
+    The road (`followGround`): each axle of a drawn car (yours on the ground, the nearest `GROUND_CARS` 6 moved ones) is put as high over
+    the road under it as Source has it where Source has the car (4 TraceLines a car, world only, differences over 60 in or a car
+    40 in up not followed): the prediction went on along the slope, into the road in dips and past crests (the user).
+    The wall trace's StartSolid sweep and carStop (24th, lost in the 11-20 rollback) are back. Not yet run in game.
     Drawn less leaning (drawing only, the user's: not the handling): cars in `AudioEngine.CAR_LEAN_LEVEL[name]` (sh_carlist, share of the
     lean taken out; the Defender 0.6, not yet seen in game: SpringConstant 10, no anti-roll bar, it leaned right over under the model's
     cornering and its inside wheels hung off the road) within 4000 in: 4 traces down from the body's corners (its OBB, 80% out, 24 in

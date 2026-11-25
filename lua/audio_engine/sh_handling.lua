@@ -182,6 +182,50 @@ function Handling.TurnLimit(settings, speed)
 	return limit
 end
 
+--[[
+	The command the car's physics stands at, for the driver's replay (server, once a tick). Source
+	runs the user commands in a packet at once while the car's physics steps once a tick, so the
+	last command's number jumps 2 one tick and stands still the next whenever packets don't line
+	up with ticks (cl_cmdrate 30 at 66 tick: every other tick; at 22 tick with network jitter), and
+	the replay was a tick too long or too short by turns: a small correction each time, the camera
+	with it. This clock moves one command a tick, drawn to the real number, so it stands at their
+	average; it's sent with its fraction. A gap of more than CLOCK_SNAP commands (a lag spike, a
+	new driver) is taken at once
+]]
+local CLOCK_PULL, CLOCK_SNAP = 0.1, 4
+function Handling.CommandClock(clock, number)
+	if not clock or abs(number - clock) > CLOCK_SNAP then return number end
+	clock = clock + 1
+	return clock + (number - clock) * CLOCK_PULL
+end
+
+--[[
+	The client's command clock: the command number now, continuously (client). Commands are made at
+	the start of the frame their tick falls in, so the time a command was seen is up to a frame late,
+	and at 50 fps against 22 or 66 tick the replay's length (newest command + time since it) jumped
+	by up to a frame each frame: at 100 mph up to ~0.9 m back and forth, the camera with it (the
+	user: "stuttery"). Command numbers run at one a tick in real time, so number = time / tick +
+	offset: each command seen gives a lower bound of the offset (it was made at or before the frame),
+	and the clock keeps their upper envelope, sinking CLOCK_SETTLE commands a second so a clock
+	adjustment by the engine still gets through, dropping at once under CLOCK_DROP
+]]
+local CLOCK_SETTLE, CLOCK_DROP = 0.2, 2
+function Handling.NewClientClock() return { offset = nil, at = 0 } end
+
+function Handling.ClientClockSeen(clock, number, now, tickInterval)
+	local sample = number - now / tickInterval
+	local offset = clock.offset
+	if offset then offset = offset - CLOCK_SETTLE * max(0, now - clock.at) end
+	if not offset or sample > offset or sample < offset - CLOCK_DROP then offset = sample end
+	clock.offset, clock.at = offset, now
+end
+
+-- the command number now (continuous), between the newest one made and the next
+function Handling.ClientClockNow(clock, now, tickInterval, newest)
+	if not clock.offset then return newest end
+	return clamp(now / tickInterval + clock.offset, newest, newest + 1)
+end
+
 function Handling.Lock(settings, speed)
 	local share = 1 - min(1, speed / settings.lockFadeSpeed)
 	return settings.lockFast + (settings.lockSlow - settings.lockFast) * share ^ settings.lockFadePower
@@ -561,10 +605,10 @@ end
 --[[
 	base: the server's state (a body + steer, drift, driving, limiter, impact), commands: the
 	buttons of each command after the one it ran, in order (count of them), fraction: how far into
-	the next command the frame is (0..1, with the last buttons). Returns the predicted body (into
+	the next command the frame is (0..1, with fractionButtons, else the last buttons). Returns the predicted body (into
 	`out`) and the steering state it ends with.
 ]]
-function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState)
+function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState, fractionButtons)
 	local body = Handling.CopyBody(base, out)
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
@@ -572,7 +616,7 @@ function Handling.Predict(base, commands, count, fraction, spec, learner, deltaT
 	state.yawSet, state.blockedFor = nil, nil
 	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime) end
 	if fraction > 0 then
-		local buttons = count > 0 and commands[count] or base.buttons or 0
+		local buttons = fractionButtons or (count > 0 and commands[count]) or base.buttons or 0
 		local savedSteer, savedDrift, savedTarget, savedSet, savedBlocked = state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor
 		step(body, state, buttons, spec, learner, base, deltaTime * fraction)
 		state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor = savedSteer, savedDrift, savedTarget, savedSet, savedBlocked
