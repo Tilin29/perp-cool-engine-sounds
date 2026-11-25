@@ -42,6 +42,9 @@ const PING = Number(process.argv[2] || 150)
   // WORLD=0: the replay without its world (road, walls), as before; the server's car still rides the road.
   // The road has a dip at x = -2600 (~80 mph) and a crest at x = -4100 (~87 mph, the car flies)
   await L.doString(`WORLD = ${process.env.WORLD !== '0'}`)
+  // BOUNCE: inches the car's body rides over the road in the server's states (springs; default 1)
+  await L.doString(`BOUNCE = ${Number(process.env.BOUNCE ?? 1)}`)
+  await L.doString(`OLDCAMERA = ${!!process.env.OLDCAMERA}`)
   await L.doString(`TICK = ${Number(process.env.TICK || 66)} FPS = ${Number(process.env.FPS || 144)} OLDCLOCK = ${['1','client'].includes(process.env.OLDCLOCK || '')} OLDSERVERCLOCK = ${['1','server'].includes(process.env.OLDCLOCK || '')}`)
   // SOURCE_STEER=script: Source's wheels at a script's own rates (3/s), as before sv_handling matched them
   await L.doString(`SOURCE_STEER_SCRIPT = ${process.env.SOURCE_STEER === 'script'}`)
@@ -129,7 +132,7 @@ const PING = Number(process.argv[2] || 150)
     -- the network
     local toServer, toClient = {}, {}
     local truth = {}            -- server time -> pose after its tick
-    local client = { learner = H.NewLearner(260, 58), smoother = H.NewSmoother(), history = {}, newest = 0, newestAt = 0, base = nil, previous = nil,
+    local client = { learner = H.NewLearner(260, 58), smoother = H.NewSmoother(), cameraSmoother = H.NewSmoother(), history = {}, newest = 0, newestAt = 0, base = nil, previous = nil,
       fresh = false, shown = false, commands = {}, earlierCommands = {}, predicted = {}, earlier = {}, display = {}, state = {}, earlierState = {} }
 
     local function yawOf(b) return math.deg(math.atan(b.by, b.bx)) end   -- the nose (model +y) heading
@@ -167,7 +170,7 @@ const PING = Number(process.argv[2] || 150)
       return count, span - whole, client.history[number + whole + 1] or last
     end
 
-    local stats = { predicted = {}, plain = {}, predictedYaw = {}, plainYaw = {}, jump = 0, wobble = {} }
+    local stats = { predicted = {}, plain = {}, predictedYaw = {}, plainYaw = {}, jump = 0, wobble = {}, cameraMove = {}, cameraTurn = {} }
     local response = { pressAt = nil, predicted = nil, plain = nil }
     local lastDisplay
     local samples = {}
@@ -223,6 +226,8 @@ const PING = Number(process.argv[2] || 150)
         if PATHLOG and (server.body.groundShare < 1 or serverTickIndex % math.floor(TICK / 2) == 0) then print(string.format("t=%.1f x=%.0f y=%.0f v=%.0f mph z=%.0f air=%s", serverTime, server.body.px, server.body.py, math.sqrt(server.body.vx ^ 2 + server.body.vy ^ 2) * H.INCH * 2.237, server.body.pz, tostring(server.body.groundShare < 1))) end
         if serverTickIndex % math.max(1, math.floor(0.03 / DT + 0.5)) == 0 and random() > 0.03 then
           local state = H.CopyBody(server.body)
+          -- (the body on its springs: up to BOUNCE inches over the road in the states, as a car in a fast corner)
+          state.pz = state.pz + BOUNCE * math.abs(math.sin(serverTime * 7.3))
           local clock = server.clock or 0
           state.command, state.commandFraction = math.floor(clock), clock - math.floor(clock)
           state.time, state.steer, state.drift = serverTime, server.state.steer, server.state.drift
@@ -259,10 +264,25 @@ const PING = Number(process.argv[2] || 150)
               local c2, f2, b2 = commandsAfter(client.previous, client.earlierCommands, clientTime)
               local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState, b2, WORLD and clientWorld or nil)
               H.SmootherAbsorb(client.smoother, earlier, predicted)
+              H.SmootherAbsorb(client.cameraSmoother, earlier, predicted)
             end
           end
           client.shown = true
+          -- (as cl_handling: the car's smoothing 0.1 s, the camera's 0.6 s; OLDCAMERA=1: the camera on the car)
           H.SmootherDecay(client.smoother, FRAME, base.impact and 0.04 or 0.1, 250)
+          H.SmootherDecay(client.cameraSmoother, FRAME, base.impact and 0.04 or (OLDCAMERA and 0.1 or 0.6), 250)
+          -- the camera's pose (the prediction + its smoothing): how far it moves off the car's own
+          -- smooth motion from frame to frame (m/s, deg/s), what twitches the view; outside the crash
+          client.cameraBody = H.SmootherApply(client.cameraSmoother, predicted, client.cameraBody)
+          local camera = client.cameraBody
+          if client.lastCamera and (clientTime < 12.9 or clientTime > 14.5) then
+            local last = client.lastCamera
+            local moveX, moveY = (camera.px - last.px) / FRAME - predicted.vx, (camera.py - last.py) / FRAME - predicted.vy
+            stats.cameraMove[#stats.cameraMove + 1] = math.sqrt(moveX ^ 2 + moveY ^ 2) * H.INCH
+            local turned = ((yawOf(camera) - last.yaw + 540) % 360 - 180) / FRAME
+            stats.cameraTurn[#stats.cameraTurn + 1] = math.abs(turned - predicted.yawRate)
+          end
+          client.lastCamera = { px = camera.px, py = camera.py, yaw = yawOf(camera) }
           local display = H.SmootherApply(client.smoother, predicted, client.display)
           if clientTime > 1 then
             samples[#samples + 1] = { t = clientTime, px = display.px, py = display.py, pz = display.pz, yaw = yawOf(display),
@@ -331,8 +351,9 @@ const PING = Number(process.argv[2] || 150)
       p.mean, p.p95, p.worst, q.mean, q.p95, q.worst, py.mean, py.p95, py.worst, qy.mean, qy.p95, qy.worst,
       response.predicted or -1, response.plain or -1, stats.jump, client.learner.samples) .. string.format('|%.3f|%.1f', stats.crashOff or 0, stats.crashWorst or 0) .. string.format('|%.2f|%.2f|%.2f|%.2f', stats.releaseYaw or 0, stats.turnYaw or 0, stats.turnYawAt or 0, stats.releaseYawAt or 0)
       .. (function() local w = summary(stats.wobble) return string.format('|%.4f|%.4f', w.mean, w.p95) end)()
-      .. string.format('|%.1f|%.1f|%.1f', stats.heightOff or 0, (stats.heightSum or 0) / math.max(1, stats.heightCount or 0), stats.intoRoad or 0))`)
-  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt, wobbleMean, wobble95, heightOff, heightMean, intoRoad] = result.split('|').map(Number)
+      .. string.format('|%.1f|%.1f|%.1f', stats.heightOff or 0, (stats.heightSum or 0) / math.max(1, stats.heightCount or 0), stats.intoRoad or 0)
+      .. (function() local m, r = summary(stats.cameraMove), summary(stats.cameraTurn) return string.format('|%.3f|%.3f|%.2f|%.2f', m.p95, m.worst, r.p95, r.worst) end)())`)
+  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt, wobbleMean, wobble95, heightOff, heightMean, intoRoad, cameraMove95, cameraMoveWorst, cameraTurn95, cameraTurnWorst] = result.split('|').map(Number)
   const m = (inch) => (inch * 0.0254).toFixed(2) + ' m'
   console.log(`ping ${PING} ms, ${process.env.TICK || 66} tick, ${process.env.FPS || 144} fps${process.env.OLDCLOCK ? ' (old clocks)' : ''}, 3% of states lost, ${samples} acceleration samples learned`)
   console.log(`  position off where the server will be:  predicted mean ${m(pm)}, 95% ${m(p95)}, worst ${m(pw)}`)
@@ -342,6 +363,7 @@ const PING = Number(process.argv[2] || 150)
   console.log(`  steering key to 2 deg turned on screen: predicted ${(rp * 1000).toFixed(0)} ms, plain Source ${(rq * 1000).toFixed(0)} ms`)
   console.log(`  heading off, steering held / 0.4 s after letting go: worst ${turnYaw.toFixed(1)} (at ${turnYawAt.toFixed(1)} s) / ${releaseYaw.toFixed(1)} (at ${releaseYawAt.toFixed(1)} s) deg`)
   console.log(`  over the dip and the crest: height off the server's mean ${m(heightMean)}, worst ${m(heightOff)}; drawn into the road up to ${m(Math.max(0, intoRoad))}`)
+  console.log(`  corrections moving the camera: 95% ${cameraMove95.toFixed(2)} m/s, worst ${cameraMoveWorst.toFixed(2)}; turning it 95% ${cameraTurn95.toFixed(1)} deg/s, worst ${cameraTurnWorst.toFixed(1)}`)
   console.log(`  frame-to-frame speed unevenness over 20 m/s: mean ${(wobbleMean * 100).toFixed(1)}%, 95% ${(wobble95 * 100).toFixed(1)}%`)
   console.log(`  largest correction jump in one frame:   ${m(jump)} (outside the crash)`)
   console.log(`  a crash at 13 s nobody predicted:       up to ${m(crashWorst)} off, back within 0.5 m after ${(crashOff * 1000).toFixed(0)} ms`)

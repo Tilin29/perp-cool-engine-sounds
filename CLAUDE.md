@@ -310,6 +310,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     off: on if Space is held then), getting out keeps it. Off = neutral, the car rolls (woken on exit; a released one is released
     again every Think while driverless). Engine off it's set on Source's controls every Think (+ throttle 0); driving, Space is
     Source's handbrake and the latch is off. The cluster's handbrake lamp shows it while the engine isn't running.
+    Released = SetHandbrake(false) + ReleaseHandbrake() (Source holds a driverless jeep's handbrake on: getting out with it off,
+    the car stayed braked, the user), also the tick after getting out. A car nobody has set it on gets it off on being got into
+    (it was on: getting in and out of a parked car untouched put it on; the user's rule: only on if switched on, or Space held
+    getting out with the engine on).
     Engine off, Source doesn't steer: sv_handling's tick puts the model's steering (`state.steer`) on with `SetSteering(-steer, 0)`.
     The user's design; not yet run in game (whether Source re-applies a driverless handbrake by itself is unknown).
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
@@ -426,14 +430,24 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     Other cars' lead = yours + (how much later than yours Source draws them): `drawnLag`, GetNetworkOrigin - GetPos along the velocity,
     smoothed 1 s (the user: at 100 mph a car length behind); the debug readout shows both.
     The replay has a world (`Handling.Predict`'s last argument, `ownWorld` in cl_handling: `world.move` after each step's motion):
-    the road (`Handling.RoadResponse`: put on it at `own.clearance`, learned from the states, pitched along it, no speed into it;
-    it flies where the road drops away more than gravity pulls it down in the step (x1.2 + 0.05 in) and lands on it) and walls
-    (`Handling.WallResponse`: the leading end's box swept each step, stopped at the wall, speed into it off with a 0.1 bounce,
-    0.3 scrub, a hit over impactSpeed lets go of the model for the rest of the replay); 1 hull + 2 line traces a step, your car
-    only. It ran through everything and was cut short afterwards along the line from the server's car, changing frame to frame:
+    the road (`Handling.RoadResponse`: put on it at the clearance of the replay's own starting state (`ownWorld.begin`, within
+    12 in of `own.clearance`, learned from the states), pitched along it, no speed into it; it flies only where the road drops
+    more than `TAKEOFF_GAP` 2 in in a step, and lands on it. With the learned clearance and "faster than gravity" (~0.1 in a step)
+    a fast corner's body bounce counted as flying: no grip, steering or throttle, the drawn car slowed and ran wide in corners,
+    the camera snapped (the user); test_prediction `BOUNCE` (default 1 in) catches it: heading worst 8.4 -> 3.8 deg. A car
+    flying off a smooth crest shows as flying once the server's state says so) and walls (`Handling.WallResponse`, `stopEnd`:
+    a box 95% of the car's width at the leading end, both ends going sideways, swept from the end's place before the step
+    (position and nose: turning swings it) at any speed; an end already in a wall (the server's car flush against it: the box
+    starts solid, which counted as clear, the car went half into walls pushing slowly, the user) finds the wall from the car's
+    middle and keeps no motion into it; speed into it off with a 0.1 bounce, 0.3 scrub, a hit over impactSpeed lets go of the
+    model for the rest of the replay); up to 2 hull + 2 line traces a step, your car only. It ran through everything and was cut short afterwards along the line from the server's car, changing frame to frame:
     into walls then a snap, stopping short, shaking against them, pinned to the road over crests the server's car flew off (the user).
     test_prediction has a dip and a crest (`WORLD=0` for none): height off the server's 0.90 m -> 0.05 m.
     The nearest `GROUND_CARS` 6 moved other cars still get `followGround` (their axles put as high over the road as Source has them).
+    The camera (third person: further than the car's half length from its middle) takes the same corrections over
+    `cameraSmoothTime` 0.6 s, the car over `smoothTime` 0.1 (`own.cameraSmoother`, `own.cameraEntry` used by calcView): it moved
+    rigidly with the car, so every correction moved the view, twitchy at higher ping (the user); test_prediction's "corrections
+    moving the camera" at 300 ms: 3.4 -> 2.3 m/s 95th percentile (`OLDCAMERA=1` for the old way). The worst left are handbrake slides.
     The stop at other cars (carStop) eases: the share of the way let go closes over `CAR_STOP_CLOSE` 0.03 s, opens over 0.25 s.
     Shadows: the placements (and riders' render origins) go on at the end of calcView with MarkShadowAsDirty, not at
     PreDrawOpaqueRenderables (shadows are drawn before it: they stayed where Source has the car, the user). Sound: after the frame
