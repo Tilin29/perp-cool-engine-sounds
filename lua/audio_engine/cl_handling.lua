@@ -488,41 +488,12 @@ local function learnWheelShare(vehicle, base, speed, realNow)
 end
 
 --[[
-	How fast Source turns the wheels, in pose units (-1..1) a second. The model's steering reaches
-	full lock in ~0.14 s (steerRate 7): drawn at that, the wheels snapped to their full turn (the
-	user); Source turns them at the script's steering rates (SlowSteeringRate ~2-3). Learned from
-	Source's own pose, over windows of WHEEL_RATE_WINDOW s while it moves between its ends (its
-	networked steps would read as bursts frame by frame); the drawn wheels go towards the predicted
-	steering at that rate
+	How fast the drawn wheels turn, in pose units (-1..1) a second. The model's steering reaches
+	full lock in ~0.14 s (steerRate 7), and so do Source's wheels (sv_handling sets its steering
+	rates to the model's): drawn at that, the wheels snapped to their full turn (the user). Drawn
+	at a script's usual rate instead (SlowSteeringRate ~3), going towards the predicted steering
 ]]
-local WHEEL_RATE_DEFAULT = 3
-local WHEEL_RATE_WINDOW = 0.1   -- s
-local WHEEL_RATE_MIN_MOVE = 0.05
-local WHEEL_RATE_LEARN = 0.2
-local wheelRates = {}           -- model -> pose units a second
-
-local function wheelRateOf(vehicle)
-	return wheelRates[vehicle:GetModel() or ""] or WHEEL_RATE_DEFAULT
-end
-
-local function learnWheelRate(vehicle, pose, realNow)
-	local window = own.wheelWindow
-	if not pose or not window or window.vehicle ~= vehicle or realNow - window.at > WHEEL_RATE_WINDOW * 3 then
-		own.wheelWindow = pose and { vehicle = vehicle, pose = pose, at = realNow } or nil
-		return
-	end
-	local seconds = realNow - window.at
-	if seconds < WHEEL_RATE_WINDOW then return end
-	local moved = math.abs(pose - window.pose)
-	-- (only a window that moved all the way through: not one that started or stopped at an end)
-	local inside = math.abs(pose) < 0.97 and math.abs(window.pose) < 0.97
-	window.pose, window.at = pose, realNow
-	if moved < WHEEL_RATE_MIN_MOVE or not inside then return end
-	local rate = clamp(moved / seconds, 0.5, 10)
-	local model = vehicle:GetModel() or ""
-	local known = wheelRates[model]
-	wheelRates[model] = known and known + (rate - known) * WHEEL_RATE_LEARN or rate
-end
+local WHEEL_RATE = 3
 
 local function takeSteerPoseOff()
 	if not steerPose then return end
@@ -806,14 +777,13 @@ local function updateFrame()
 		end
 		own.displayPosition, own.displayAngles = toPosition, displayAngles
 		-- (the wheels: the predicted steering x how far Source turns them at this speed, turning at
-		-- Source's own rate)
+		-- WHEEL_RATE)
 		own.sourceSteerPose = sourceSteerPose(vehicle)
 		local wheelSpeed = math.abs(Handling.ForwardSpeed(base, spec)) * Handling.INCH
 		learnWheelShare(vehicle, base, wheelSpeed, realNow)
-		learnWheelRate(vehicle, own.sourceSteerPose, realNow)
 		local wheelTarget = -(own.state.steer or 0) * wheelShareAt(vehicle, spec, math.abs(Handling.ForwardSpeed(predicted, spec)) * Handling.INCH)
 		local wheelFrom = own.steerPose or own.sourceSteerPose or wheelTarget
-		own.steerPose = math.Approach(wheelFrom, wheelTarget, wheelRateOf(vehicle) * frameTime)
+		own.steerPose = math.Approach(wheelFrom, wheelTarget, WHEEL_RATE * frameTime)
 		-- (for the readout: Source's pose now, before anything is drawn moved)
 		own.sourcePosition, own.sourceYaw = vehicle:GetPos(), vehicle:GetAngles().y
 		own.velocity = own.velocity or Vector()

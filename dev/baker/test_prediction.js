@@ -35,6 +35,10 @@ const PING = Number(process.argv[2] || 150)
     function CreateConVar() return { GetBool = function() return true end } end`)
   await L.doString(fs.readFileSync(path.join(ADDON, 'lua', 'audio_engine', 'sh_handling.lua'), 'utf8'))
   await L.doString(`PING = ${PING}`)
+  // SOURCE_STEER=script: Source's wheels at a script's own rates (3/s), as before sv_handling matched them
+  await L.doString(`SOURCE_STEER_SCRIPT = ${process.env.SOURCE_STEER === 'script'}`)
+  // SOURCE_PULL: how hard Source's tyres pull the yaw rate to their own turn between ticks (per s)
+  await L.doString(`SOURCE_PULL = ${Number(process.env.SOURCE_PULL || 2.5)}`)
   await L.doString(String.raw`
     local H = AUDIO_ENGINE.Handling
     local DT = 1 / 66
@@ -80,11 +84,16 @@ const PING = Number(process.argv[2] || 150)
       local side = (body.vx * rx + body.vy * ry)
       -- Source's own steering and tyres (slower, a different lock, no grip cap) and a bump now and then
       local wanted = (has(buttons, Lk) and 1 or 0) - (has(buttons, R) and 1 or 0)
-      server.sourceSteer = server.sourceSteer + math.max(-3 * DT, math.min(3 * DT, wanted - server.sourceSteer))
+      -- (sv_handling sets Source's steering rates to the model's: its wheels follow the model's steering)
+      local settings = spec.settings
+      local sourceRate = SOURCE_STEER_SCRIPT and 3 or (wanted == 0 and settings.steerReturn or settings.steerRate)
+      server.sourceSteer = server.sourceSteer + math.max(-sourceRate * DT, math.min(sourceRate * DT, wanted - server.sourceSteer))
       local speed = math.abs(forward)
-      local lock = 11 + 19 * math.max(0, 1 - speed / 15)
+      -- (its wheel angle: a script's own, or as sv_handling matches it to the model: x1.1 + 0.5 deg)
+      local lock = SOURCE_STEER_SCRIPT and 11 + 19 * math.max(0, 1 - speed / 15)
+        or math.min(30, H.TurnAngle(settings, 2.7, speed) * 1.1 + 0.5)
       local sourceYaw = math.deg(forward * math.tan(math.rad(lock)) / 2.7) * server.sourceSteer
-      body.yawRate = body.yawRate + (sourceYaw - body.yawRate) * math.min(1, 2.5 * DT) + (random() - 0.5) * 3
+      body.yawRate = body.yawRate + (sourceYaw - body.yawRate) * math.min(1, SOURCE_PULL * DT) + (random() - 0.5) * 3
       local grip = (has(buttons, J) and 0.3 or 0.9) * 9.81 / H.INCH * DT
       local removed = math.min(math.abs(side), grip) * (side >= 0 and -1 or 1)
       body.vx, body.vy = body.vx + rx * removed, body.vy + ry * removed
@@ -240,6 +249,17 @@ const PING = Number(process.argv[2] || 150)
           if off > 0.5 / H.INCH then stats.crashOff = sample.t - 13 - UP end
           stats.crashWorst = math.max(stats.crashWorst or 0, off)
         end
+        -- just after a steering key is let go: how far the car shown is off the server's (the "snap")
+        local keysNow, keysBefore = keysAt(sample.t), keysAt(sample.t - 0.4)
+        if math.floor(keysBefore / 4) % 4 ~= 0 and math.floor(keysNow / 4) % 4 == 0 and not has(keysNow, J)
+          and not has(keysAt(sample.t - 1), J) and not has(keysAt(sample.t - 0.5), J) then
+          local off = dyaw(sample.yaw, reference.yaw)
+          if off > (stats.releaseYaw or 0) then stats.releaseYaw, stats.releaseYawAt = off, sample.t end
+        end
+        if math.floor(keysNow / 4) % 4 ~= 0 and not has(keysNow, J) and not has(keysBefore, J) then
+          local off = dyaw(sample.yaw, reference.yaw)
+          if off > (stats.turnYaw or 0) then stats.turnYaw, stats.turnYawAt = off, sample.t end
+        end
         -- steering response: the first left turn at 4 s; how long until the car shown has turned 2 degrees
         if sample.t >= 4 and not response.startPredicted then response.startPredicted, response.startPlain = sample.yaw, plain.yaw end
         if response.startPredicted and not response.predicted and dyaw(sample.yaw, response.startPredicted) > 2 then response.predicted = sample.t - 4 end
@@ -255,8 +275,8 @@ const PING = Number(process.argv[2] || 150)
     local p, q, py, qy = summary(stats.predicted), summary(stats.plain), summary(stats.predictedYaw), summary(stats.plainYaw)
     __result(string.format('%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.3f|%.3f|%.1f|%d',
       p.mean, p.p95, p.worst, q.mean, q.p95, q.worst, py.mean, py.p95, py.worst, qy.mean, qy.p95, qy.worst,
-      response.predicted or -1, response.plain or -1, stats.jump, client.learner.samples) .. string.format('|%.3f|%.1f', stats.crashOff or 0, stats.crashWorst or 0))`)
-  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst] = result.split('|').map(Number)
+      response.predicted or -1, response.plain or -1, stats.jump, client.learner.samples) .. string.format('|%.3f|%.1f', stats.crashOff or 0, stats.crashWorst or 0) .. string.format('|%.2f|%.2f|%.2f|%.2f', stats.releaseYaw or 0, stats.turnYaw or 0, stats.turnYawAt or 0, stats.releaseYawAt or 0))`)
+  const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt] = result.split('|').map(Number)
   const m = (inch) => (inch * 0.0254).toFixed(2) + ' m'
   console.log(`ping ${PING} ms, 3% of states lost, ${samples} acceleration samples learned`)
   console.log(`  position off where the server will be:  predicted mean ${m(pm)}, 95% ${m(p95)}, worst ${m(pw)}`)
@@ -264,6 +284,7 @@ const PING = Number(process.argv[2] || 150)
   console.log(`  heading off:                            predicted mean ${pym.toFixed(1)} deg, 95% ${py95.toFixed(1)}, worst ${pyw.toFixed(1)}`)
   console.log(`                                          plain Source mean ${qym.toFixed(1)} deg, 95% ${qy95.toFixed(1)}, worst ${qyw.toFixed(1)}`)
   console.log(`  steering key to 2 deg turned on screen: predicted ${(rp * 1000).toFixed(0)} ms, plain Source ${(rq * 1000).toFixed(0)} ms`)
+  console.log(`  heading off, steering held / 0.4 s after letting go: worst ${turnYaw.toFixed(1)} (at ${turnYawAt.toFixed(1)} s) / ${releaseYaw.toFixed(1)} (at ${releaseYawAt.toFixed(1)} s) deg`)
   console.log(`  largest correction jump in one frame:   ${m(jump)} (outside the crash)`)
   console.log(`  a crash at 13 s nobody predicted:       up to ${m(crashWorst)} off, back within 0.5 m after ${(crashOff * 1000).toFixed(0)} ms`)
   const failures = []
@@ -271,6 +292,8 @@ const PING = Number(process.argv[2] || 150)
   if (!(rp >= 0 && rq > 0 && rp < rq - PING / 1000 * 0.6)) failures.push('steering does not show clearly sooner')
   if (!(jump < 6)) failures.push('a correction jumped more than 6 inches in one frame')
   if (!(crashOff < PING / 1000 + 0.35)) failures.push('the crash took too long to show')
+  if (!process.env.SOURCE_STEER && !process.env.SOURCE_PULL && !(turnYaw < 2 && releaseYaw < 2))
+    failures.push('the heading is off by 2 degrees or more in a turn or as the key is let go')
   if (failures.length) { console.log('FAILED: ' + failures.join('; ')); process.exit(1) }
   console.log('OK')
 })().catch((error) => { console.error(error); process.exit(1) })

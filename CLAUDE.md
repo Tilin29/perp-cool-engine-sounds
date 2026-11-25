@@ -363,7 +363,11 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     cars on `test_car.txt` (as ratios to test_car's values: keep the `TEST` table in step with the file), nothing else changed except, where
     the model runs (`steerForModel`, also in RebaseHandling; the drivemodel convar's change rebases every car), Source's steering: turnThrottleReduce 0
     and degreesFast = the model's grip-capped turn at `STEER_FIT_SPEED` = FastCarSpeed 35 mph (`Handling.TurnAngle`, ~7.5 deg; PERP ~11; fitted at 25 m/s, ~3 deg, Source held 3 deg from 35 mph where the model asks ~7 and cars under throttle hardly turned): both braked cars in a turn
-    (throttle cut up to 90%, front tyres scrubbing across the path). `audioScriptParams` stays the script's own; adds the
+    (throttle cut up to 90%, front tyres scrubbing across the path). Source's steering rates are the model's too (`steeringRate*` = steerRate,
+    `steeringRestRate*` = steerReturn, brake/throttle/boost factors 1): at a script's ~2-3/s its wheels were still turned ~0.3 s
+    after letting go and kept rotating the car between ticks, which the replay can't know (drawn car short in turns, snapping
+    round on release, the user; test_prediction `SOURCE_STEER=script SOURCE_PULL=20` shows it: 6.2 / 5.6 deg held / released,
+    1.8 / 2.4 matched). Other cars' wheels (Source's pose) now reach full lock in ~0.14 s. `audioScriptParams` stays the script's own; adds the
     PhysicsCollide callback (`audioImpactAt` on a velocity change over `impactSpeed` 120 in/s, not floor/ceiling normals: the model is off
     `impactHold` 0.35 s, eases back over `impactEase` 0.5). Tick: on driven cars (`AudioEngine.DrivenVehicles`, kept by sv_engine's
     Think; sv_engine's OnEntityCreated only times jeeps), reads the physics, ground share from `GetWheelContactPoint`
@@ -413,8 +417,8 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     by the offset (culling goes by Source's position: your car vanished otherwise), players in it via PrePlayerDraw; stale overrides cleared.
     `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it).
     Your car's `vehicle_steer` pose (wheels, steering wheel) is the predicted steering x Source's wheel share at that speed
-    (learned per 5 m/s band), moving at Source's own steering rate (learned from its pose over 0.1 s windows, default 3/s): at the
-    model's steerRate 7 the wheels snapped to full lock (the user). Not yet seen in game.
+    (learned per 5 m/s band), moving at `WHEEL_RATE` 3/s (a script's usual rate): at the model's steerRate 7 the wheels snapped
+    to full lock (the user). Not yet seen in game.
     Drawn less leaning (drawing only, the user's: not the handling): cars in `AudioEngine.CAR_LEAN_LEVEL[name]` (sh_carlist, share of the
     lean taken out; the Defender 0.6, not yet seen in game: SpringConstant 10, no anti-roll bar, it leaned right over under the model's
     cornering and its inside wheels hung off the road) within 4000 in: 4 traces down from the body's corners (its OBB, 80% out, 24 in
