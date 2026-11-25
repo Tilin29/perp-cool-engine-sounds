@@ -412,6 +412,9 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     `SetRenderAngles` (Player's is something else) + `InvalidateBoneCache` on the car and its children (pods, lightbar), render bounds widened
     by the offset (culling goes by Source's position: your car vanished otherwise), players in it via PrePlayerDraw; stale overrides cleared.
     `AudioEngine.DisplayPose(entity)` (cl_police's lightbar lenses and lights use it).
+    Your car's `vehicle_steer` pose (wheels, steering wheel) is the predicted steering x Source's wheel share at that speed
+    (learned per 5 m/s band), moving at Source's own steering rate (learned from its pose over 0.1 s windows, default 3/s): at the
+    model's steerRate 7 the wheels snapped to full lock (the user). Not yet seen in game.
     Drawn less leaning (drawing only, the user's: not the handling): cars in `AudioEngine.CAR_LEAN_LEVEL[name]` (sh_carlist, share of the
     lean taken out; the Defender 0.6, not yet seen in game: SpringConstant 10, no anti-roll bar, it leaned right over under the model's
     cornering and its inside wheels hung off the road) within 4000 in: 4 traces down from the body's corners (its OBB, 80% out, 24 in
