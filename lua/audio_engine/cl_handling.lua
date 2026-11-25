@@ -48,6 +48,11 @@ local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false,
 AudioEngine.PREDICTION = {
 	maxCommands = 32,         -- never replays more (~0.5 s at 66 tick: a longer gap shows that late)
 	smoothTime = 0.1,         -- s: a correction dies away to 1/e in this...
+	-- the camera takes the same corrections over this: it moved rigidly with the car, so each
+	-- correction moved the whole view, twitchy at higher ping (the user). The car shifts a little in
+	-- the frame instead (test_prediction at 300 ms: the view's moves off the car's own motion 3.4 ->
+	-- 2.3 m/s at the 95th percentile, 0.6 vs 0.1 s)
+	cameraSmoothTime = 0.6,
 	impactSmoothTime = 0.04,  -- ...while a crash plays out on the server (its outcome shows quickly)
 	snapDistance = 250,       -- inches: a jump bigger than this (teleport, respawn) is shown at once
 	easeTime = 0.35,          -- s: the other cars' lead eases in / out over this
@@ -150,6 +155,7 @@ local function resetOwn(vehicle)
 	end
 	own.learner = IsValid(vehicle) and learners[vehicle] or nil
 	own.smoother = Handling.NewSmoother()
+	own.cameraSmoother = Handling.NewSmoother()
 	own.received = {}
 end
 
@@ -1219,15 +1225,18 @@ local function updateFrame()
 				local earlier = Handling.Predict(own.previousBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime, own.earlier, own.earlierState, earlierButtons, ownWorld)
 				local before = Handling.SmootherSize(own.smoother)
 				Handling.SmootherAbsorb(own.smoother, earlier, predicted)
+				Handling.SmootherAbsorb(own.cameraSmoother, earlier, predicted)
 				local jump = math.abs(Handling.SmootherSize(own.smoother) - before)
 				stats.corrections, stats.correctionSum, stats.largest = stats.corrections + 1, stats.correctionSum + jump, math.max(stats.largest, jump)
 			elseif not own.shown then
 				-- starting: from where Source shows it
 				Handling.SmootherAbsorb(own.smoother, bodyFromEntity(vehicle, own.start), predicted)
+				Handling.SmootherAbsorb(own.cameraSmoother, own.start, predicted)
 			end
 		end
 		own.shown = true
 		Handling.SmootherDecay(own.smoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.smoothTime, PREDICTION.snapDistance)
+		Handling.SmootherDecay(own.cameraSmoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.cameraSmoothTime, PREDICTION.snapDistance)
 		local display = Handling.SmootherApply(own.smoother, predicted, own.display)
 
 		-- (walls and the road are in the replay: ownWorld)
@@ -1271,6 +1280,15 @@ local function updateFrame()
 		own.velocity:SetUnpacked(predicted.vx, predicted.vy, predicted.vz)
 		own.velocityAt = realNow
 		displace(vehicle, toPosition, own.displayAngles, frame, realNow)
+		-- the camera's pose: the car's, moved by what its slower smoothing still holds over the car's
+		local car, camera = own.smoother, own.cameraSmoother
+		local entry = displaced[vehicle]
+		own.cameraEntry = {
+			fromPosition = entry.fromPosition, fromAngles = entry.fromAngles,
+			toPosition = entry.toPosition + Vector(camera.x - car.x, camera.y - car.y, camera.z - car.z),
+			toAngles = Angle(entry.toAngles.p, entry.toAngles.y + (camera.rz - car.rz) * DEG, entry.toAngles.r),
+		}
+		own.cameraEntryFrame = frame
 		if record then recordFrame(realNow, predicted, display, vehicle, own.count > 0 and own.commands[own.count] or base.buttons) end
 		updateLead(vehicle, base.time + (count + fraction) * deltaTime, realNow, frameTime)
 	else
@@ -1299,7 +1317,15 @@ local function calcView(originalCall, gamemodeTable, player, origin, angles, fov
 	local moved = {}
 	if type(view) == "table" then for key, value in pairs(view) do moved[key] = value end end
 	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
-	moved.origin, moved.angles = mapPose(entry, moved.origin or origin, moved.angles or angles)
+	-- (the camera's own smoothing only from outside the car: in first person the cabin would slide
+	-- about the view)
+	local cameraEntry = entry
+	local viewOrigin = moved.origin or origin
+	if own.cameraEntryFrame == FrameNumber() and own.cameraEntry and own.spec then
+		local halfLength = sizeOf(own.vehicle, own.spec).halfLength
+		if viewOrigin:DistToSqr(entry.fromPosition) > halfLength * halfLength then cameraEntry = own.cameraEntry end
+	end
+	moved.origin, moved.angles = mapPose(cameraEntry, viewOrigin, moved.angles or angles)
 	own.cameraShift = moved.origin:Distance((type(view) == "table" and view.origin) or origin)
 	cameraFrame = FrameNumber()
 	-- on now that the camera is worked out: the shadows (the car's, its riders') are drawn before

@@ -444,6 +444,10 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     into walls then a snap, stopping short, shaking against them, pinned to the road over crests the server's car flew off (the user).
     test_prediction has a dip and a crest (`WORLD=0` for none): height off the server's 0.90 m -> 0.05 m.
     The nearest `GROUND_CARS` 6 moved other cars still get `followGround` (their axles put as high over the road as Source has them).
+    The camera (third person: further than the car's half length from its middle) takes the same corrections over
+    `cameraSmoothTime` 0.6 s, the car over `smoothTime` 0.1 (`own.cameraSmoother`, `own.cameraEntry` used by calcView): it moved
+    rigidly with the car, so every correction moved the view, twitchy at higher ping (the user); test_prediction's "corrections
+    moving the camera" at 300 ms: 3.4 -> 2.3 m/s 95th percentile (`OLDCAMERA=1` for the old way). The worst left are handbrake slides.
     The stop at other cars (carStop) eases: the share of the way let go closes over `CAR_STOP_CLOSE` 0.03 s, opens over 0.25 s.
     Shadows: the placements (and riders' render origins) go on at the end of calcView with MarkShadowAsDirty, not at
     PreDrawOpaqueRenderables (shadows are drawn before it: they stayed where Source has the car, the user). Sound: after the frame
