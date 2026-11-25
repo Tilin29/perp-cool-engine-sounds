@@ -257,6 +257,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   // the model only follows gently instead of setting the full turn again
   await L.doString(`
     local body = Body(15)
+    body.touching = true
     local state = { steer = 1, drift = false }
     local changes = {}
     for tick = 1, 10 do
@@ -264,13 +265,18 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
       changes[tick] = yawChange
       body.yawRate = 0      -- the wall: no rotation got through
     end
+    -- not touching anything: Source's tyres taking the rotation back is no wall, the turn is still set
+    local open, openState = Body(15), { steer = 1, drift = false }
+    local openChange = 0
+    for tick = 1, 10 do openChange = H.Control(open, openState, H.KEY_LEFT, SPEC, 1 / 66); open.yawRate = 0 end
     -- free: the same without the wall, tick 10
     local free, freeState = Body(15), { steer = 1, drift = false }
     local freeChange = 0
     for tick = 1, 10 do freeChange = H.Control(free, freeState, H.KEY_LEFT, SPEC, 1 / 66); H.ApplyControl(free, SPEC, freeChange, 0, 0) end
-    __result(string.format("%.2f|%.2f|%.2f", changes[2], changes[10], free.yawRate))`)
+    __result(string.format("%.2f|%.2f|%.2f|%.2f", changes[2], changes[10], free.yawRate, openChange))`)
   const blocked = res.split('|').map(Number)
   check(blocked[1] < blocked[2] * 0.2, `against a wall the turn is no longer forced every tick (tick 10: ${blocked[1]} deg/s set, free car turning ${blocked[2]})`)
+  check(blocked[3] > blocked[2] * 0.5, `not touching anything, a rotation taken back is still forced (tick 10: ${blocked[3]} deg/s set)`)
 
   // 4f. the prediction over rough ground: on its wheels a bump's kick up isn't carried on (it drew the
   // car bobbing); in the air it flies

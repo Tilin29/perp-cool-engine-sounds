@@ -161,6 +161,8 @@ local driveModelConVar = Handling.driveModelConVar   -- audio_engine_drivemodel 
 -- a collision that changed the car's velocity a lot: the model lets go while the crash plays out
 local function onCollide(vehicle, data)
 	if not data.HitNormal or math.abs(data.HitNormal.z) > 0.7 then return end   -- landing, bottoming out
+	-- any touch from the side (a wall, a car): the model's obstructed check only runs then
+	vehicle.audioContactAt = CurTime()
 	if not (data.OurNewVelocity and data.OurOldVelocity) then return end
 	local settings = vehicle.audioHandlingSpec and vehicle.audioHandlingSpec.settings or AudioEngine.HANDLING
 	if (data.OurNewVelocity - data.OurOldVelocity):LengthSqr() < settings.impactSpeed * settings.impactSpeed then return end
@@ -200,6 +202,20 @@ local function steerForModel(vehicle, params)
 	if not istable(steering) then return false end
 	setValue(steering, "turnThrottleReduceSlow", 0)
 	setValue(steering, "turnThrottleReduceFast", 0)
+	-- Source's wheels turn as the model's steering does (its rates are -1..1 a second): at a
+	-- script's own (~2-3, x2 with throttle on the way back) they were still turned ~0.3 s after the
+	-- key was let go and kept rotating the car between ticks, which the client's replay can't know:
+	-- the drawn car turned too little holding a key and snapped round on letting go (the user;
+	-- the 24th's log: the server's car kept turning ~0.2 s longer than predicted)
+	local settings = Handling.SettingsFor(carConfig.name)
+	setValue(steering, "steeringRateSlow", settings.steerRate)
+	setValue(steering, "steeringRateFast", settings.steerRate)
+	setValue(steering, "steeringRestRateSlow", settings.steerReturn)
+	setValue(steering, "steeringRestRateFast", settings.steerReturn)
+	setValue(steering, "brakeSteeringRateFactor", 1)
+	setValue(steering, "throttleSteeringRestRateFactor", 1)
+	setValue(steering, "boostSteeringRateFactor", 1)
+	setValue(steering, "boostSteeringRestRateFactor", 1)
 	if steering.degreesFast then
 		local spec = Handling.SpecFor(vehicle)
 		-- (the model's turn there, a touch more as over it (matchSteering); at most the script's lock.
@@ -424,6 +440,8 @@ local function drive(vehicle, driver, modelOn, deltaTime, now, sendNow)
 	Handling.SetAxes(body, vehicle:GetAngles())
 	body.yawRate = physics:GetAngleVelocity().z     -- local, deg/s: the car's up
 	body.groundShare = groundShareOf(vehicle)
+	local contactAt = vehicle.audioContactAt
+	body.touching = contactAt ~= nil and now - contactAt < spec.settings.contactHold
 	local impactShare = impactShareOf(vehicle, spec.settings, now)
 	-- (carConfig.stability = false: a car registered without the model)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)

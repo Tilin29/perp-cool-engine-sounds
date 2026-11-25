@@ -133,7 +133,7 @@ local function specOf(vehicle)
 end
 
 local function resetOwn(vehicle)
-	own.vehicle, own.base, own.previousBase, own.fresh, own.shown = vehicle, nil, nil, false, false
+	own.vehicle, own.base, own.previousBase, own.fresh, own.shown, own.steerPose = vehicle, nil, nil, false, false, nil
 	own.spec = IsValid(vehicle) and specOf(vehicle) or nil
 	if IsValid(vehicle) and not learners[vehicle] then
 		learners[vehicle] = Handling.NewLearner(vehicle:GetNW2Float("audio_pwr", 120), vehicle:GetNW2Float("audio_vmax", 180) / 3.6)
@@ -487,6 +487,14 @@ local function learnWheelShare(vehicle, base, speed, realNow)
 	shares[band] = shares[band] and shares[band] + (share - shares[band]) * WHEEL_LEARN_RATE or share
 end
 
+--[[
+	How fast the drawn wheels turn, in pose units (-1..1) a second. The model's steering reaches
+	full lock in ~0.14 s (steerRate 7), and so do Source's wheels (sv_handling sets its steering
+	rates to the model's): drawn at that, the wheels snapped to their full turn (the user). Drawn
+	at a script's usual rate instead (SlowSteeringRate ~3), going towards the predicted steering
+]]
+local WHEEL_RATE = 3
+
 local function takeSteerPoseOff()
 	if not steerPose then return end
 	if IsValid(steerPose.entity) then steerPose.entity:SetPoseParameter(STEER_POSE, steerPose.restore) end
@@ -768,11 +776,14 @@ local function updateFrame()
 			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
 		end
 		own.displayPosition, own.displayAngles = toPosition, displayAngles
-		-- (the wheels: the predicted steering x how far Source turns them at this speed)
+		-- (the wheels: the predicted steering x how far Source turns them at this speed, turning at
+		-- WHEEL_RATE)
 		own.sourceSteerPose = sourceSteerPose(vehicle)
 		local wheelSpeed = math.abs(Handling.ForwardSpeed(base, spec)) * Handling.INCH
 		learnWheelShare(vehicle, base, wheelSpeed, realNow)
-		own.steerPose = -(own.state.steer or 0) * wheelShareAt(vehicle, spec, math.abs(Handling.ForwardSpeed(predicted, spec)) * Handling.INCH)
+		local wheelTarget = -(own.state.steer or 0) * wheelShareAt(vehicle, spec, math.abs(Handling.ForwardSpeed(predicted, spec)) * Handling.INCH)
+		local wheelFrom = own.steerPose or own.sourceSteerPose or wheelTarget
+		own.steerPose = math.Approach(wheelFrom, wheelTarget, WHEEL_RATE * frameTime)
 		-- (for the readout: Source's pose now, before anything is drawn moved)
 		own.sourcePosition, own.sourceYaw = vehicle:GetPos(), vehicle:GetAngles().y
 		own.velocity = own.velocity or Vector()
@@ -783,6 +794,8 @@ local function updateFrame()
 		updateLead(vehicle, base.time + (count + fraction) * deltaTime, realNow, frameTime)
 	else
 		own.shown = false
+		-- (the drawn wheels start again from Source's next time)
+		own.steerPose = nil
 		if not vehicle then own.vehicle = nil end
 	end
 
