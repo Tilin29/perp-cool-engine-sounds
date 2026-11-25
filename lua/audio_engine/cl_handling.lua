@@ -587,13 +587,8 @@ local function putSoundBack()
 	if IsValid(entity) and entity:GetPos():DistToSqr(move.moved) < 0.01 then entity:SetPos(move.source) end
 end
 
---[[
-	Players riding a moved car, moved with it while the placements are on: the render origin for
-	the model, and their position too (put back once the frame is drawn, unless the game set it
-	since): a player's shadow is cast from where the player is, not where it's drawn, and the
-	driver's shadow fell behind the car by the lead (the user)
-]]
-local movedPlayers = {}   -- rider -> { source (their position), moved (where it was put) }
+-- players riding a moved car, moved with it (render origin) while the placements are on
+local movedPlayers = {}
 
 local function putPlacementsOn()
 	if placementsOn then return end
@@ -612,23 +607,19 @@ local function putPlacementsOn()
 		local car = AudioEngine.RiddenCar(rider)
 		local entry = car and displaced[car]
 		if entry then
-			local source = rider:GetPos()
-			local moved = (mapPose(entry, source, rider:GetAngles()))
-			rider:SetPos(moved)
-			rider:SetRenderOrigin(moved)
+			rider:SetRenderOrigin((mapPose(entry, rider:GetPos(), rider:GetAngles())))
 			rider:InvalidateBoneCache()
 			rider:MarkShadowAsDirty()
-			movedPlayers[rider] = { source = source, moved = rider:GetPos() }
+			movedPlayers[rider] = true
 		end
 	end
 end
 
 local function takePlacementsOff()
 	takeSteerPoseOff()
-	for rider, move in pairs(movedPlayers) do
+	for rider in pairs(movedPlayers) do
 		if IsValid(rider) then
 			rider:SetRenderOrigin(nil)
-			if rider:GetPos():DistToSqr(move.moved) < 0.01 then rider:SetPos(move.source) end
 			rider:InvalidateBoneCache()
 		end
 	end
