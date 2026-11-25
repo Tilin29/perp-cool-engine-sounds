@@ -156,6 +156,7 @@ local function resetOwn(vehicle)
 	own.learner = IsValid(vehicle) and learners[vehicle] or nil
 	own.smoother = Handling.NewSmoother()
 	own.cameraSmoother = Handling.NewSmoother()
+	own.cameraImpactAt, own.cameraImpactShare = nil, 0
 	own.received = {}
 end
 
@@ -586,8 +587,13 @@ local function putSoundBack()
 	if IsValid(entity) and entity:GetPos():DistToSqr(move.moved) < 0.01 then entity:SetPos(move.source) end
 end
 
--- players riding a moved car, moved with it (render origin) while the placements are on
-local movedPlayers = {}
+--[[
+	Players riding a moved car, moved with it while the placements are on: the render origin for
+	the model, and their position too (put back once the frame is drawn, unless the game set it
+	since): a player's shadow is cast from where the player is, not where it's drawn, and the
+	driver's shadow fell behind the car by the lead (the user)
+]]
+local movedPlayers = {}   -- rider -> { source (their position), moved (where it was put) }
 
 local function putPlacementsOn()
 	if placementsOn then return end
@@ -606,19 +612,23 @@ local function putPlacementsOn()
 		local car = AudioEngine.RiddenCar(rider)
 		local entry = car and displaced[car]
 		if entry then
-			rider:SetRenderOrigin((mapPose(entry, rider:GetPos(), rider:GetAngles())))
+			local source = rider:GetPos()
+			local moved = (mapPose(entry, source, rider:GetAngles()))
+			rider:SetPos(moved)
+			rider:SetRenderOrigin(moved)
 			rider:InvalidateBoneCache()
 			rider:MarkShadowAsDirty()
-			movedPlayers[rider] = true
+			movedPlayers[rider] = { source = source, moved = rider:GetPos() }
 		end
 	end
 end
 
 local function takePlacementsOff()
 	takeSteerPoseOff()
-	for rider in pairs(movedPlayers) do
+	for rider, move in pairs(movedPlayers) do
 		if IsValid(rider) then
 			rider:SetRenderOrigin(nil)
+			if rider:GetPos():DistToSqr(move.moved) < 0.01 then rider:SetPos(move.source) end
 			rider:InvalidateBoneCache()
 		end
 	end
@@ -955,6 +965,7 @@ local worldSpec, worldWallSize = nil, nil
 local wallStart, wallEnd, wallUp = Vector(), Vector(), Vector()
 local ownWorld = {}
 local replayClearance = nil   -- how high this replay's car rides over the road (ownWorld.begin)
+local replayHitWall = false   -- the replay met a wall (the camera follows the car closely then)
 
 -- the road under a body's axles: front, rear heights (or nil), half the wheelbase
 local function roadUnder(body, spec, clearance)
@@ -974,6 +985,7 @@ end
 ]]
 local CLEARANCE_SPREAD = 12
 function ownWorld.begin(body)
+	replayHitWall = false
 	replayClearance = own.clearance
 	if not replayClearance or body.groundShare < 1 then return end
 	local front, rear = roadUnder(body, worldSpec, replayClearance)
@@ -1063,9 +1075,13 @@ function ownWorld.move(body, fromX, fromY, fromZ, deltaTime, fromNoseX, fromNose
 	local distance = math.sqrt(travelX * travelX + travelY * travelY + travelZ * travelZ)
 	local along = travelX * noseX + travelY * noseY + travelZ * noseZ
 	local leading = along >= 0 and 1 or -1
-	stopEnd(body, spec, size, leading, fromX, fromY, fromZ, fromNoseX, fromNoseY, fromNoseZ, noseX, noseY, noseZ)
+	if stopEnd(body, spec, size, leading, fromX, fromY, fromZ, fromNoseX, fromNoseY, fromNoseZ, noseX, noseY, noseZ) then
+		replayHitWall = true
+	end
 	if math.abs(along) < SIDEWAYS_WALL_SHARE * distance or distance < 0.5 then
-		stopEnd(body, spec, size, -leading, fromX, fromY, fromZ, fromNoseX, fromNoseY, fromNoseZ, noseX, noseY, noseZ)
+		if stopEnd(body, spec, size, -leading, fromX, fromY, fromZ, fromNoseX, fromNoseY, fromNoseZ, noseX, noseY, noseZ) then
+			replayHitWall = true
+		end
 	end
 	-- the road under the axles
 	local clearance = replayClearance
@@ -1183,6 +1199,32 @@ end
 ---------------------------------------------------------------------------
 local lastRealTime = RealTime()
 
+--[[
+	The camera's slower smoothing (cameraSmoothTime) around a collision: the car took a crash's
+	corrections over 0.04 s, the camera over 0.6 s and on/off with the server's impact flag, so it
+	stayed back at the spot of the collision, then caught up in a lurch (the user: "spergs out",
+	"lags behind on the spot of collision"). From a wall met in the replay or the server's impact
+	the camera takes the car's own smoothing (eased in over CAMERA_IMPACT_EASE, held
+	CAMERA_IMPACT_HOLD after, eased out over CAMERA_IMPACT_FADE), and it never trails the car by
+	more than CAMERA_LAG_MAX inches / CAMERA_TURN_MAX radians
+]]
+local CAMERA_IMPACT_EASE = 0.12
+local CAMERA_IMPACT_HOLD = 0.4
+local CAMERA_IMPACT_FADE = 0.6
+local CAMERA_LAG_MAX = 30
+local CAMERA_TURN_MAX = 0.1
+
+local function holdCameraNearCar(camera, car)
+	local x, y, z = camera.x - car.x, camera.y - car.y, camera.z - car.z
+	local distance = math.sqrt(x * x + y * y + z * z)
+	if distance > CAMERA_LAG_MAX then
+		local share = CAMERA_LAG_MAX / distance
+		camera.x, camera.y, camera.z = car.x + x * share, car.y + y * share, car.z + z * share
+	end
+	camera.rz = car.rz + clamp(camera.rz - car.rz, -CAMERA_TURN_MAX, CAMERA_TURN_MAX)
+	camera.rx, camera.ry = car.rx, car.ry
+end
+
 local function updateFrame()
 	local frame = FrameNumber()
 	if updatedFrame == frame then return end
@@ -1215,6 +1257,7 @@ local function updateFrame()
 		worldSpec, worldWallSize = spec, wallSizeOf(vehicle, spec)
 		if own.fresh then learnClearance(spec, base) end
 		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state, fractionButtons, ownWorld)
+		local hitWall = replayHitWall
 		own.count, own.fraction = count, fraction
 
 		if own.fresh then
@@ -1236,7 +1279,19 @@ local function updateFrame()
 		end
 		own.shown = true
 		Handling.SmootherDecay(own.smoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.smoothTime, PREDICTION.snapDistance)
-		Handling.SmootherDecay(own.cameraSmoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.cameraSmoothTime, PREDICTION.snapDistance)
+		if hitWall or base.impact then own.cameraImpactAt = realNow end
+		local sinceImpact = own.cameraImpactAt and realNow - own.cameraImpactAt or math.huge
+		local impactWanted = clamp(1 - (sinceImpact - CAMERA_IMPACT_HOLD) / CAMERA_IMPACT_FADE, 0, 1)
+		local impactShare = own.cameraImpactShare or 0
+		if impactWanted > impactShare then
+			impactShare = math.min(impactWanted, impactShare + frameTime / CAMERA_IMPACT_EASE)
+		else
+			impactShare = impactWanted
+		end
+		own.cameraImpactShare = impactShare
+		local cameraTime = Lerp(impactShare, PREDICTION.cameraSmoothTime, PREDICTION.smoothTime)
+		Handling.SmootherDecay(own.cameraSmoother, frameTime, cameraTime, PREDICTION.snapDistance)
+		holdCameraNearCar(own.cameraSmoother, own.smoother)
 		local display = Handling.SmootherApply(own.smoother, predicted, own.display)
 
 		-- (walls and the road are in the replay: ownWorld)
@@ -1308,15 +1363,79 @@ end
 local ourCalls = setmetatable({}, { __mode = "k" })
 local cameraFrame = -1
 
+--[[
+	The vehicle's third-person camera, ours (it was, then lost in the 11-20 rollback): it orbits
+	the middle of the car as the camera follows it (own.cameraEntry: the slower smoothing), at a
+	fixed distance: the base camera's zoom (`GetCameraDistance`, moved by the mouse wheel, which
+	is the speed limiter's) held at CAMERA_ZOOM 0.7 (the user), from the car's own render bounds
+	(they're widened while it's drawn moved). Pulled in at once by a wall behind it, back out over
+	CAMERA_REACH_RETURN (the base camera jumped in and out against walls in a crash)
+]]
+local CAMERA_ZOOM = 0.7             -- the base camera's distance setting: diagonal x (1 + this)
+local CAMERA_RISE = 0.35            -- the orbit's centre: this share of the car's height over its middle
+local CAMERA_WALL_GAP = 4           -- inches kept off a wall behind the camera
+local CAMERA_REACH_RETURN = 0.25    -- s: back out after a wall let go
+local cameraHull = Vector(CAMERA_WALL_GAP, CAMERA_WALL_GAP, CAMERA_WALL_GAP)
+local cameraResult = {}
+local cameraTrace = { mins = -cameraHull, maxs = cameraHull, mask = MASK_SOLID, filter = notCar, output = cameraResult }
+local cameraReach = { vehicle = nil, share = 1, at = 0 }
+
+local function rootOf(entity)
+	local parent = entity:GetParent()
+	while IsValid(parent) do entity, parent = parent, parent:GetParent() end
+	return entity
+end
+
+local function thirdPersonOrigin(player, angles)
+	if not IsValid(player) or player:GetViewEntity() ~= player then return nil end
+	local seat = player:GetVehicle()
+	if not IsValid(seat) or not seat.GetThirdPersonMode or not seat:GetThirdPersonMode() then return nil end
+	local car = rootOf(seat)
+	local bounds = originalBounds[car]
+	local mins, maxs
+	if bounds then mins, maxs = bounds.mins, bounds.maxs else mins, maxs = car:GetRenderBounds() end
+	local radius = (maxs - mins):Length() * (1 + CAMERA_ZOOM)
+	local centre = car:OBBCenter()
+	centre.z = centre.z + (car:OBBMaxs().z - car:OBBMins().z) * CAMERA_RISE
+	local pivot = car:LocalToWorld(centre)
+	-- (where the camera has the car: its own smoothing for your predicted car, else as drawn)
+	local entry = displaced[car]
+	if car == own.vehicle and own.cameraEntryFrame == FrameNumber() and own.cameraEntry then entry = own.cameraEntry end
+	if entry then pivot = mapPose(entry, pivot, angle_zero) end
+	cameraTrace.start, cameraTrace.endpos = pivot, pivot - angles:Forward() * radius
+	util.TraceHull(cameraTrace)
+	local share = cameraResult.StartSolid and 0 or (cameraResult.Fraction or 1)
+	local now = RealTime()
+	if cameraReach.vehicle ~= car then cameraReach.vehicle, cameraReach.share = car, share end
+	local deltaTime = clamp(now - cameraReach.at, 0, 0.1)
+	cameraReach.at = now
+	if share < cameraReach.share then
+		cameraReach.share = share
+	else
+		cameraReach.share = cameraReach.share + (share - cameraReach.share) * (1 - math.exp(-deltaTime / CAMERA_REACH_RETURN))
+	end
+	return pivot - angles:Forward() * (radius * cameraReach.share)
+end
+
 local function calcView(originalCall, gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
 	updateFrame()
 	local view = withOwnBounds(own.vehicle, originalCall, "CalcView", gamemodeTable, player, origin, angles, fov, nearZ, farZ, ...)
 	local entry = own.vehicle and displaced[own.vehicle]
-	if not entry then return view end
+	local viewAngles = (type(view) == "table" and view.angles) or angles
+	local thirdPerson = thirdPersonOrigin(player, viewAngles)
+	if not entry and not thirdPerson then return view end
 	-- a copy: some cameras hand back the same table each frame
 	local moved = {}
 	if type(view) == "table" then for key, value in pairs(view) do moved[key] = value end end
 	moved.fov, moved.znear, moved.zfar = moved.fov or fov, moved.znear or nearZ, moved.zfar or farZ
+	if thirdPerson then
+		-- (already from the car as the camera has it; the look direction is the player's own)
+		moved.origin, moved.angles, moved.drawviewer = thirdPerson, viewAngles, true
+		own.cameraShift = 0
+		cameraFrame = FrameNumber()
+		putPlacementsOn()
+		return moved
+	end
 	-- (the camera's own smoothing only from outside the car: in first person the cabin would slide
 	-- about the view)
 	local cameraEntry = entry
