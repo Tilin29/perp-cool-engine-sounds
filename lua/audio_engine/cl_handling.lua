@@ -41,7 +41,8 @@
 local AudioEngine = AUDIO_ENGINE
 local Handling = AudioEngine.Handling
 
-local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, false,
+-- (userinfo: the server runs a predicting driver's keys from its input buffer, Handling.NextCommand)
+local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, true,
 	"1 = the car you drive is shown where it will be when the server runs your keys (no input delay); 0 = as Source shows it")
 local positionConVar = CreateClientConVar("audio_engine_predict_position", "0", true, false,
 	"0 = only your car's heading runs ahead (it turns as soon as you steer, drawn where Source shows it, the same place everyone sees it); "
@@ -218,7 +219,8 @@ local function recordRow(row)
 end
 
 -- how much of the predicted rotation the server's car really turned from the previous state to
--- this one (Handling.LearnYaw: the prediction turns the car that much less)
+-- this one (Handling.LearnYaw: the prediction turns the car that much less), a share for a turn
+-- held or building and one for a turn unwinding (Source's tyres stop the car's turn sooner)
 local yawCommands, yawBody, yawState = {}, {}, {}
 local function learnYaw(previous, state)
 	if not previous or not own.spec or not own.learner or state.impact or previous.impact then return end
@@ -230,6 +232,10 @@ local function learnYaw(previous, state)
 		yawCommands[count] = buttonsOf(number) or yawCommands[count - 1] or previous.buttons or 0
 	end
 	local predicted = Handling.Predict(previous, yawCommands, count, 0, own.spec, own.learner, engine.TickInterval(), yawBody, yawState)
+	-- (a stretch partly unwinding and partly not teaches neither)
+	local unwindingSteps = yawState.unwindingSteps or 0
+	if unwindingSteps > 0 and unwindingSteps < count then return end
+	local unwinding = unwindingSteps > 0
 	local previousYaw = math.deg(math.atan2(previous.ay, previous.ax))
 	local predictedTurn = math.NormalizeAngle(math.deg(math.atan2(predicted.ay, predicted.ax)) - previousYaw)
 	-- (too little turn to measure, or turning the other way: a kerb, a bump)
@@ -237,7 +243,7 @@ local function learnYaw(previous, state)
 	local serverTurn = math.NormalizeAngle(math.deg(math.atan2(state.ay, state.ax)) - previousYaw)
 	if serverTurn * predictedTurn <= 0 then return end
 	local forwardSpeed = Handling.ForwardSpeed(previous, own.spec)
-	Handling.LearnYaw(own.learner, forwardSpeed, Handling.YawShareAt(own.learner, forwardSpeed) * serverTurn / predictedTurn)
+	Handling.LearnYaw(own.learner, forwardSpeed, Handling.YawShareAt(own.learner, forwardSpeed, unwinding) * serverTurn / predictedTurn, unwinding)
 end
 
 local function recordState(previous, state)
@@ -290,7 +296,6 @@ end, nil, "audio_engine_predict_record [seconds]: log the server's states agains
 net.Receive("audio_engine_drive", function()
 	local index = net.ReadUInt(13)
 	local state = { command = net.ReadUInt(32) }
-	state.commandFraction = net.ReadUInt(8) / 256
 	state.time = net.ReadDouble()
 	state.px, state.py, state.pz = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
 	local pitch, yaw, roll = net.ReadFloat(), net.ReadFloat(), net.ReadFloat()
@@ -323,9 +328,9 @@ end)
 local function commandsAfter(base, list)
 	local number, count = base.command, 0
 	if number ~= 0 and newestCommand > number and buttonsOf(number + 1) then
-		-- (from where the server's physics stands, Handling.CommandClock, to the command clock now)
+		-- (from the command the server's model ran last, one a tick from its input buffer, to the command clock now)
 		local tick = engine.TickInterval()
-		local span = Handling.ClientClockNow(commandClock, RealTime(), tick, newestCommand) - number - (base.commandFraction or 0)
+		local span = Handling.ClientClockNow(commandClock, RealTime(), tick, newestCommand) - number
 		span = clamp(span, 0, PREDICTION.maxCommands)
 		local whole = math.floor(span)
 		local last = base.buttons or 0

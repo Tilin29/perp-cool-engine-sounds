@@ -185,20 +185,44 @@ function Handling.TurnLimit(settings, speed)
 end
 
 --[[
-	The command the car's physics stands at, for the driver's replay (server, once a tick). Source
-	runs the user commands in a packet at once while the car's physics steps once a tick, so the
-	last command's number jumps 2 one tick and stands still the next whenever packets don't line
-	up with ticks (cl_cmdrate 30 at 66 tick: every other tick; at 22 tick with network jitter), and
-	the replay was a tick too long or too short by turns: a small correction each time, the camera
-	with it. This clock moves one command a tick, drawn to the real number, so it stands at their
-	average; it's sent with its fraction. A gap of more than CLOCK_SNAP commands (a lag spike, a
-	new driver) is taken at once
+	The model's input buffer (server, once a tick, for a driver whose client predicts, on a car the
+	model runs on): the user
+	command whose keys the model runs this tick. Source runs a packet's commands as it arrives, the
+	car's physics steps once a tick, and the model used to take the newest command's keys: whenever
+	packets didn't line up with ticks (cl_cmdrate 30 at 66 tick; at 22 tick any network jitter near
+	a tick's edge) one tick ran no new command and the next skipped one. The driver's replay can't
+	know which ticks those will be, so every key change could land a tick early or late: at 22 tick
+	the drawn car turned on ~2.5 deg past the server's after a turn and turned back (the user: "it's
+	done turning, then it snaps into the server's"), and in held turns the rotation jittered.
+	So the model takes them one a tick, in order, with one waiting (as Rocket League's server buffers
+	inputs): a command up to a tick late is still there in time. Nothing new: the last again (the
+	buffer refills a command); one spare all of BUFFER_TRIM seconds: one dropped, a tick of lag less;
+	more than BUFFER_RESET behind, back of it (a lag spike, a new driver).
+	The number goes to the driver: their replay starts after it, one command a tick (test_prediction
+	at 22 tick, 150 ms: the turn-back after a release 2.5 -> 0.9 deg). It costs one tick of lag on the
+	server's car (the model's turn; Source's throttle, brakes and wheels take the newest command)
 ]]
-local CLOCK_PULL, CLOCK_SNAP = 0.1, 4
-function Handling.CommandClock(clock, number)
-	if not clock or abs(number - clock) > CLOCK_SNAP then return number end
-	clock = clock + 1
-	return clock + (number - clock) * CLOCK_PULL
+local BUFFER_TRIM, BUFFER_RESET = 1, 8
+function Handling.NewInputBuffer() return { command = nil, fewest = math.huge, ticks = 0 } end
+
+-- the command to run this tick, given the newest one the server has had (nil: none yet)
+function Handling.NextCommand(buffer, newest, tickInterval)
+	if not newest then return buffer.command end
+	local command = buffer.command
+	if not command or command > newest or newest - command > BUFFER_RESET then
+		command = newest - 1
+		buffer.fewest, buffer.ticks = math.huge, 0
+	elseif newest > command then
+		command = command + 1
+	end
+	buffer.fewest = min(buffer.fewest, newest - command)
+	buffer.ticks = buffer.ticks + 1
+	if buffer.ticks * tickInterval >= BUFFER_TRIM then
+		if buffer.fewest >= 2 then command = command + 1 end
+		buffer.fewest, buffer.ticks = math.huge, 0
+	end
+	buffer.command = command
+	return command
 end
 
 --[[
@@ -270,6 +294,25 @@ local function noseOf(body, spec)
 end
 Handling.NoseOf = noseOf
 
+-- whether a turn held at `eased` (deg/s) is on its way back towards none, `target` being the one
+-- asked: letting go of the key, or swapping to the other one (until the car turns that way)
+local function unwindingOf(eased, target)
+	local gap = target - eased
+	return gap * eased < 0 and abs(gap) > 0.5 and abs(eased) > 0.5
+end
+
+-- the rotation the steering asks of a body (deg/s): Control's target on grip, before it's eased
+function Handling.AskedYawRate(body, steer, spec)
+	local settings = spec.settings
+	local nx, ny, nz, rx, ry, rz = noseOf(body, spec)
+	local forwardSpeed = body.vx * nx + body.vy * ny + body.vz * nz
+	local sideSpeed = body.vx * rx + body.vy * ry + body.vz * rz
+	local speed = sqrt(forwardSpeed * forwardSpeed + sideSpeed * sideSpeed) * INCH
+	local kinematic = DEG * forwardSpeed * INCH * tan(Handling.Lock(settings, speed) * RAD) / spec.wheelbase * steer
+	local turnLimit = Handling.TurnLimit(settings, speed)
+	return clamp(kinematic, -turnLimit, turnLimit)
+end
+
 --[[
 	One tick of the model: moves the steering (state.steer) and the drift flag, and returns the
 	change to the yaw rate (deg/s, about the car's up), to the sideways speed (inches/s along the
@@ -293,7 +336,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	local fade = clamp((speed - settings.minSpeed) / settings.fadeSpeed, 0, 1)
 	if share <= 0 or fade <= 0 then
 		if fade <= 0 then state.drift = false end
-		state.yawTarget, state.yawSet, state.blockedFor = nil, nil, nil
+		state.yawTarget, state.yawSet, state.blockedFor, state.unwinding = nil, nil, nil, nil
 		return 0, 0, 0, 0
 	end
 	share = share * fade
@@ -334,7 +377,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	local yawChange
 	if handbrake or state.drift then
 		-- a slide: the rotation only drawn towards the target, the car's own momentum does the rest
-		state.yawTarget = nil
+		state.yawTarget, state.unwinding = nil, nil
 		yawChange = (target - body.yawRate) * min(1, follow * deltaTime) * share
 	else
 		-- on grip: the target eases in at yawFollow and the car is put on it every tick. Source's own
@@ -342,6 +385,9 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 		-- 12%), the car settled well short of the turn asked (the user: fast cars "barely turn" at
 		-- 40-70 mph once Source's front wheels no longer pulled it round)
 		local eased = state.yawTarget or body.yawRate
+		-- (unwinding: the turn held on its way back towards none; the prediction learns how much of
+		-- it the server's car really turns apart, Handling.YawShareAt)
+		state.unwinding = unwindingOf(eased, target)
 		eased = eased + (target - eased) * min(1, follow * deltaTime)
 		state.yawTarget = eased
 		-- held against something (a wall: the front corner stopped every tick, slammed round again by
@@ -569,26 +615,31 @@ Handling.ForwardSpeed = forwardSpeedOf
 	the car turned 65-89% of what the prediction drew, more of a shortfall the faster it went
 	(dev log, 2026-11-24). Drawn at the full rate, the car turned further than the server's,
 	was pulled back by every state: the user's "turn and then the vehicle snaps", drift-like
-	(the prediction's rotation is scaled by it; its yaw rate, the server's, is kept)
+	(the prediction's rotation is scaled by it; its yaw rate, the server's, is kept).
+	Learned apart while a turn unwinds (the key let go, Control's state.unwinding): the server's car
+	stops turning sooner than the model eases out (Source's tyres, and at 22 tick a key change
+	landing a tick early or late), and with one share for both the prediction turned on past the
+	server's car after every turn, then snapped back (the user; offline at 22 tick 3-4 degrees)
 ]]
 local YAW_BAND = 10        -- m/s per speed band
 local YAW_BANDS = 8
 local YAW_LEARN_RATE = 0.25
 local function yawBandOf(speed) return clamp(floor(abs(speed) / YAW_BAND) + 1, 1, YAW_BANDS) end
 
-function Handling.YawShareAt(learner, speed)
-	local shares = learner and learner.yawShares
+function Handling.YawShareAt(learner, speed, unwinding)
+	local shares = learner and (unwinding and learner.yawUnwindShares or learner.yawShares)
 	return shares and shares[yawBandOf(speed)] or 1
 end
 
 -- sample: the server's turn over a replay / the replay's own (made with the share learned then)
-function Handling.LearnYaw(learner, speed, sample)
+function Handling.LearnYaw(learner, speed, sample, unwinding)
 	if not learner then return end
-	local shares = learner.yawShares
+	local key = unwinding and "yawUnwindShares" or "yawShares"
+	local shares = learner[key]
 	if not shares then
 		shares = {}
 		for band = 1, YAW_BANDS do shares[band] = 1 end
-		learner.yawShares = shares
+		learner[key] = shares
 	end
 	local band = yawBandOf(speed)
 	shares[band] = clamp(shares[band] + (clamp(sample, 0.4, 1.2) - shares[band]) * YAW_LEARN_RATE, 0.4, 1.2)
@@ -682,8 +733,10 @@ local function step(body, state, buttons, spec, learner, base, deltaTime, world)
 	local mode = Handling.DriveMode(buttons, forwardSpeed, base.driving, base.limiter)
 	local fromX, fromY, fromZ = body.px, body.py, body.pz
 	local fromNoseX, fromNoseY, fromNoseZ = noseOf(body, spec)
+	-- (the rotation this step is the one the last step's Control set: its phase's share)
+	if state.unwinding then state.unwindingSteps = (state.unwindingSteps or 0) + 1 end
 	Handling.Integrate(body, spec, Handling.LearnedAcceleration(learner, mode, forwardSpeed), deltaTime, STOPPING[mode],
-		Handling.YawShareAt(learner, forwardSpeed))
+		Handling.YawShareAt(learner, forwardSpeed, state.unwinding))
 	if world then world.move(body, fromX, fromY, fromZ, deltaTime, fromNoseX, fromNoseY, fromNoseZ) end
 	local yawChange, sideChange, _, forwardChange = Handling.Control(body, state, buttons, spec, deltaTime)
 	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
@@ -701,6 +754,9 @@ function Handling.Predict(base, commands, count, fraction, spec, learner, deltaT
 	if world and world.begin then world.begin(body) end
 	local state = outState or {}
 	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
+	-- (the turn unwinding where the server's state stands: the one it holds against the one asked)
+	state.unwinding = base.yawTarget ~= nil and not base.drift and unwindingOf(base.yawTarget, Handling.AskedYawRate(base, base.steer or 0, spec))
+	state.unwindingSteps = 0
 	-- (no walls in the prediction: never obstructed; the server's state carries the result)
 	state.yawSet, state.blockedFor = nil, nil
 	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime, world) end
