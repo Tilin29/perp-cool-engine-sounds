@@ -135,6 +135,15 @@ decided, for everyone. They show up one ping late, blended in. Offline (`dev/bak
 ping with jitter and lost packets), the car on screen is about 0.2 m from where the server will have it, against
 about 6 m for plain Source. A steering key shows about 250 ms sooner.
 
+By default only the heading is shown ahead (`audio_engine_predict_position 0`): your car is drawn where Source
+has it, the same place every other player sees it, and turned about its rear axle to the heading the prediction
+gives, so it answers the steering at once while its path follows one delay later. Other cars are left where
+Source shows them. Drawn the whole car ahead (`1`), every client saw a different street: your car a lead ahead of
+where the others see it, and the cars around it guessed over the same lead. Offline at 150 ms ping, a steering
+key shows in about 100 ms instead of about 340 ms, and the heading on screen is 0.3 degrees on average from the
+one the server will give the car. In a turn the nose points ahead of the path by the lead (a few degrees,
+up to ~25 in hard turns at high ping): `audio_engine_predict_amount` shows less of it.
+
 Prediction is off in single player and for a listen server's host, where there's no delay to hide. To try it,
 join a server and use `net_fakelag 150`.
 
@@ -165,7 +174,9 @@ join a server and use `net_fakelag 150`.
 | `audio_engine_cruise` | server | 1 | speed limiter on registered cars (middle mouse switches it, the mouse wheel sets the limit) |
 | `audio_engine_drivemodel` | shared | 1 | the handling model on registered cars (rotation follows the steering, grip limit, handbrake drifts); 0 = Source's own tyres alone |
 | `audio_engine_predict` | client | 1 | your own car is shown where it will be when the server runs your keys (no input delay) |
-| `audio_engine_predict_others` | client | 1 | while you drive with prediction, other moving cars are shown where they are now too |
+| `audio_engine_predict_position` | client | 0 | 0 = only your car's heading runs ahead (drawn where Source has it, the same place everyone sees it); 1 = the whole car, and the cars around it with it |
+| `audio_engine_predict_amount` | client | 1 | how much of the prediction to show, 0–1 (the heading's lead, or the whole car's) |
+| `audio_engine_predict_others` | client | 1 | with the whole car predicted, other moving cars are shown where they are now too |
 | `audio_engine_predict_debug` | client | 0 | draw the server's car (red), Source's (yellow) and the predicted one (green) |
 | `audio_engine_editor` | shared | 0 | 1 = the in-game engine tuning menu is available (`!engine`, `audio_engine_menu`, context menu) |
 | `audio_engine_debug` | shared | 1 | the debug tools for superadmins; 0 = off (debug module only) |

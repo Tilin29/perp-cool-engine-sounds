@@ -326,7 +326,7 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
   steady part throttle, `inp.cruise`) / 2 over (throttle shut). `audio_engine_cruise`.
 - Handling (the user scrapped the old assists, sv_stability / anti-spin / traction control / lock at speed, for this): every car's motion
   is the server's alone (Source's jeep: engine, brakes, suspension, all collisions), so crashes between players agree; the driver's
-  client only draws ahead of it. The average PERP player has 150 ms ping: a key showed ~0.25 s late (half ping up, half down, cl_interp 0.1).
+  client only draws ahead of it (by default only the heading: `audio_engine_predict_position` 0). The average PERP player has 150 ms ping: a key showed ~0.25 s late (half ping up, half down, cl_interp 0.1).
   - `sh_handling.lua` (`AudioEngine.Handling`): the model, plain Lua on numbers (no Vector/Angle: no allocations, and it runs offline).
     Bodies { px.. position, vx.. velocity (in/s), ax.. model x axis, bx.. y (left), cx.. z (up), yawRate (deg/s, left +), groundShare,
     controlShare }. `Control` per tick: keyboard steering ramps (`steerRate` 7 / `steerReturn` 8 / `steerReverse` 9 per s; were 4.5 / 6), the yaw rate
@@ -404,7 +404,23 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     under the model's lockSlow 32 (1970 Challenger 26, Carrera GT 28, ...) steer a few degrees under the model at parking speeds. `AudioEngine.RebaseHandling(veh[, params])` rebuilds `vehicle.audioBase` from `vehicle.audioScriptParams`, refreshes NW2
     `audio_vmax`/`audio_pwr` (`AudioEngine.RefreshCarStats`, sv_engine) and re-applies performance. `audio_engine_accel_log`, `audio_engine_handling_info`.
   - `cl_handling.lua`: the driver's prediction (`audio_engine_predict` 1; off in single player / for a listen host; `audio_engine_predict_amount`
-    0..1, default 1, a tester's ask: how far ahead it draws your car, a blend from Source's pose, the other cars' lead scaled with it). Client `StartCommand`
+    0..1, default 1, a tester's ask: how far ahead it draws your car, a blend from Source's pose, the other cars' lead scaled with it).
+    Default: heading only (`audio_engine_predict_position` 0, client, archived; the user, of the whole car drawn ahead: cars "lagging behind
+    a lot", the clients "completely desynced from one another" (by design every client saw a different street: 0.25 s at 30 m/s is 7.5 m),
+    wonky, little feedback; their idea: predict the turning, not the acceleration). The car is drawn where Source shows it (position,
+    pitch, roll: Source's, the same place everyone sees, bumps and crashes as they happen) and turned about its rear axle (`spec.pivotX/Y/Z`,
+    the rear wheels' middle, `AudioEngine.CarGeometry().rearAxle`) by `Handling.HeadingLeadFrame`: the heading of the whole-car display
+    (predicted + smoother, all of the below) minus Source's (`Handling.YawBetween`), x a share easing to `Handling.Authority` of the newest
+    state (`Handling.HEADING_LEAD`: shareRise / shareFall 0.3 s; impactFall 0.08 s on the impact flag or past `snapAngle` 90; none
+    `staleTime` 0.3 s after the last state), x the amount, as it is up to `kneeAngle` 20 deg, then easing towards `maxAngle` 30 (the
+    model turns up to ~75 deg/s: 0.25 s of lead is ~19 deg; a tanh cap at 25 cut 20 to 16.6 and the heading trailed 5 deg in hard turns).
+    No other cars carried on (othersShare eases out) and no carStop in it; the camera entry keeps only the camera smoother's turn (x share
+    x amount), no position. `audio_engine_predict_position 1` = the whole car as below, unchanged. A new state's correction is worked out
+    from the state drawn last frame (`own.shownBase`; it was the state before the newest) before that state's learning (`own.learning`:
+    learnYaw, learnFrom, then learnClearance, run in updateFrame after the earlier replay; at once while the prediction is off): learnt
+    on arrival, every change of the learning (acceleration, turn share, clearance) moved the drawn car in one frame, unsmoothed
+    (test_prediction 250 ms: 2-4 deg in a handbrake turn, the whole car over 6 in, `OLDLEARN=1` for the old way; at 150 ms the camera's
+    worst turn from corrections 83 -> 29 deg/s). The readout and `audio_engine_predict_stats` show the mode and the heading lead. Client `StartCommand`
     keeps each command's buttons by number (skip number 0, it happens); each frame, from the newest state, `Predict` through the commands
     after its number (at most `maxCommands` 32) + the fraction of the next; without matching numbers, one ping of the keys held. A new state's
     jump goes into the smoother (`smoothTime` 0.1 s, 0.04 during an impact, snap over 250 in). `clearShare`: a hull trace from the server's car
@@ -482,7 +498,15 @@ Keep the synth the single source of every sound (no recordings). Porting the sou
     the things to check first. Own car's engine sound stays at Source's position (a few metres behind the camera at speed).
   - `dev/baker/test_prediction.js [ping] [commands a packet]` (2 = cl_cmdrate 30; `NOCLOCK=1`: the raw command number): a "Source" server the client doesn't know (own engine, brakes, tyres, lock, bumps), 150 ms with
     jitter and 3% loss, 144 fps: predicted ~0.2 m off where the server will be vs ~6 m plain, steering shows ~250 ms sooner, corrections
-    under 7 cm a frame, an unpredicted crash back within 0.5 m ~80 ms after its state arrives.
+    under 7 cm a frame, an unpredicted crash back within 0.5 m ~80 ms after its state arrives. It also runs the heading-only mode on the
+    same drive (`Handling.HeadingLeadFrame` on plain Source's pose): at 150 ms the heading 0.3 deg off the server's at the newest key
+    (plain 5.8), a key showing in 98 ms (plain 341), held / let go worst 1.3 / 1.1 deg, the lead mean ~5 deg, 95% ~24 (hard turns,
+    the handbrake), changing at most ~130 deg/s, the car moved under 0.7 m by the turn about its rear axle, the lead gone at once after
+    the crash. Fails on its own checks at 40-350 ms, 22 tick, 50 fps (the whole car's own checks still fail at 350 ms, 22 tick,
+    `OLDCLOCK`, `BOUNCE=3`, as before). `dev/baker/test_client_prediction.js`: cl_handling.lua itself in a mock of GMod with Source's
+    angle maths (AngleVectors, VectorAngles, LocalToWorld / WorldToLocal), a flat road, no walls: A turns the car shown left about its
+    rear axle, D right, the first- and third-person cameras and the lightbar with it, DisplayPose agrees, other cars not moved,
+    overrides off and the sound's position back after each frame; `audio_engine_predict_position 1` still draws the car ahead.
   - Speed limiter (`sv_cruise`) still trims horsepower through `ApplyPerformance`, nothing else does now.
 - The server also has its own `sl65amg_cop.txt` (fixed copy given to the user separately).
 
@@ -718,7 +742,7 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   `node bake.js --dry` renders everything and writes nothing, printing each engine's band levels as played (`bank.levelReport`);
   `--out <dir> --only 3,7` writes those engines' WAVs and a manifest for just them to <dir> (dev/drive_demo plays them with
   `AE_SOUND=<dir>`, `AE_OUT` for its output: compare against recordings without touching the shipped bake).
-  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling (PERP physics on the test script) and the handling model with a fake vehicle. `test_prediction.js` checks the driving prediction. `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
+  `analyze_wav.js <wav|folder>` prints loudness and pitch per band. `test_handling.js` checks sv_handling (PERP physics on the test script) and the handling model with a fake vehicle. `test_prediction.js` checks the driving prediction (both modes), `test_client_prediction.js` cl_handling.lua in a GMod mock. `test_debug.js` checks the gearing/rev core and the debug module's shared code. `check_syntax.js` compiles all Lua; `test_integration.js <PERP dev pack dir>` checks muting and baked banks.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - Offline harnesses run under LuaJIT (`luajit file.lua` from `dev/`). Fix the hard-coded paths at the top first: they point at /home/claude/....
   - `gmod_sim5.lua`: drive mix

@@ -25,7 +25,16 @@
 	server's alone, so everyone agrees on them. Only what's drawn (and your camera) runs ahead.
 	Off in single player and for a listen server's host (no delay to hide).
 
-	Client convars: audio_engine_predict (1), audio_engine_predict_others (1),
+	By default only the heading runs ahead (audio_engine_predict_position 0): the car is drawn
+	where Source shows it, the same place every other player sees it, with Source's own bumps,
+	slides and crashes, and turned about its rear axle to the heading the prediction above gives
+	(Handling.HeadingLeadFrame); the other cars are left where Source shows them (5. is off).
+	Drawn the whole car ahead (1, the steps above as they are), every client saw a different
+	street (the user: cars "lagging behind a lot", the clients "completely desynced"; their idea:
+	predict the turning, not the acceleration).
+
+	Client convars: audio_engine_predict (1), audio_engine_predict_position (0),
+	audio_engine_predict_amount (1), audio_engine_predict_others (1, whole-car mode),
 	audio_engine_predict_debug (0: boxes for the server's car, Source's and the predicted one).
 	audio_engine_predict_stats prints how it's doing.
 ]]
@@ -34,12 +43,16 @@ local Handling = AudioEngine.Handling
 
 local predictConVar = CreateClientConVar("audio_engine_predict", "1", true, false,
 	"1 = the car you drive is shown where it will be when the server runs your keys (no input delay); 0 = as Source shows it")
+local positionConVar = CreateClientConVar("audio_engine_predict_position", "0", true, false,
+	"0 = only your car's heading runs ahead (it turns as soon as you steer, drawn where Source shows it, the same place everyone sees it); "
+		.. "1 = the whole car is drawn where the server will have it, and the cars around it carried on over the same lead", 0, 1)
 -- (a tester asked to dial in how much of it they get)
 local amountConVar = CreateClientConVar("audio_engine_predict_amount", "1", true, false,
-	"How far ahead the prediction draws your car (and the other cars with it): 1 = where the server will have it (no input delay), "
-		.. "0.5 = half way, 0 = where Source shows it", 0, 1)
+	"How much of the prediction to show: 1 = all (the heading, or with audio_engine_predict_position 1 the whole car, where the server "
+		.. "will have it: no input delay), 0.5 = half way, 0 = as Source shows it", 0, 1)
 local othersConVar = CreateClientConVar("audio_engine_predict_others", "1", true, false,
-	"1 = while you drive with prediction, other moving cars are shown where they are now too, so close driving and crashes line up")
+	"1 = while you drive with the whole car predicted (audio_engine_predict_position 1), other moving cars are shown where they are now too, "
+		.. "so close driving and crashes line up")
 local soundConVar = CreateClientConVar("audio_engine_predict_sound", "1", true, false,
 	"1 = your car's sounds come from where it's drawn (its position is moved there for the sound update after the frame); 0 = from where Source has it")
 local debugConVar = CreateClientConVar("audio_engine_predict_debug", "0", false, false,
@@ -118,7 +131,7 @@ end
 ---------------------------------------------------------------------------
 local own = {
 	smoother = Handling.NewSmoother(), commands = {}, earlierCommands = {},
-	predicted = {}, earlier = {}, display = {}, start = {}, state = {}, earlierState = {},
+	predicted = {}, earlier = {}, display = {}, start = {}, source = {}, state = {}, earlierState = {},
 	received = {}, lead = nil, nextMatch = 0, stats = { states = 0, matched = 0, fallback = 0, corrections = 0, correctionSum = 0, largest = 0, clamped = 0 },
 }
 local learners = setmetatable({}, { __mode = "k" })
@@ -158,6 +171,8 @@ local function resetOwn(vehicle)
 	own.cameraSmoother = Handling.NewSmoother()
 	own.cameraImpactAt, own.cameraImpactShare = nil, 0
 	own.received = {}
+	own.heading, own.receivedAt = Handling.NewHeadingLead(), nil
+	own.learning, own.shownBase = {}, nil
 end
 
 -- what the server's states show of how the car accelerates along its nose
@@ -295,9 +310,9 @@ net.Receive("audio_engine_drive", function()
 	-- (unreliable: an older one can arrive after a newer one)
 	if base and state.time <= base.time then return end
 	recordState(base, state)
-	learnYaw(base, state)
-	learnFrom(base, state)
-	own.previousBase, own.base, own.fresh = base, state, true
+	-- (learnt from in the next frame, once the correction is worked out: updateFrame)
+	own.learning[#own.learning + 1] = { previous = base, state = state }
+	own.previousBase, own.base, own.fresh, own.receivedAt = base, state, true, RealTime()
 	own.stats.states = own.stats.states + 1
 	local received = own.received
 	received[#received + 1] = { time = state.time, x = state.px, y = state.py, z = state.pz }
@@ -1232,7 +1247,9 @@ local function updateFrame()
 	if vehicle and own.vehicle ~= vehicle then resetOwn(vehicle) end
 	local base = vehicle and own.base
 	local running = base ~= nil and own.spec ~= nil
-	othersShare = clamp(othersShare + ((running and othersConVar:GetBool()) and 1 or -1) * frameTime / PREDICTION.easeTime, 0, 1)
+	-- (heading only: your car isn't drawn ahead, so neither are the others)
+	local wholeCar = positionConVar:GetBool()
+	othersShare = clamp(othersShare + ((running and wholeCar and othersConVar:GetBool()) and 1 or -1) * frameTime / PREDICTION.easeTime, 0, 1)
 
 	-- the other cars first: your car stops at them as they're drawn (carStop)
 	if othersShare > 0 and own.lead then
@@ -1242,21 +1259,35 @@ local function updateFrame()
 
 	if running then
 		local spec, learner, deltaTime = own.spec, own.learner, engine.TickInterval()
-		local count, fraction, matched, fractionButtons = commandsAfter(base, own.commands)
 		local stats = own.stats
-		if matched then stats.matched = stats.matched + 1 else stats.fallback = stats.fallback + 1 end
 		worldSpec, worldWallSize = spec, wallSizeOf(vehicle, spec)
-		if own.fresh then learnClearance(spec, base) end
+		-- a new state: where the state drawn last frame puts the car for this same moment, worked out
+		-- before the new states' learning (acceleration, turn share, clearance) changes the replay. The
+		-- difference is the correction. Worked out after it (and from the state before the newest,
+		-- not the one drawn), each change of the learning moved the drawn car in one frame (offline at
+		-- 250 ms ping: 2-4 degrees in a handbrake turn, the whole car over 6 inches)
+		local earlier
+		if own.fresh and own.shown and own.shownBase and own.shownBase ~= base then
+			local earlierCount, earlierFraction, _, earlierButtons = commandsAfter(own.shownBase, own.earlierCommands)
+			earlier = Handling.Predict(own.shownBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime, own.earlier, own.earlierState, earlierButtons, ownWorld)
+		end
+		if own.fresh then
+			for _, pair in ipairs(own.learning) do
+				learnYaw(pair.previous, pair.state)
+				learnFrom(pair.previous, pair.state)
+			end
+			table.Empty(own.learning)
+			learnClearance(spec, base)
+		end
+		local count, fraction, matched, fractionButtons = commandsAfter(base, own.commands)
+		if matched then stats.matched = stats.matched + 1 else stats.fallback = stats.fallback + 1 end
 		local predicted = Handling.Predict(base, own.commands, count, fraction, spec, learner, deltaTime, own.predicted, own.state, fractionButtons, ownWorld)
 		local hitWall = replayHitWall
 		own.count, own.fraction = count, fraction
 
 		if own.fresh then
 			own.fresh = false
-			if own.shown and own.previousBase then
-				-- where the earlier state put the car for this same moment: the difference is the correction
-				local earlierCount, earlierFraction, _, earlierButtons = commandsAfter(own.previousBase, own.earlierCommands)
-				local earlier = Handling.Predict(own.previousBase, own.earlierCommands, earlierCount, earlierFraction, spec, learner, deltaTime, own.earlier, own.earlierState, earlierButtons, ownWorld)
+			if earlier then
 				local before = Handling.SmootherSize(own.smoother)
 				Handling.SmootherAbsorb(own.smoother, earlier, predicted)
 				Handling.SmootherAbsorb(own.cameraSmoother, earlier, predicted)
@@ -1268,7 +1299,7 @@ local function updateFrame()
 				Handling.SmootherAbsorb(own.cameraSmoother, own.start, predicted)
 			end
 		end
-		own.shown = true
+		own.shown, own.shownBase = true, base
 		Handling.SmootherDecay(own.smoother, frameTime, base.impact and PREDICTION.impactSmoothTime or PREDICTION.smoothTime, PREDICTION.snapDistance)
 		if hitWall or base.impact then own.cameraImpactAt = realNow end
 		local sinceImpact = own.cameraImpactAt and realNow - own.cameraImpactAt or math.huge
@@ -1289,24 +1320,37 @@ local function updateFrame()
 		local basePosition = Vector(base.px, base.py, base.pz)
 		local toPosition = Vector(display.px, display.py, display.pz)
 		local displayAngles = Handling.AnglesOf(display)
-		-- not through other cars (as they're drawn: moved over the lead, or parked). The share of
-		-- the way it's let go closes quickly at a stop and eases back up after, instead of jumping
-		-- frame to frame (it shook against cars)
-		local baseAngles = Handling.AnglesOf(base)
-		local _, _, stoppedByCar, carShare = carStop(vehicle, spec, basePosition, baseAngles, toPosition, displayAngles, realNow)
-		local wanted = stoppedByCar and carShare or 1
-		local current = own.carShare or 1
-		own.carShare = current + (wanted - current) * math.min(1, frameTime / (wanted < current and CAR_STOP_CLOSE or CAR_STOP_OPEN))
-		if own.carShare < 0.999 then
-			toPosition = LerpVector(own.carShare, basePosition, toPosition)
-			displayAngles = LerpAngle(own.carShare, baseAngles, displayAngles)
-		end
-		if stoppedByCar then stats.carStops = (stats.carStops or 0) + 1 end
-		-- (audio_engine_predict_amount: part of the way from where Source shows the car)
 		local amount = amountConVar:GetFloat()
-		if amount < 1 then
-			toPosition = LerpVector(amount, vehicle:GetPos(), toPosition)
-			displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
+		if not wholeCar then
+			-- heading only: Source's car turned about its rear axle to the prediction's heading
+			local source = bodyFromEntity(vehicle, own.source)
+			local fresh = own.receivedAt ~= nil and realNow - own.receivedAt < Handling.HEADING_LEAD.staleTime
+			local offset = Handling.HeadingLeadFrame(own.heading, source, display, base, spec, frameTime, amount, fresh)
+			local pivotX, pivotY, pivotZ = Handling.PointOf(source, spec.pivotX or 0, spec.pivotY or 0, spec.pivotZ or 0)
+			local turned = Handling.TurnAbout(source, offset, pivotX, pivotY, pivotZ, own.turned)
+			own.turned = turned
+			toPosition, displayAngles = Vector(turned.px, turned.py, turned.pz), Handling.AnglesOf(turned)
+			stats.headingFrames, stats.headingSum = (stats.headingFrames or 0) + 1, (stats.headingSum or 0) + math.abs(offset)
+			stats.headingLargest = math.max(stats.headingLargest or 0, math.abs(offset))
+		else
+			-- not through other cars (as they're drawn: moved over the lead, or parked). The share of
+			-- the way it's let go closes quickly at a stop and eases back up after, instead of jumping
+			-- frame to frame (it shook against cars)
+			local baseAngles = Handling.AnglesOf(base)
+			local _, _, stoppedByCar, carShare = carStop(vehicle, spec, basePosition, baseAngles, toPosition, displayAngles, realNow)
+			local wanted = stoppedByCar and carShare or 1
+			local current = own.carShare or 1
+			own.carShare = current + (wanted - current) * math.min(1, frameTime / (wanted < current and CAR_STOP_CLOSE or CAR_STOP_OPEN))
+			if own.carShare < 0.999 then
+				toPosition = LerpVector(own.carShare, basePosition, toPosition)
+				displayAngles = LerpAngle(own.carShare, baseAngles, displayAngles)
+			end
+			if stoppedByCar then stats.carStops = (stats.carStops or 0) + 1 end
+			-- (audio_engine_predict_amount: part of the way from where Source shows the car)
+			if amount < 1 then
+				toPosition = LerpVector(amount, vehicle:GetPos(), toPosition)
+				displayAngles = LerpAngle(amount, vehicle:GetAngles(), displayAngles)
+			end
 		end
 		own.displayPosition, own.displayAngles = toPosition, displayAngles
 		-- (the wheels: the predicted steering x how far Source turns them at this speed, turning at
@@ -1327,12 +1371,14 @@ local function updateFrame()
 		own.velocityAt = realNow
 		displace(vehicle, toPosition, own.displayAngles, frame, realNow)
 		-- the camera's pose: the car's, moved by what its slower smoothing still holds over the car's
+		-- (heading only: just its turn, as much of it as the lead shows; the car isn't moved)
 		local car, camera = own.smoother, own.cameraSmoother
 		local entry = displaced[vehicle]
+		local cameraTurn = (camera.rz - car.rz) * DEG * (wholeCar and 1 or own.heading.share * amount)
 		own.cameraEntry = {
 			fromPosition = entry.fromPosition, fromAngles = entry.fromAngles,
-			toPosition = entry.toPosition + Vector(camera.x - car.x, camera.y - car.y, camera.z - car.z),
-			toAngles = Angle(entry.toAngles.p, entry.toAngles.y + (camera.rz - car.rz) * DEG, entry.toAngles.r),
+			toPosition = wholeCar and entry.toPosition + Vector(camera.x - car.x, camera.y - car.y, camera.z - car.z) or entry.toPosition,
+			toAngles = Angle(entry.toAngles.p, entry.toAngles.y + cameraTurn, entry.toAngles.r),
 		}
 		own.cameraEntryFrame = frame
 		if record then recordFrame(realNow, predicted, display, vehicle, own.count > 0 and own.commands[own.count] or base.buttons) end
@@ -1341,6 +1387,14 @@ local function updateFrame()
 		own.shown = false
 		-- (the drawn wheels start again from Source's next time)
 		own.steerPose = nil
+		-- (states keep coming with the prediction off: learnt from at once)
+		if own.learning and #own.learning > 0 then
+			for _, pair in ipairs(own.learning) do
+				learnYaw(pair.previous, pair.state)
+				learnFrom(pair.previous, pair.state)
+			end
+			table.Empty(own.learning)
+		end
 		if not vehicle then own.vehicle = nil end
 	end
 
@@ -1535,7 +1589,8 @@ local function updateLive(realNow)
 	table.Empty(live.lines)
 	local vehicle = own.vehicle
 	local frames = per("matched") + per("fallback")
-	liveLine("prediction %s | states from server %.0f/s (want ~33)", predictionAllowed() and "ON" or "OFF", per("states"))
+	liveLine("prediction %s (%s) | states from server %.0f/s (want ~33)", predictionAllowed() and "ON" or "OFF",
+		positionConVar:GetBool() and "whole car" or "heading only", per("states"))
 	liveLine("frames matched %.0f%%, fallback %.0f%% | replaying %d commands + %.2f",
 		frames > 0 and per("matched") / frames * 100 or 0, frames > 0 and per("fallback") / frames * 100 or 0, own.count or 0, own.fraction or 0)
 	liveLine("lead %.0f ms | ping %d + interp %.0f = %.0f ms | server tick %.0f",
@@ -1563,6 +1618,10 @@ local function updateLive(realNow)
 		liveLine("drawn %.1f m ahead of Source's car (speed x lead = %.1f m) | turned %.1f deg from it | camera moved %.1f m",
 			ahead * 0.01905, speed * (own.lead or 0) * 0.01905, math.abs(math.NormalizeAngle(own.displayAngles.y - own.sourceYaw)),
 			(own.cameraShift or 0) * 0.01905)
+		if not positionConVar:GetBool() and own.heading then
+			liveLine("heading lead %.1f deg (the prediction %.1f deg ahead of Source's car x share %.2f x amount %.2f)",
+				own.heading.offset, own.heading.full, own.heading.share, amountConVar:GetFloat())
+		end
 	end
 end
 
@@ -1580,9 +1639,14 @@ end)
 concommand.Add("audio_engine_predict_stats", function()
 	local stats = own.stats
 	local learner = own.learner
-	print(string.format("[Audio Engine] prediction %s, car %s | states %d | frames matched %d, fallback %d | replaying %d commands + %.2f",
-		predictionAllowed() and "on" or "off", IsValid(own.vehicle) and tostring(AudioEngine.GetCarConfig(own.vehicle) and AudioEngine.GetCarConfig(own.vehicle).name) or "-",
+	print(string.format("[Audio Engine] prediction %s (%s), car %s | states %d | frames matched %d, fallback %d | replaying %d commands + %.2f",
+		predictionAllowed() and "on" or "off", positionConVar:GetBool() and "whole car" or "heading only",
+		IsValid(own.vehicle) and tostring(AudioEngine.GetCarConfig(own.vehicle) and AudioEngine.GetCarConfig(own.vehicle).name) or "-",
 		stats.states, stats.matched, stats.fallback, own.count or 0, own.fraction or 0))
+	if (stats.headingFrames or 0) > 0 then
+		print(string.format("  heading lead: mean %.1f deg, largest %.1f deg, now %.1f (share %.2f)", stats.headingSum / stats.headingFrames,
+			stats.headingLargest or 0, own.heading and own.heading.offset or 0, own.heading and own.heading.share or 0))
+	end
 	print(string.format("  corrections %d, mean %.1f in, largest %.1f in | wall stops %d, car stops %d | lead %.0f ms (ping %d, interp %.0f ms) | others %s | learned samples %d",
 		stats.corrections, stats.corrections > 0 and stats.correctionSum / stats.corrections or 0, stats.largest, stats.clamped, stats.carStops or 0,
 		(own.lead or 0) * 1000, LocalPlayer():Ping(), interpolationDelay() * 1000, othersConVar:GetBool() and "on" or "off", learner and learner.samples or 0))
