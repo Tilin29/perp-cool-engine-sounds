@@ -287,6 +287,37 @@ local function updateParkBrake(vehicle, driver)
 	applyParkBrake(vehicle, parkBrakeOf(vehicle))
 end
 
+-- what holds a car: the parking brake as this file has it, and what Source / PERP have
+concommand.Add("audio_engine_parkbrake_info", function(requester)
+	if IsValid(requester) and not requester:IsSuperAdmin() then return end
+	local function say(text)
+		if IsValid(requester) then requester:PrintMessage(HUD_PRINTCONSOLE, text) else print(text) end
+	end
+	local vehicle = IsValid(requester) and requester:GetVehicle()
+	if IsValid(requester) and not (IsValid(vehicle) and trackedVehicles[vehicle]) then
+		local entity = requester:GetEyeTrace().Entity
+		vehicle = IsValid(entity) and trackedVehicles[entity] and entity or nil
+	end
+	if not IsValid(vehicle) then say("[Audio Engine] sit in or look at a car") return end
+	local physics = vehicle:GetPhysicsObject()
+	local succeeded, params = pcall(vehicle.GetOperatingParams, vehicle)
+	local function call(name)
+		if not vehicle[name] then return "n/a" end
+		local ok, value = pcall(vehicle[name], vehicle)
+		return ok and tostring(value) or "error"
+	end
+	say(string.format("[Audio Engine] parking brake of %s (sv_engine build: coast throttle)", tostring(vehicle)))
+	say(string.format("  ours: %s  NW2 audio_parkbrake: %s  release window: %.2f s left",
+		tostring(vehicle.audioParkBrake), tostring(vehicle:GetNW2Bool("audio_parkbrake", false)),
+		math.max(0, (vehicle.audioParkReleaseUntil or 0) - CurTime())))
+	say(string.format("  driver: %s  engine audio_on: %s  drivable: %s  IsEngineStarted: %s  IsEngineEnabled: %s",
+		tostring(vehicle:GetDriver()), tostring(vehicle:GetNW2Bool("audio_on", false)), tostring(vehicle.audioDrivable),
+		call("IsEngineStarted"), call("IsEngineEnabled")))
+	say(string.format("  Source speed: %s in/s  gear: %s  physics asleep: %s  PERP IsHandBraking: %s  PERP IsTurnedOn: %s",
+		succeeded and istable(params) and tostring(params.speed) or "?", succeeded and istable(params) and tostring(params.gear) or "?",
+		IsValid(physics) and tostring(physics:IsAsleep()) or "?", call("IsHandBraking"), call("IsTurnedOn")))
+end, nil, "Print the parking brake state of the car you sit in or look at (superadmin)")
+
 hook.Add("PlayerEnteredVehicle", "audio_engine", function(player, vehicle)
 	if not isOurs(vehicle) then return end
 	trackedVehicles[vehicle] = true
