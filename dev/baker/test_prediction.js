@@ -15,7 +15,10 @@
     - how far plain Source (interpolated, cl_interp 0.1) is off, for comparison
     - how long a steering key takes to show, predicted vs plain
     - the largest jump a correction made on screen in one frame
-  and fails if the prediction isn't clearly better than plain Source.
+  and the same for the default heading-only mode (audio_engine_predict_position 0: Source's car
+  turned by Handling.HeadingLeadFrame, its position plain Source's): the heading shown, how soon a
+  key shows, the lead itself (how far the nose runs ahead of the path), its steps, the crash.
+  Fails if either isn't clearly better than plain Source.
 */
 const path = require('path')
 const fs = require('fs')
@@ -45,6 +48,8 @@ const PING = Number(process.argv[2] || 150)
   // BOUNCE: inches the car's body rides over the road in the server's states (springs; default 1)
   await L.doString(`BOUNCE = ${Number(process.env.BOUNCE ?? 1)}`)
   await L.doString(`OLDCAMERA = ${!!process.env.OLDCAMERA}`)
+  // OLDLEARN=1: the client learns from a state as it arrives and measures the correction from the state before the newest, as before
+  await L.doString(`OLDLEARN = ${!!process.env.OLDLEARN}`)
   await L.doString(`TICK = ${Number(process.env.TICK || 66)} FPS = ${Number(process.env.FPS || 144)} OLDCLOCK = ${['1','client'].includes(process.env.OLDCLOCK || '')} OLDSERVERCLOCK = ${['1','server'].includes(process.env.OLDCLOCK || '')}`)
   // SOURCE_STEER=script: Source's wheels at a script's own rates (3/s), as before sv_handling matched them
   await L.doString(`SOURCE_STEER_SCRIPT = ${process.env.SOURCE_STEER === 'script'}`)
@@ -59,7 +64,8 @@ const PING = Number(process.argv[2] || 150)
     local function random() seed = (seed * 1103515245 + 12345) % 2147483648 return seed / 2147483648 end
     local function jitter() return (random() - 0.5) * 0.02 end
 
-    local spec = { settings = H.SettingsFor("test"), wheelbase = 2.7, noseX = 0, noseY = 1, noseZ = 0 }
+    local spec = { settings = H.SettingsFor("test"), wheelbase = 2.7, noseX = 0, noseY = 1, noseZ = 0,
+      pivotX = 0, pivotY = -0.5 * 2.7 / H.INCH, pivotZ = 0 }
 
     -- the keys over time
     local F, B, Lk, R, J = 1, 2, 4, 8, 16
@@ -133,7 +139,24 @@ const PING = Number(process.argv[2] || 150)
     local toServer, toClient = {}, {}
     local truth = {}            -- server time -> pose after its tick
     local client = { learner = H.NewLearner(260, 58), smoother = H.NewSmoother(), cameraSmoother = H.NewSmoother(), history = {}, newest = 0, newestAt = 0, base = nil, previous = nil,
-      fresh = false, shown = false, commands = {}, earlierCommands = {}, predicted = {}, earlier = {}, display = {}, state = {}, earlierState = {} }
+      fresh = false, shown = false, commands = {}, earlierCommands = {}, predicted = {}, earlier = {}, display = {}, state = {}, earlierState = {},
+      heading = H.NewHeadingLead(), receivedAt = -1, sourceBody = {}, turned = {}, learning = {} }
+    local function learn(previous, state)
+      if previous and state.time - previous.time < 0.15 then
+        local before, after = H.ForwardSpeed(previous, spec), H.ForwardSpeed(state, spec)
+        H.Learn(client.learner, H.DriveMode(state.buttons, after, true, 0), (before + after) / 2, (after - before) / (state.time - previous.time) - H.SlopeAcceleration(state, spec))
+      end
+    end
+    -- a level body whose nose (model +y) points along yaw, at (x, y)
+    local function bodyAt(x, y, yaw, out)
+      local radians = math.rad(yaw)
+      out.px, out.py, out.pz = x, y, 0
+      out.bx, out.by, out.bz = math.cos(radians), math.sin(radians), 0
+      out.ax, out.ay, out.az = math.sin(radians), -math.cos(radians), 0
+      out.cx, out.cy, out.cz = 0, 0, 1
+      return out
+    end
+    local headingSamples = {}
 
     local function yawOf(b) return math.deg(math.atan(b.by, b.bx)) end   -- the nose (model +y) heading
     local function truthAt(t)
@@ -243,11 +266,9 @@ const PING = Number(process.argv[2] || 150)
           local state = message.state
           if not client.base or state.time > client.base.time then
             local previous = client.base
-            if previous and state.time - previous.time < 0.15 then
-              local before, after = H.ForwardSpeed(previous, spec), H.ForwardSpeed(state, spec)
-              H.Learn(client.learner, H.DriveMode(state.buttons, after, true, 0), (before + after) / 2, (after - before) / (state.time - previous.time) - H.SlopeAcceleration(state, spec))
-            end
-            client.previous, client.base, client.fresh = previous, state, true
+            -- (learnt from in the next frame, once its correction is worked out, as cl_handling; OLDLEARN=1: at once)
+            if OLDLEARN then learn(previous, state) else client.learning[#client.learning + 1] = { previous, state } end
+            client.previous, client.base, client.fresh, client.receivedAt = previous, state, true, clientTime
           end
         end
       end
@@ -256,18 +277,25 @@ const PING = Number(process.argv[2] || 150)
         nextFrame = nextFrame + FRAME
         local base = client.base
         if base then
+          -- (as cl_handling: the state drawn last frame's prediction for now, before the new states' learning)
+          local earlier
+          local drawn = OLDLEARN and client.previous or client.shownBase
+          if client.fresh and client.shown and drawn and drawn ~= base then
+            local c2, f2, b2 = commandsAfter(drawn, client.earlierCommands, clientTime)
+            earlier = H.Predict(drawn, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState, b2, WORLD and clientWorld or nil)
+          end
+          for _, pair in ipairs(client.learning) do learn(pair[1], pair[2]) end
+          client.learning = {}
           local count, fraction, lastButtons = commandsAfter(base, client.commands, clientTime)
           local predicted = H.Predict(base, client.commands, count, fraction, spec, client.learner, DT, client.predicted, client.state, lastButtons, WORLD and clientWorld or nil)
           if client.fresh then
             client.fresh = false
-            if client.shown and client.previous then
-              local c2, f2, b2 = commandsAfter(client.previous, client.earlierCommands, clientTime)
-              local earlier = H.Predict(client.previous, client.earlierCommands, c2, f2, spec, client.learner, DT, client.earlier, client.earlierState, b2, WORLD and clientWorld or nil)
+            if earlier then
               H.SmootherAbsorb(client.smoother, earlier, predicted)
               H.SmootherAbsorb(client.cameraSmoother, earlier, predicted)
             end
           end
-          client.shown = true
+          client.shown, client.shownBase = true, base
           -- (as cl_handling: the car's smoothing 0.1 s, the camera's 0.6 s; OLDCAMERA=1: the camera on the car)
           H.SmootherDecay(client.smoother, FRAME, base.impact and 0.04 or 0.1, 250)
           H.SmootherDecay(client.cameraSmoother, FRAME, base.impact and 0.04 or (OLDCAMERA and 0.1 or 0.6), 250)
@@ -284,6 +312,18 @@ const PING = Number(process.argv[2] || 150)
           end
           client.lastCamera = { px = camera.px, py = camera.py, yaw = yawOf(camera) }
           local display = H.SmootherApply(client.smoother, predicted, client.display)
+          -- the heading-only mode: Source's car as shown now (half a ping + the interpolation late), turned by the lead
+          local shown = truthAt(clientTime - UP - INTERP)
+          if shown then
+            local source = bodyAt(shown.px, shown.py, shown.yaw, client.sourceBody)
+            local offset = H.HeadingLeadFrame(client.heading, source, display, base, spec, FRAME, 1, clientTime - client.receivedAt < H.HEADING_LEAD.staleTime)
+            local pivotX, pivotY, pivotZ = H.PointOf(source, spec.pivotX, spec.pivotY, spec.pivotZ)
+            local turned = H.TurnAbout(source, offset, pivotX, pivotY, pivotZ, client.turned)
+            if clientTime > 1 then
+              headingSamples[#headingSamples + 1] = { t = clientTime, yaw = yawOf(turned), plain = shown.yaw, offset = offset,
+                moved = math.sqrt((turned.px - shown.px) ^ 2 + (turned.py - shown.py) ^ 2) }
+            end
+          end
           if clientTime > 1 then
             samples[#samples + 1] = { t = clientTime, px = display.px, py = display.py, pz = display.pz, yaw = yawOf(display),
               underRoad = roadAt(display.px, display.py) - display.pz }
@@ -341,11 +381,49 @@ const PING = Number(process.argv[2] || 150)
       end
     end
 
+    -- the heading-only mode, against the same reference
+    local heading = { yaw = {}, plainYaw = {}, lead = {}, step = 0, moved = 0, turnYaw = 0, releaseYaw = 0 }
+    local onset, previousSample = {}, nil
+    for _, sample in ipairs(headingSamples) do
+      local reference = truthAt(sample.t + UP)
+      if reference then
+        -- (the crash's own turn reaches the reference before the client could know it)
+        local inCrash = sample.t >= 13 - UP - 0.05 and sample.t < 15
+        if not inCrash then
+          heading.yaw[#heading.yaw + 1] = dyaw(sample.yaw, reference.yaw)
+          heading.plainYaw[#heading.plainYaw + 1] = dyaw(sample.plain, reference.yaw)
+          -- (how fast the lead itself changes, deg/s: a hard turn's own is up to ~150, a correction's jump far more)
+          if previousSample then heading.step = math.max(heading.step, math.abs(sample.offset - previousSample.offset) / (sample.t - previousSample.t)) end
+          local keysNow, keysBefore = keysAt(sample.t), keysAt(sample.t - 0.4)
+          if math.floor(keysBefore / 4) % 4 ~= 0 and math.floor(keysNow / 4) % 4 == 0 and not has(keysNow, J)
+            and not has(keysAt(sample.t - 1), J) and not has(keysAt(sample.t - 0.5), J) then
+            heading.releaseYaw = math.max(heading.releaseYaw, dyaw(sample.yaw, reference.yaw))
+          end
+          if math.floor(keysNow / 4) % 4 ~= 0 and not has(keysNow, J) and not has(keysBefore, J) then
+            heading.turnYaw = math.max(heading.turnYaw, dyaw(sample.yaw, reference.yaw))
+          end
+        end
+        heading.lead[#heading.lead + 1] = math.abs(sample.offset)
+        heading.moved = math.max(heading.moved, sample.moved)
+        if sample.t >= 4 and not onset.start then onset.start = sample.yaw end
+        if onset.start and not onset.at and dyaw(sample.yaw, onset.start) > 2 then onset.at = sample.t - 4 end
+        -- the crash: when the lead is gone once the crash has reached the client
+        if sample.t >= 13 + UP and sample.t < 15 then
+          if math.abs(sample.offset) >= 1 then heading.crashGone = nil elseif not heading.crashGone then heading.crashGone = sample.t - 13 - UP end
+        end
+        previousSample = sample
+      end
+    end
+
     local function summary(list)
       table.sort(list)
       local sum = 0 for _, v in ipairs(list) do sum = sum + v end
       return { mean = sum / #list, p95 = list[math.floor(#list * 0.95)], worst = list[#list] }
     end
+    local hy, hq, hl = summary(heading.yaw), summary(heading.plainYaw), summary(heading.lead)
+    HEADING_RESULT = string.format('%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.3f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.3f|%.1f',
+      hy.mean, hy.p95, hy.worst, hq.mean, hq.p95, hq.worst, onset.at or -1, heading.turnYaw, heading.releaseYaw,
+      hl.mean, hl.p95, hl.worst, heading.step, heading.crashGone or -1, heading.moved * H.INCH * 100)
     local p, q, py, qy = summary(stats.predicted), summary(stats.plain), summary(stats.predictedYaw), summary(stats.plainYaw)
     __result(string.format('%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.3f|%.3f|%.1f|%d',
       p.mean, p.p95, p.worst, q.mean, q.p95, q.worst, py.mean, py.p95, py.worst, qy.mean, qy.p95, qy.worst,
@@ -354,6 +432,7 @@ const PING = Number(process.argv[2] || 150)
       .. string.format('|%.1f|%.1f|%.1f', stats.heightOff or 0, (stats.heightSum or 0) / math.max(1, stats.heightCount or 0), stats.intoRoad or 0)
       .. (function() local m, r = summary(stats.cameraMove), summary(stats.cameraTurn) return string.format('|%.3f|%.3f|%.2f|%.2f', m.p95, m.worst, r.p95, r.worst) end)())`)
   const [pm, p95, pw, qm, q95, qw, pym, py95, pyw, qym, qy95, qyw, rp, rq, jump, samples, crashOff, crashWorst, releaseYaw, turnYaw, turnYawAt, releaseYawAt, wobbleMean, wobble95, heightOff, heightMean, intoRoad, cameraMove95, cameraMoveWorst, cameraTurn95, cameraTurnWorst] = result.split('|').map(Number)
+  const [hym, hy95, hyw, hqm, hq95, hqw, hOnset, hTurn, hRelease, hlm, hl95, hlw, hStep, hCrash, hMoved] = (await L.global.get('HEADING_RESULT')).split('|').map(Number)
   const m = (inch) => (inch * 0.0254).toFixed(2) + ' m'
   console.log(`ping ${PING} ms, ${process.env.TICK || 66} tick, ${process.env.FPS || 144} fps${process.env.OLDCLOCK ? ' (old clocks)' : ''}, 3% of states lost, ${samples} acceleration samples learned`)
   console.log(`  position off where the server will be:  predicted mean ${m(pm)}, 95% ${m(p95)}, worst ${m(pw)}`)
@@ -367,7 +446,19 @@ const PING = Number(process.argv[2] || 150)
   console.log(`  frame-to-frame speed unevenness over 20 m/s: mean ${(wobbleMean * 100).toFixed(1)}%, 95% ${(wobble95 * 100).toFixed(1)}%`)
   console.log(`  largest correction jump in one frame:   ${m(jump)} (outside the crash)`)
   console.log(`  a crash at 13 s nobody predicted:       up to ${m(crashWorst)} off, back within 0.5 m after ${(crashOff * 1000).toFixed(0)} ms`)
+  console.log(`heading only (audio_engine_predict_position 0, the default): the car where plain Source has it, turned by the lead`)
+  console.log(`  heading off:                            shown mean ${hym.toFixed(1)} deg, 95% ${hy95.toFixed(1)}, worst ${hyw.toFixed(1)}`)
+  console.log(`                                          plain Source mean ${hqm.toFixed(1)} deg, 95% ${hq95.toFixed(1)}, worst ${hqw.toFixed(1)}`)
+  console.log(`  steering key to 2 deg turned on screen: shown ${(hOnset * 1000).toFixed(0)} ms, plain Source ${(rq * 1000).toFixed(0)} ms`)
+  console.log(`  heading off, steering held / 0.4 s after letting go: worst ${hTurn.toFixed(1)} / ${hRelease.toFixed(1)} deg`)
+  console.log(`  the lead (nose ahead of the path):      mean ${hlm.toFixed(1)} deg, 95% ${hl95.toFixed(1)}, largest ${hlw.toFixed(1)}; changing at most ${hStep.toFixed(0)} deg/s`)
+  console.log(`  turning about the rear axle moved the car up to ${(hMoved / 100).toFixed(2)} m (its position is otherwise Source's)`)
+  console.log(`  the crash: the lead gone ${(hCrash * 1000).toFixed(0)} ms after it reaches the client`)
   const failures = []
+  if (!(hym < hqm * 0.5)) failures.push('heading only: the heading shown is not clearly closer than plain Source')
+  if (!(hOnset >= 0 && rq > 0 && hOnset < rq - PING / 1000 * 0.6)) failures.push('heading only: steering does not show clearly sooner')
+  if (!(hStep < 250)) failures.push('heading only: the lead jumped (changed faster than 250 deg/s)')
+  if (!(hCrash >= 0 && hCrash < 0.25)) failures.push('heading only: the lead did not go quickly after the crash')
   if (!(pm < qm * 0.35)) failures.push('the prediction is not clearly closer than plain Source')
   if (!(rp >= 0 && rq > 0 && rp < rq - PING / 1000 * 0.6)) failures.push('steering does not show clearly sooner')
   if (!(jump < 6)) failures.push('a correction jumped more than 6 inches in one frame')

@@ -17,10 +17,12 @@
 	                            The driver gets the car's state every other tick, tagged with the
 	                            last user command the server ran.
 	  client (cl_handling.lua)  runs the same model from that state through every command it
-	                            sent since (Source's own player prediction, for the car), shows
-	                            the car there, and blends in each correction. Crashes, kerbs and
-	                            other cars are still the server's: they show up one ping late,
-	                            blended, never as a different outcome.
+	                            sent since (Source's own player prediction, for the car), and by
+	                            default turns the car where Source shows it to the heading that
+	                            gives (the heading lead, below); audio_engine_predict_position 1
+	                            draws the whole car there instead. Crashes, kerbs and other cars
+	                            are still the server's: they show up one ping late, blended,
+	                            never as a different outcome.
 
 	Everything below is plain Lua on numbers (no Vector/Angle), so the server can run it for 40
 	cars a tick without allocating, the client can replay ~25 commands a frame, and dev/baker/
@@ -764,10 +766,113 @@ function Handling.SmootherSize(smoother)
 end
 
 ---------------------------------------------------------------------------
--- the car's shape (Garry's Mod; both realms): nose direction and wheelbase from the wheel
--- attachments, cached per model
+-- the heading lead (client, audio_engine_predict_position 0, the default): your car is drawn
+-- where Source shows it, the same place every other player sees it, and only turned about its
+-- rear axle by how far the prediction's heading is ahead of Source's. Drawn the whole car ahead
+-- (audio_engine_predict_position 1), every client saw a different street: your car a lead
+-- (~7 m at 30 m/s) ahead of where others see it, the cars around it carried on over the same
+-- lead and wrong whenever they braked or turned (the user: cars "lagging behind a lot", the
+-- clients "completely desynced", wonky, little feedback; their idea: predict the turning, not
+-- the acceleration). The lead fades out where the model has no hold of the rotation (crawling,
+-- in the air, spiked, model off), goes quickly after a crash, and is capped softly
+---------------------------------------------------------------------------
+Handling.HEADING_LEAD = {
+	shareRise = 0.3,     -- s: the lead comes in over this as the model takes the car (setting off, landing)...
+	shareFall = 0.3,     -- ...and goes over this as it lets go (slowing to a crawl, leaving the ground)...
+	impactFall = 0.08,   -- ...or over this after a crash: it plays out as every other player sees it
+	staleTime = 0.3,     -- s: no state from the server for this long: no lead
+	snapAngle = 90,      -- degrees: a prediction this far from Source's car is a respawn, a teleport or a spin: the lead goes (impactFall)
+	-- a lead over kneeAngle (a long ping in a hard turn: 75 deg/s x 0.25 s is 19) eases towards maxAngle
+	-- instead of growing on (the nose that far ahead of the path); under it it's shown as it is
+	kneeAngle = 20,
+	maxAngle = 30,
+}
+
+-- how much of a body's rotation the model has, 0..1 (what Control's share comes to)
+function Handling.Authority(body, spec)
+	local settings = spec.settings
+	local nx, ny, nz, rx, ry, rz = noseOf(body, spec)
+	local forwardSpeed = body.vx * nx + body.vy * ny + body.vz * nz
+	local sideSpeed = body.vx * rx + body.vy * ry + body.vz * rz
+	local speed = sqrt(forwardSpeed * forwardSpeed + sideSpeed * sideSpeed) * INCH
+	return body.controlShare * body.groundShare * clamp((speed - settings.minSpeed) / settings.fadeSpeed, 0, 1)
+end
+
+-- the signed angle (degrees, left +) from `from`'s nose to `to`'s, about `from`'s up
+function Handling.YawBetween(from, to, spec)
+	local ax, ay, az = noseOf(from, spec)
+	local bx, by, bz = noseOf(to, spec)
+	local ux, uy, uz = from.cx, from.cy, from.cz
+	-- both noses laid flat on `from`'s ground
+	local alongA, alongB = ax * ux + ay * uy + az * uz, bx * ux + by * uy + bz * uz
+	ax, ay, az = ax - ux * alongA, ay - uy * alongA, az - uz * alongA
+	bx, by, bz = bx - ux * alongB, by - uy * alongB, bz - uz * alongB
+	local cross = (ay * bz - az * by) * ux + (az * bx - ax * bz) * uy + (ax * by - ay * bx) * uz
+	return DEG * atan2(cross, ax * bx + ay * by + az * bz)
+end
+
+-- a point given in the body's own frame (Entity:LocalToWorld: x, y = left, z = up), in the world
+function Handling.PointOf(body, x, y, z)
+	return body.px + body.ax * x + body.bx * y + body.cx * z,
+		body.py + body.ay * x + body.by * y + body.cy * z,
+		body.pz + body.az * x + body.bz * y + body.cz * z
+end
+
+-- the body turned by `angle` (degrees, left +) about its up axis through the point (pivotX, pivotY, pivotZ), into out
+function Handling.TurnAbout(body, angle, pivotX, pivotY, pivotZ, out)
+	out = Handling.CopyBody(body, out)
+	local ux, uy, uz = body.cx, body.cy, body.cz
+	local radians = angle * RAD
+	out.ax, out.ay, out.az = rotate(body.ax, body.ay, body.az, ux, uy, uz, radians)
+	out.bx, out.by, out.bz = rotate(body.bx, body.by, body.bz, ux, uy, uz, radians)
+	local x, y, z = rotate(body.px - pivotX, body.py - pivotY, body.pz - pivotZ, ux, uy, uz, radians)
+	out.px, out.py, out.pz = pivotX + x, pivotY + y, pivotZ + z
+	return out
+end
+
+local function tanh(value)
+	if value > 10 then return 1 elseif value < -10 then return -1 end
+	local e = exp(2 * value)
+	return (e - 1) / (e + 1)
+end
+
+-- the lead as shown: as it is up to the knee, then easing towards the cap
+local function softCap(angle, knee, cap)
+	local size = abs(angle)
+	if size <= knee then return angle end
+	return sign(angle) * (knee + (cap - knee) * tanh((size - knee) / (cap - knee)))
+end
+
+function Handling.NewHeadingLead() return { share = 0, full = 0, offset = 0 } end
+
+--[[
+	One frame (cl_handling.lua; dev/baker/test_prediction.js runs the same). Returns the angle
+	(degrees, left +) to turn Source's car by on screen.
+	  source   Source's car as shown now (a body: its axes)
+	  shown    the prediction as the whole-car mode would draw it (predicted + its smoothing): its
+	           heading is the one shown; its position isn't used
+	  base     the newest state from the server (its authority, its impact flag)
+	  scale    how much of the lead to show (audio_engine_predict_amount)
+	  fresh    false when no state came for HEADING_LEAD.staleTime
+]]
+function Handling.HeadingLeadFrame(lead, source, shown, base, spec, frameTime, scale, fresh)
+	local settings = Handling.HEADING_LEAD
+	local full = Handling.YawBetween(source, shown, spec)
+	local snapped = abs(full) > settings.snapAngle
+	local target = (fresh and not snapped and not base.impact) and Handling.Authority(base, spec) or 0
+	local fadeTime = target >= lead.share and settings.shareRise or ((base.impact or snapped) and settings.impactFall or settings.shareFall)
+	lead.share = approach(lead.share, target, frameTime / fadeTime)
+	lead.full, lead.offset = full, softCap(full * lead.share * scale, settings.kneeAngle, settings.maxAngle)
+	return lead.offset
+end
+
+---------------------------------------------------------------------------
+-- the car's shape (Garry's Mod; both realms): nose direction, wheelbase and the middle of the
+-- rear axle (model space; the heading lead turns the car about it) from the wheel attachments,
+-- cached per model
 ---------------------------------------------------------------------------
 local geometryCache = {}
+local function unknownShape() return { forward = Vector(0, 1, 0), wheelbase = 2.6, rearAxle = Vector(0, 0, 0) } end
 function AudioEngine.CarGeometry(vehicle)
 	local model = vehicle:GetModel()
 	if geometryCache[model] then return geometryCache[model] end
@@ -775,20 +880,21 @@ function AudioEngine.CarGeometry(vehicle)
 	for _, attachmentName in ipairs({ "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr" }) do
 		local attachmentId = vehicle:LookupAttachment(attachmentName)
 		local attachment = attachmentId and attachmentId > 0 and vehicle:GetAttachment(attachmentId)
-		if not attachment then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
+		if not attachment then return unknownShape() end
 		wheelPositions[attachmentName] = vehicle:WorldToLocal(attachment.Pos)
 	end
-	local forward = ((wheelPositions.wheel_fl + wheelPositions.wheel_fr) - (wheelPositions.wheel_rl + wheelPositions.wheel_rr)) * 0.5
+	local rearAxle = (wheelPositions.wheel_rl + wheelPositions.wheel_rr) * 0.5
+	local forward = (wheelPositions.wheel_fl + wheelPositions.wheel_fr) * 0.5 - rearAxle
 	forward.z = 0
 	local length = forward:Length()
-	if length < 1 then return { forward = Vector(0, 1, 0), wheelbase = 2.6 } end
+	if length < 1 then return unknownShape() end
 	local wheelbase = clamp(length * INCH, 1.8, 4.5)
 	forward:Normalize()
-	geometryCache[model] = { forward = forward, wheelbase = wheelbase }
+	geometryCache[model] = { forward = forward, wheelbase = wheelbase, rearAxle = rearAxle }
 	return geometryCache[model]
 end
 
--- the model's numbers for a car: { settings, wheelbase, noseX/Y/Z }
+-- the model's numbers for a car: { settings, wheelbase, noseX/Y/Z, pivotX/Y/Z (the rear axle's middle, model space) }
 function Handling.SpecFor(vehicle)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)
 	local geometry = AudioEngine.CarGeometry(vehicle)
@@ -796,6 +902,7 @@ function Handling.SpecFor(vehicle)
 		settings = Handling.SettingsFor(carConfig and carConfig.name),
 		wheelbase = geometry.wheelbase,
 		noseX = geometry.forward.x, noseY = geometry.forward.y, noseZ = geometry.forward.z,
+		pivotX = geometry.rearAxle.x, pivotY = geometry.rearAxle.y, pivotZ = geometry.rearAxle.z,
 	}
 end
 
