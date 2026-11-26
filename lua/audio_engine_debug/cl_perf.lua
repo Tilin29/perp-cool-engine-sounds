@@ -207,10 +207,6 @@ local function bankMemory()
 	end
 	for _, bank in pairs(Bank.list or {}) do addBank(bank) end
 	addBank(Bank.env)
-	memory.count = Bank.count or 0
-	local conVar = GetConVar("audio_engine_maxsounds")
-	memory.max = conVar and conVar:GetInt() or 0
-	memory.queue = #(Bank.queue or {})
 
 	return memory
 end
@@ -260,7 +256,6 @@ local function memoryLines(snap, printLine)
 	printLine(string.format("Sound banks: %d baked (WAV files %.1f MB in the engine), %d generated (%.1f MB of Lua tables + ~%.1f MB in the engine)%s",
 		banks.baked, banks.bakedBytes / MB, banks.generated, genLua / MB, genEngine / MB,
 		banks.building > 0 and string.format(", %d still building", banks.building) or ""))
-	printLine(string.format("  generated engines count %d of audio_engine_maxsounds %d; %d in the build queue", banks.count or 0, banks.max or 0, banks.queue or 0))
 	local siren = snap.siren
 	if siren then
 		local sampleRate = (siren.sampleRate or 44100)

@@ -1,6 +1,6 @@
 # Audio Engine
 
-Procedurally generated engine sound, rpm/gear model and speed / rpm HUD for Garry's Mod cars: all 165 PERPHeads cars, plus an example police car (Mercedes SL65 AMG, RTU liveries) with its own model, in a separate addon (`addons/sl65amg_rtu/`, temporary: not part of the final addon).
+Synthesized engine sound (rendered offline, shipped as WAVs), rpm/gear model and speed / rpm HUD for Garry's Mod cars: all 165 PERPHeads cars, plus an example police car (Mercedes SL65 AMG, RTU liveries) with its own model, in a separate addon (`addons/sl65amg_rtu/`, temporary: not part of the final addon).
 
 **Requires** the TDM Cars content (shared materials and wheels), same as the model.
 
@@ -15,33 +15,6 @@ The engine is off when you get in, and the car is silent and can't drive. Press 
 - Pick your own key with `audio_engine_startkey` (a key name such as `k` or `f1`, or `none`). `bind <key> audio_engine_toggle` also works.
 - `audio_engine_autostart 1` on the server starts the engine by itself when a driver gets in (the car still waits for the start-up to finish).
 
-## Engine tuning in game
-The tuning menu is off by default. A server turns it on with `audio_engine_editor 1`. Then open it any of these ways:
-- type `!engine` in chat
-- run `audio_engine_menu` in the console
-- right-click the car in the context menu (C) and choose **Engine tuning**
-
-You need to be in the car or looking at it. The menu has the Rev Bench controls:
-- **Presets:** one for every engine type on the server: V12 (and turbo), flat-12, W16, V10 (and big-block), V8 crossplane / high-revving / flat-plane / twin-turbo / hybrid, V6 (even-fire, odd-fire, twin-turbo), flat-6, inline-6 (and turbo), inline-5 turbo, inline-4 (everyday, high-revving, turbo, hybrid), inline-3, flat-4 (FR-S, air-cooled, Subaru turbo), 2- and 3-rotor Wankel, and an electric motor. Plus the SL65's own V12 biturbo and the classic Rev Bench inline-4.
-- **Sound:**
-  - engine layout, pitch, exhaust tone, volume and realism (0 = the Rev Bench sound)
-  - **Gurgle:** the burble off throttle and on the overrun. The burn goes ragged: firings come in uneven groups and the odd one misfires. It fades out under full throttle.
-  - **Pops & bangs (how often):** Off, Rare, Occasional, Frequent, Constant. It covers overrun crackle, plus bangs on lift-off, upshifts and the limiter.
-  - **Pops & bangs volume:** 0–200%, separate from how often.
-  - **Pops & bangs tone:** Muffled, Sport, Loud pipe, Straight pipe. Muffled is mostly the scatter of the pop rattling through the silencers; Straight pipe is mostly the sharp crack.
-  - turbo (whistle), with an optional **blow-off valve**, and a volume for each (0–200%). Like the pop volume, these change instantly without regenerating the engine.
-- **RPM & performance:**
-  - idle and redline
-  - **Acceleration** (×0.5–2.5 engine power) and **Top speed** (km/h). These change the car's real physics. The revs, gears and sound follow.
-  - live stats: cylinders, firing frequency, and how many loops get generated
-  - **Sound quality:** 44.1 kHz or 22.05 kHz. This only affects your own PC: 22.05 kHz generates twice as fast and uses half the memory. Changing it regenerates every engine.
-
-Gearing isn't in this menu any more. The old ratio editor never reached the car. Each car is fitted to its top speed automatically, or follows its own `E.CAR_GEARING` entry, which you make with the gearing editor of the debug tools (below).
-
-**Apply to car** changes that car for everyone. **Back to stock** resets everything, including performance. Switching engine presets keeps your acceleration and top speed.
-
-A new engine is generated in the background on every client near the car (about 1.5–2 s of CPU). The old sound keeps playing until it's ready. Cars with the same engine settings share one set of sounds.
-
 ## Debug tools (not for the final version)
 A separate module on top of the addon, for tuning on a test server: `lua/audio_engine_debug/`. It loads automatically whenever that folder is there, so delete the folder to ship without it. It's on by default (`audio_engine_debug 0` switches it off), and only superadmins (or the host of a listen or single-player game) can use it. Open it with `audio_engine_debug_menu`, `!enginedebug`, or right-click a car → **Engine debug tools**. It works on the car you're in or looking at. Every change is a live test: copy what works back into the files. The pages are:
 - **Handling script:** loads the vehicle script the car is linked to and lets you edit every value. **Apply live** puts the changes on the car. Values marked `respawn` (wheel radius, materials, sounds) only take effect when the car spawns. **Copy txt** puts the whole edited file on the clipboard, and **Save to data/** writes it to `garrysmod/data/audio_engine_debug/scripts/`, so it can go into PERP's script pack. Without PERP's scripts mounted, it shows `test_car.txt` carrying PERP's physics values (what the car really drives on) and says so.
@@ -51,37 +24,26 @@ A separate module on top of the addon, for tuning on a test server: `lua/audio_e
 - **Settings:** the client and server convars and the test commands as controls.
 
 ## How the sound works
-Every sound comes from a Lua engine synthesizer based on Rev Bench, with no recordings. The stock engine of every car is rendered offline by that same synthesizer (`dev/baker`) and ships as WAV files in `sound/audio_engine/`, so stock cars load instantly and cost no CPU. An engine retuned in the menu is generated in game, spread over a few seconds of frames in the background. Look for `[Audio Engine] ... generated 30 sounds` in the console. `audio_engine_baked 0` makes the client generate everything, as before.
-
+Every engine's sounds are synthesized (no recordings), rendered offline and shipped as WAV files in
+`sound/audio_engine/`, described by `lua/audio_engine/cl_baked.lua`. Nothing is generated in game, so cars load
+instantly and cost no CPU. There's no in-game engine editor. The old Lua synthesizer and its tools were removed;
+a new offline generator is being written, and until it exists the shipped sounds stay as they are.
 ## PERPHeads cars
-All 165 PERP cars use the procedural engine, matched by the TDM/PERP model they already use (no models are included here), whatever tier script PERP spawns them with (used, upgrades, spiked, cop...). Their TDM engine recordings are muted (`audio_engine_mutestock`). For testing in sandbox they're listed under **Vehicles → PERP cars (Audio Engine)**. The developer log for putting this on the PERP server is `INTEGRATION.md`.
+All 165 PERP cars use this engine, matched by the TDM/PERP model they already use (no models are included here), whatever tier script PERP spawns them with (used, upgrades, spiked, cop...). Their TDM engine recordings are muted (`audio_engine_mutestock`). For testing in sandbox they're listed under **Vehicles → PERP cars (Audio Engine)**. The developer log for putting this on the PERP server is `INTEGRATION.md`.
 
-On top of the Rev Bench synth, the **Realism** slider adds:
-- **each engine type's own voice:** its exhaust resonances (big and deep for a V8, thin and high for an inline-4, high and smooth for a V10 or V12), pulse width, and its low-order rhythm (the V8 burble, the boxer rumble, the five-cylinder warble)
-- two exhaust banks, each with slightly different pipe resonances
-- slightly different strength and timing per cylinder, plus cycle-to-cycle combustion variation (bigger at idle)
-- combustion that varies from firing to firing, with slightly loose timing, so it never sounds like a perfect machine-made tone
-- exhaust grit that rides on each pulse instead of a steady hiss
-- a touch of uneven (asymmetric) distortion, like a real exhaust pipe pushed hard, which gives the bark
-- a muffler resonance, faint valvetrain ticking, a tailpipe reflection and a small outdoor space
-- a top-end filter that keeps the engine's body instead of fizz at high revs
-- turbos: a whistle that builds with boost and a blow-off "pssh" when you lift
-
-What gets generated:
-- One loop per rpm point (10 points, about 1.26× apart), on and off throttle. Each is pitched by at most about ±12% and cross-faded, so the exhaust resonances stay put.
-- A rev-limiter loop, start-up sounds (normal and "emotion"), a shut-down sound, three pops and two bangs.
-- Shared by every car, generated once: tyre roar, wind, the turbo whistle and two blow-off sounds. So switching the turbo or blow-off valve on or off, or changing their volume, never generates a new engine. Only layout, pitch, exhaust tone, idle, redline, realism, gurgle and pop tone do.
-- Every engine is matched to the same loudness, so a V8 plays as loud as an inline-4 (electric motors sit well below). Each loop's few loudest pulses are limited so nothing clips.
-
+What each engine ships:
+- One loop per rpm point (about 1.26× apart), on and off throttle. Each is pitched by at most about ±12% and cross-faded, so the exhaust resonances stay put.
+- A rev-limiter loop, start-up sounds (normal and "emotion"), a shut-down sound, pops and bangs.
+- Shared by every car: tyre roar, wind, the turbo whistle, two blow-off sounds, the electric cars' sounds and the supercharger whine. So switching the turbo or blow-off valve on or off, or changing their volume, needs no new engine sounds.
 Every car gets a small random detune (±1.5%), so a row of them doesn't sound like one cloned recording.
 
 Playback is kept clean:
 - Every loop glides to its new volume instead of jumping once per frame, which would click (zipper noise).
-- Each car keeps its own mix under full scale, using the measured peak of every generated sound, including pops and bangs that overlap. Revving in neutral may go a few dB louder than driving.
+- Each car keeps its own mix under full scale, using the measured peak of every sound, including pops and bangs that overlap. Revving in neutral may go a few dB louder than driving.
 
 Around the engine:
 - **Doppler:** a car coming toward you sounds higher, and drops in pitch as it passes, from the real speeds of the car and of you, at four times the real shift so a drive-by stands out. At 130 km/h that's about +72% then −30%. Your own car is never shifted.
-- **Tyre roar and wind:** a road roar that grows with speed, and a faint wind that only becomes noticeable near top speed. These are generated once and shared by every car. They play even with the engine off, while the car rolls.
+- **Tyre roar and wind:** a road roar that grows with speed, and a faint wind that only becomes noticeable near top speed. They're shared by every car. They play even with the engine off, while the car rolls.
 
 The rpm and gear come from a small automatic-gearbox model:
 - It uses the car's real speed and the driver's keys.
@@ -102,7 +64,7 @@ The HUD tachometer and the model's own dashboard tach needle both follow the rev
 - `SteeringExponent` 0, so any tap of A/D is full lock
 - `SkidMaterial` set to `jeeptire`, so slides snap back
 
-Also remove the engine `Gear`/`State` sounds from that script, or they play on top of the generated engine.
+Also remove the engine `Gear`/`State` sounds from that script, or they play on top of this addon's engine.
 
 `addons/sl65amg_rtu/scripts/vehicles/plpd/sl65amg_rtu.txt` is tuned to be calm on its own:
 - lower centre of mass and a cap on body rotation speed
@@ -110,43 +72,16 @@ Also remove the engine `Gear`/`State` sounds from that script, or they play on t
 - less rear brake bias and slight front drive
 - only a touch of power cut while steering
 
-### Handling model and prediction
-Source simulates every car on the server only. Your key reaches the server half a ping later, and the result
-comes back the other half later, then waits in the interpolation buffer: at 150 ms ping a steering key shows
-about 0.25 s after you press it. Moving the cars to the clients would make crashes between players disagree,
-so the server stays the only authority, and the driver's client runs ahead of it:
+### Handling model
+Source simulates every car on the server only, so crashes between players always agree. On the server
+(`sv_handling.lua`), Source's jeep still handles the engine, brakes, suspension and every collision. On top of it,
+a handling model (`sh_handling.lua`) takes over the car's rotation and sideways grip each tick. The rotation
+follows what the steering asks at that speed (never more than the tyres can hold), and a slide loses its sideways
+speed at the grip limit. It never adds speed along the nose, so it can't launch a car. The handbrake lets the rear
+go and starts a drift, which lasts while the car stays sideways. A spin is caught. After a crash the model lets go
+until the crash has played out. Spiked tyres get no model.
 
-- **On the server** (`sv_handling.lua`), Source's jeep still handles the engine, brakes, suspension and every
-  collision. On top of it, a handling model (`sh_handling.lua`) takes over the car's rotation and sideways
-  grip each tick. The rotation follows what the steering asks at that speed (never more than the tyres can
-  hold), and a slide loses its sideways speed at the grip limit. It never touches the speed along the nose, so it
-  can't launch a car and corners don't scrub speed. The handbrake lets the rear go and starts a drift, which
-  lasts while the car stays sideways. A spin is caught. After a crash the model lets go until the crash has played
-  out. Spiked tyres get no model.
-- **On the driver's client** (`cl_handling.lua`), the server sends the car's state every other tick with the
-  last command it ran. The client replays every command since through the same model, plus how this car
-  accelerates (learned from those states), and draws the car, its driver, passengers and lightbar there, with
-  the camera. Each correction from the server fades out in about 0.1 s, so the car never snaps. A wall the
-  prediction would drive through stops it at the wall. Other moving cars are drawn where they are now too, so you
-  don't see yourself drive into a car you're only following.
-
-Nothing on the client moves a physics object, so crashes, pushes and ramming stay exactly what the server
-decided, for everyone. They show up one ping late, blended in. Offline (`dev/baker/test_prediction.js`, 150 ms
-ping with jitter and lost packets), the car on screen is about 0.2 m from where the server will have it, against
-about 6 m for plain Source. A steering key shows about 250 ms sooner.
-
-By default only the heading is shown ahead (`audio_engine_predict_position 0`): your car is drawn where Source
-has it, the same place every other player sees it, and turned about its rear axle to the heading the prediction
-gives, so it answers the steering at once while its path follows one delay later. Other cars are left where
-Source shows them. Drawn the whole car ahead (`1`), every client saw a different street: your car a lead ahead of
-where the others see it, and the cars around it guessed over the same lead. Offline at 150 ms ping, a steering
-key shows in about 100 ms instead of about 340 ms, and the heading on screen is 0.3 degrees on average from the
-one the server will give the car. In a turn the nose points ahead of the path by the lead (a few degrees,
-up to ~25 in hard turns at high ping): `audio_engine_predict_amount` shows less of it.
-
-Prediction is off in single player and for a listen server's host, where there's no delay to hide. To try it,
-join a server and use `net_fakelag 150`.
-
+Cars are drawn where Source has them. (A client-side driving prediction was tried and removed.)
 ## Convars
 | Convar | Realm | Default | |
 |---|---|---|---|
@@ -160,12 +95,8 @@ join a server and use `net_fakelag 150`.
 | `audio_engine_hud` | client | 1 | show the HUD |
 | `audio_engine_units` | client | mph | `mph` or `kmh` |
 | `audio_engine_hud_scale` | client | 1 | HUD size |
-| `audio_engine_samplerate` | client | 44100 | 44100 or 22050 (twice as fast, half the memory); changing it regenerates everything |
-| `audio_engine_genbudget` | client | 6 | milliseconds per frame spent generating sounds, 1–50 |
-| `audio_engine_maxsounds` | client | 10 | how many different engines to keep generated (about 4 MB each); past this, cars fall back to their stock sound |
-| `audio_engine_baked` | client | 1 | stock engines play the pre-generated sounds; 0 = generate everything in game |
 | `audio_engine_startkey` | client | r | key that starts and stops the engine (`none` = no key) |
-| `audio_engine_mutestock` | shared | 1 | silence the TDM engine recordings of cars that use the procedural engine |
+| `audio_engine_mutestock` | shared | 1 | silence the TDM engine recordings of cars that use this engine |
 | `audio_engine_muteskid` | shared | 1 | silence the TDM tyre screech when braking (shared by all TDM cars) |
 | `audio_engine_mutetyrescrape` | shared | 1 | silence the scrape of sliding tyres (a global change: glass bottle and dirt surface sounds) |
 | `audio_engine_autostart` | server | 0 | 1 = start the engine when a driver gets in; 0 = the driver starts it |
@@ -173,30 +104,19 @@ join a server and use `net_fakelag 150`.
 | `audio_engine_keeprunning` | server | 1 | keep idling after the driver gets out (0 = getting out switches the engine off; not saved, set it in server.cfg) |
 | `audio_engine_cruise` | server | 1 | speed limiter on registered cars (middle mouse switches it, the mouse wheel sets the limit) |
 | `audio_engine_drivemodel` | shared | 1 | the handling model on registered cars (rotation follows the steering, grip limit, handbrake drifts); 0 = Source's own tyres alone |
-| `audio_engine_predict` | client | 1 | your own car is shown where it will be when the server runs your keys (no input delay) |
-| `audio_engine_predict_position` | client | 0 | 0 = only your car's heading runs ahead (drawn where Source has it, the same place everyone sees it); 1 = the whole car, and the cars around it with it |
-| `audio_engine_predict_amount` | client | 1 | how much of the prediction to show, 0–1 (the heading's lead, or the whole car's) |
-| `audio_engine_predict_others` | client | 1 | with the whole car predicted, other moving cars are shown where they are now too |
-| `audio_engine_predict_debug` | client | 0 | draw the server's car (red), Source's (yellow) and the predicted one (green) |
-| `audio_engine_editor` | shared | 0 | 1 = the in-game engine tuning menu is available (`!engine`, `audio_engine_menu`, context menu) |
 | `audio_engine_debug` | shared | 1 | the debug tools for superadmins; 0 = off (debug module only) |
-| `audio_engine_tuneaccess` | server | 1 | who can retune engines: 0 = whoever drives the car, 1 = admins, 2 = superadmins |
-| `audio_engine_tunecooldown` | server | 5 | seconds between engine changes per player |
 
 Commands:
-- `audio_engine_menu` opens the tuning menu (also `!engine` in chat), when `audio_engine_editor` is 1.
 - `audio_engine_debug_menu` opens the debug tools (also `!enginedebug`; superadmins, debug module).
 - `audio_engine_handling_info` (admins) prints the handling setup of the car you're in or looking at.
 - `audio_engine_accel_log [seconds]` (admins) logs speed, gear, rpm, the steering and the rotation asked vs. what the car does, to the console (default 12 s, max 60).
-- `audio_engine_predict_stats` prints how the driving prediction is doing: corrections, wall stops, the lead, the learned samples.
 - `audio_engine_toggle` (bindable) switches the engine of the car you're driving on or off, like the start key.
-- `audio_engine_rebuild` regenerates all engine sounds (after editing the synth or presets).
 - `audio_engine_wingflap` (superadmins) shows the brake flap for 10 s on the P1 or SLR you're in or looking at.
 - `audio_engine_bonedump` (superadmins) writes the bone manipulations of the car you're in or looking at to `data/audio_engine_bones.txt`.
 
 ## Files to edit
 - `lua/audio_engine/sh_carlist.lua`: which preset each of the server's 165 cars uses, with a few per-car changes (redline, tone). Register a car by name once its model is known: `AUDIO_ENGINE.RegisterCarNamed("models/....mdl", "Ferrari 458 Spider")`.
-- `lua/audio_engine/sh_presets.lua`: the engine presets and gearbox presets. Add your own here and they show up in the menu.
+- `lua/audio_engine/sh_presets.lua`: the engine presets and gearbox presets. A car's `preset` picks which baked sounds it plays.
 - `lua/audio_engine/sh_config.lua`: per car. Sets:
   - the stock `preset`
   - `topSpeed` (the gearing fit). `"auto"` reads MaxSpeed from the car's vehicle script.

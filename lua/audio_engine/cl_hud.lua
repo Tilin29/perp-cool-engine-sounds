@@ -875,10 +875,8 @@ local rpmNeedle = {}
 --[[
 	The speedometer: the stepper-style hold above made it move in steps (held, then a jump each
 	0.8 mph pulling away), and its speed came from the car's drawn position frame to frame, which
-	jittered more the faster the car (fast cars' needles kept kicking). Now the speed is the server's
-	own physics (AudioEngine.ServerSpeed, the driver's drive state, cl_handling), else a line fitted
-	through the last SPEED_FIT_SECONDS of positions on game time (single player, the listen host,
-	prediction off), and the needle follows it smoothly over SPEED_NEEDLE_TIME s (no overshoot, so
+	jittered more the faster the car (fast cars' needles kept kicking). Now the speed is a line fitted
+	through the last SPEED_FIT_SECONDS of positions on game time, and the needle follows it smoothly over SPEED_NEEDLE_TIME s (no overshoot, so
 	no sway). The digits change only once the needle is SPEED_DIGIT_HOLD past the shown number
 ]]
 local SPEED_FIT_SECONDS = 0.3
@@ -996,8 +994,7 @@ local function readState(player, vehicle, car, deltaTime)
 	state.limiter = engineState.limiterHoldTimer > 0 or state.share > 0.985
 	local usesMph, factor, unitLabel = speedUnits()
 	state.unitLabel, state.usesMph = unitLabel, usesMph
-	local serverSpeed = AudioEngine.ServerSpeed and AudioEngine.ServerSpeed(vehicle)
-	local metresPerSecond = serverSpeed and serverSpeed * 0.0254 or fittedSpeed(vehicle) or abs(car.speedAlongNose)
+	local metresPerSecond = fittedSpeed(vehicle) or abs(car.speedAlongNose)
 	if state.speedUnits ~= unitLabel then state.speedUnits, speedNeedle.value = unitLabel, nil end
 	local speed, digits = smoothSpeedNeedle(metresPerSecond * factor, deltaTime)
 	state.speed, state.speedDigits = max(0, speed), max(0, digits)

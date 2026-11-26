@@ -79,7 +79,7 @@ function findAll(pat) {
     table.Count = function(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
     AUDIO_ENGINE = {}`)
   for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_carlist.lua', 'sh_perp.lua',
-    'cl_baked.lua', 'cl_synth.lua', 'cl_soundbank.lua']) await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
+    'cl_baked.lua', 'cl_soundbank.lua']) await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
 
   let fail = 0
   const check = (ok, msg) => { if (!ok) { fail++; console.log('FAIL', msg) } }
@@ -139,7 +139,7 @@ function findAll(pat) {
         seen[cfg.id] = true
         nb = nb + 1
         local b = Bank.Get(cfg)
-        if b.baked then
+        if b and b.baked then
           baked = baked + 1
           local names = {}
           for _, l in ipairs(b.layers) do names[#names + 1] = l.on names[#names + 1] = l.off end
@@ -158,7 +158,7 @@ function findAll(pat) {
         end
       end
     end
-    local env = Bank.GetEnv()
+    local env = Bank.GetEnv() or {}
     if not env.baked then miss[#miss + 1] = "env not baked" end
     for _, k in ipairs({ "road", "wind", "turbo", "evhum", "bov1", "bov2" }) do
       if not (env[k] and file.Exists("sound/" .. env[k], "GAME")) then miss[#miss + 1] = "env " .. k end

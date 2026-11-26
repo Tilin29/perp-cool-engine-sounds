@@ -22,7 +22,7 @@
 AUDIO_ENGINE = AUDIO_ENGINE or {}
 local AudioEngine = AUDIO_ENGINE
 
--- character: the car's own exhaust voice over its engine type's (cl_synth.lua CHARACTER: f1, f2,
+-- character: the car's own exhaust voice over its engine type's (the old Lua synth's CHARACTER; still part of the baked sound key: f1, f2,
 -- f3, w, o1, o05; any left out keep the type's). A new sound: re-bake. dev/tone_studio.html edits it
 local function engineEntry(preset, stock, character) return { preset = preset, stock = stock, character = character } end
 

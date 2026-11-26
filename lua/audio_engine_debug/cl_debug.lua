@@ -1404,17 +1404,12 @@ local function buildHandlingPage(pagePanel)
 		sendCvars(changes)
 	end)
 	paragraph(scrollPanel, "Off = the cars drive on their vehicle script alone, as on PERP without this addon: Source's own tyres, " ..
-		"no handling model. PERP's physics still go onto cars that fell back to the test script, so they match the server. " ..
-		"The driver's prediction (audio_engine_predict, client) runs either way.")
+		"no handling model. PERP's physics still go onto cars that fell back to the test script, so they match the server.")
 	local boxes = {}
 	for _, cvarName in ipairs({ "audio_engine_drivemodel", "audio_engine_cruise" }) do
 		local cvarEntry = EngineDebug.SERVER_CVAR_SET[cvarName]
 		boxes[cvarName] = check(scrollPanel, cvarEntry[3] .. "   (" .. cvarName .. ")", true, function(checked) sendCvars({ { cvarName, checked and 1 or 0 } }) end)
 	end
-	paragraph(scrollPanel, "Prediction (this client): audio_engine_predict, audio_engine_predict_others; audio_engine_predict_debug 1 draws the " ..
-		"server's car red, Source's yellow and the predicted one green; audio_engine_predict_stats prints how it's doing. " ..
-		"It only shows on a server you joined (not single player or a listen server's host): try net_fakelag 150 there.", COLORS.amber)
-
 	heading(scrollPanel, "Values (live, until a map change)")
 	local sliders = {}
 	for i, tunable in ipairs(EngineDebug.TUNABLES) do
@@ -1505,10 +1500,6 @@ local function buildSettingsPage(pagePanel)
 	conVarCheck("audio_engine_hud", "Speed / rpm HUD")
 	conVarCombo("audio_engine_units", "HUD units", { { "mph", "mph" }, { "kmh", "km/h" } })
 	conVarSlider("audio_engine_hud_scale", "HUD size", 0.5, 2, 2)
-	conVarCombo("audio_engine_samplerate", "Generated sound quality", { { 44100, "44.1 kHz" }, { 22050, "22.05 kHz (faster)" } })
-	conVarSlider("audio_engine_genbudget", "Generation budget (ms per frame)", 1, 50, 0)
-	conVarSlider("audio_engine_maxsounds", "Generated sounds kept", 2, 40, 0)
-	conVarCheck("audio_engine_baked", "Play the pre-generated (baked) stock sounds")
 	local keyRow = vgui.Create("DPanel", scrollPanel)
 	keyRow:Dock(TOP)
 	keyRow:SetTall(24)
@@ -1520,8 +1511,6 @@ local function buildSettingsPage(pagePanel)
 	keyEntry:Dock(LEFT)
 	keyEntry:SetWide(80)
 	keyEntry:SetConVar("audio_engine_startkey")
-	local clientButtons = buttonRow(scrollPanel)
-	clientButtons:Add("Regenerate engine sounds", function() RunConsoleCommand("audio_engine_rebuild") end)
 
 	heading(scrollPanel, "Server")
 	local boxes, others = {}, {}
@@ -1536,7 +1525,6 @@ local function buildSettingsPage(pagePanel)
 		end
 	end
 	local serverButtons = buttonRow(scrollPanel)
-	serverButtons:Add("Open the Rev Bench editor", function() RunConsoleCommand("audio_engine_menu") end)
 	serverButtons:Add("Show the brake flap (10 s)", function() RunConsoleCommand("audio_engine_wingflap") end)
 	serverButtons:Add("Dump bone manipulations", function() RunConsoleCommand("audio_engine_bonedump") end)
 

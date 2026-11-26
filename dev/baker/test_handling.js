@@ -6,7 +6,6 @@
     - the handling model (sh_handling.lua): steering turns the car, the turn never asks more than the
       tyres' grip, sideways speed goes at the grip limit, the speed along the nose is never touched,
       the handbrake lets the rear go, the model off (controlShare 0) does nothing; grip per kind of car
-  The prediction itself: test_prediction.js.
 
     node test_handling.js
   The fake keeps speeds in inches/s and takes mph in SetVehicleParams, like sv_engine assumes.
@@ -283,28 +282,6 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   check(blocked[1] < blocked[2] * 0.2, `against a wall the turn is no longer forced every tick (tick 10: ${blocked[1]} deg/s set, free car turning ${blocked[2]})`)
   check(blocked[3] > blocked[2] * 0.5, `not touching anything, a rotation taken back is still forced (tick 10: ${blocked[3]} deg/s set)`)
 
-  // 4f. the prediction over rough ground: on its wheels a bump's kick up isn't carried on (it drew the
-  // car bobbing); in the air it flies
-  await L.doString(`
-    local function lift(ground, slope)
-      local body = Body(10)
-      local c, s = math.cos(math.rad(slope)), math.sin(math.rad(slope))
-      -- pitched nose up about x: the nose (y) tilts up, up tilts back
-      body.bx, body.by, body.bz = 0, c, s
-      body.cx, body.cy, body.cz = 0, -s, c
-      body.vx, body.vy, body.vz = 0, c * 10 / H.INCH, s * 10 / H.INCH
-      body.vx, body.vy, body.vz = body.vx + body.cx * 40, body.vy + body.cy * 40, body.vz + body.cz * 40   -- a bump's kick, 40 in/s
-      body.groundShare = ground
-      local z0 = body.pz
-      for _ = 1, 15 do H.Integrate(body, SPEC, 0, 1 / 66) end   -- ~0.23 s, a lead
-      local alongUp = (body.px * body.cx + body.py * body.cy + (body.pz - z0) * body.cz)
-      return alongUp, body.py * s + (body.pz - z0) * c
-    end
-    __result(string.format("%.2f|%.2f", lift(1, 0), lift(0, 0)))`)
-  const bump = res.split('|').map(Number)
-  const t = 15 / 66, flight = 40 * t - 0.5 * 386.1 * t * t
-  check(Math.abs(bump[0]) < 0.5 && Math.abs(bump[1] - flight) < 1, `a bump's kick: on the wheels not carried on (${bump[0]} in up over a lead), in the air a ballistic arc (${bump[1]} in, ${flight.toFixed(2)} expected)`)
-
   // 4g. a Lua refresh on a running server: values left from an older file (the turn floor off, a
   // per-car copy) give way to the file's, and cars keep reading the same table
   g.set('__shHandling', fs.readFileSync(path.join(LUA, 'sh_handling.lua'), 'utf8'))
@@ -348,58 +325,6 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   console.log('full-lock turn at 20/25/30/40/50/60 mph:', turns.map((x) => x.toFixed(1)).join(' | '))
   check(turns.slice(1).every((x, i) => x > turns[i] * 0.8 && x < turns[i] * 1.2) && turns[5] < turns[2],
     'the turn eases off with speed, no cliff: each step (20/25/30/40/50/60 mph) keeps over 80% of the one before')
-
-  // 6. the model's input buffer (sv_handling's StartCommand and HandlingModelInput, Handling.NextCommand):
-  // commands reaching the server 2 / 0 / 3 a tick still reach the model one a tick, in order, each with
-  // its own keys; a driver whose client doesn't predict runs the newest, as Source does
-  await L.doString(`
-    local startCommand = HOOKS.StartCommand.audio_engine_handling
-    local function newDriver(predict)
-      local driver = { predict = predict, keys = 0 }
-      function driver:IsValid() return true end
-      function driver:GetInfoNum(name, default) if name == "audio_engine_predict" then return self.predict end return default end
-      function driver:IsListenServerHost() return false end
-      function driver:KeyDown(key) return self.keys & key ~= 0 end
-      return driver
-    end
-    local function newCommand(number, keys)
-      return { CommandNumber = function() return number end, GetButtons = function() return keys end }
-    end
-    -- command n's keys: W, with A on 4..9 and D from 12
-    local function keysOf(n) return IN_FORWARD + ((n >= 4 and n <= 9) and IN_MOVELEFT or 0) + (n >= 12 and IN_MOVERIGHT or 0) end
-    local arrivals = { 1, 2, 0, 1, 2, 0, 0, 3, 1, 1, 0, 2, 1, 1, 1, 1 }
-    local out = {}
-    for _, predict in ipairs({ 1, 0 }) do
-      local driver = newDriver(predict)
-      local nextNumber, newest, runs, keysRight = 100, 0, {}, true
-      for _, count in ipairs(arrivals) do
-        for _ = 1, count do startCommand(driver, newCommand(nextNumber, keysOf(nextNumber))) newest, nextNumber = nextNumber, nextNumber + 1 end
-        driver.keys = keysOf(newest)
-        local run, buttons = E.HandlingModelInput(driver, 1 / 66, true)
-        runs[#runs + 1] = run - 100
-        if buttons ~= H.ButtonsFrom(function(keys, key) return keys & key ~= 0 end, keysOf(run)) then keysRight = false end
-      end
-      out[#out + 1] = table.concat(runs, ",") .. "/" .. tostring(keysRight)
-    end
-    -- a spare command waiting a whole second: one dropped (a tick of lag less), once; a lag spike: back of it
-    local buffer, newest = H.NewInputBuffer(), 10
-    H.NextCommand(buffer, newest, 1 / 66)
-    newest = newest + 2
-    H.NextCommand(buffer, newest, 1 / 66)
-    local levels, changes, lowest = {}, 0, math.huge
-    for i = 1, 140 do
-      newest = newest + 1
-      levels[i] = newest - H.NextCommand(buffer, newest, 1 / 66)
-      lowest = math.min(lowest, levels[i])
-      if i > 1 and levels[i] ~= levels[i - 1] then changes = changes + 1 end
-    end
-    out[#out + 1] = string.format("%d,%d,%d,%d,%d", levels[1], levels[140], changes, lowest, newest + 20 - H.NextCommand(buffer, newest + 20, 1 / 66))
-    __result(table.concat(out, ";"))`)
-  const [buffered, newestRuns, trim] = res.split(';')
-  console.log('model input, commands run each tick (buffer / newest):', buffered, '|', newestRuns, '| trim:', trim)
-  check(buffered === '-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14/true', `input buffer: one command a tick, in order, with its own keys (${buffered})`)
-  check(newestRuns === '0,2,2,3,5,5,5,8,9,10,10,12,13,14,15,16/true', `no prediction: the newest command, as Source runs it (${newestRuns})`)
-  check(trim === '2,1,1,1,1', `input buffer: a spare command for a second is dropped once, a lag spike skipped (${trim})`)
 
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
   process.exit(fail ? 1 : 0)

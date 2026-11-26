@@ -12,7 +12,7 @@
 	                                                 -> AudioEngine.CAR_REV / sh_drivetrain.lua Drivetrain.REV
 	  handling script the car's params (server)      -> the vehicle script txt (copied out)
 	  handling model  audio_engine_drivemodel and AudioEngine.HANDLING values (sh_handling.lua), on the server
-	                  and, through Global2 audio_dbg_handling, every client (their prediction runs the same model)
+	                  and, through Global2 audio_dbg_handling, every client (the debug menu shows them)
 ]]
 
 local AudioEngine = AUDIO_ENGINE
@@ -38,7 +38,6 @@ end
 -- server convars the debug menu shows as controls (the client asks the server to set them)
 ---------------------------------------------------------------------------
 EngineDebug.SERVER_CVARS = {
-	{ "audio_engine_editor", "bool", "Engine editor (Rev Bench menu, !engine)" },
 	{ "audio_engine_drivemodel", "bool", "Handling model (rotation follows the steering, grip limit, handbrake drifts)" },
 	{ "audio_engine_cruise", "bool", "Speed limiter (middle mouse)" },
 	{ "audio_engine_autostart", "bool", "Engine starts by itself on entering" },
@@ -216,7 +215,7 @@ local function followGlobalRev()
 end
 
 -- the handling model's values tuned live (Global2 audio_dbg_handling) onto AudioEngine.HANDLING,
--- on the clients too: their prediction runs the same model as the server
+-- on the clients too: the debug menu shows the server's values
 -- (the file's values: sh_handling.lua's own, renewed on every load of it. This was a copy taken when
 -- the debug module first loaded, kept over refreshes: each refresh put every value back to it, and a
 -- changed default (the turn floor) never reached a running server)

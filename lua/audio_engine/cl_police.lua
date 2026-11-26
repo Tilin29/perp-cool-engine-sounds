@@ -157,9 +157,8 @@ local function turned(forward, right, up, direction)
 	return forward * direction.x - right * direction.y + up * direction.z
 end
 
--- where the bar is drawn (the car may be drawn ahead of Source's copy: cl_handling.lua)
+-- where the bar is drawn
 local function lightbarPose(lightbar)
-	if AudioEngine.DisplayPose then return AudioEngine.DisplayPose(lightbar) end
 	return lightbar:GetPos(), lightbar:GetAngles()
 end
 

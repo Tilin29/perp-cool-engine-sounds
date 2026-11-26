@@ -77,7 +77,7 @@ AudioEngine.ENGINE_PRESETS = {
 	-- V8
 	{ id = "v8x",    name = "V8 · crossplane (heavy duty, trucks)",     layout = "v8cross", pitch = 0.95, tone = 0.65, idle = 700,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.6,  popTone = 0.25, gearbox = "road",
 	  character = { f1 = 58, f2 = 210, f3 = 115, w = 1.35, o1 = 0.18, o05 = 0.26, valvetrain = 1.2, valveHz = 2000 } },
-	-- own voices (character: cl_synth.lua CHARACTER fields over the layout's); v8m, v8p, v8r and the i4 family
+	-- own voices (character: the old Lua synth's CHARACTER; still part of the baked sound key fields over the layout's); v8m, v8p, v8r and the i4 family
 	-- were tuned in Tone Studio, the others set apart from their layout's voice; muffle = the car's silencer (config.muffle)
 	{ id = "v8m",    name = "V8 · old muscle",                          layout = "v8cross", pitch = 0.90, tone = 0.85, idle = 800,  redline = 6000,  realism = 1, turbo = false, bov = false, pops = 0.4,  gurgle = 0.85, popTone = 0.25, gearbox = "road",
 	  character = { f1 = 56, f2 = 340, f3 = 150, w = 1.25, o1 = 0.32, o05 = 0.45 } },
@@ -410,7 +410,7 @@ function AudioEngine.ApplyGearing(config, spec)
 	return config
 end
 
--- the voice fields that change the sound (cl_synth.lua CHARACTER), in the sound key in this order:
+-- the voice fields that change the sound (the old Lua synth's CHARACTER; still part of the baked sound key), in the sound key in this order:
 -- the exhaust's (f1 .. o05), then intake, valvetrain and gear whine
 AudioEngine.CHARACTER_FIELDS = { "f1", "f2", "f3", "w", "o1", "o05", "intake", "intakeHz", "valvetrain", "valveHz", "whine", "whineOrder" }
 

@@ -9,16 +9,15 @@
 	   accelerates, tops out and handles like on the server. They're applied as ratios to
 	   test_car.txt's own values, so Source's internal units never matter.
 	2. Every tick, on every driven car: the handling model (sh_handling.lua) takes over the
-	   rotation and sideways grip (audio_engine_drivemodel), and the driver gets the car's state
-	   for their client's prediction (cl_handling.lua). Source's jeep keeps the engine, brakes,
+	   rotation and sideways grip (audio_engine_drivemodel). Source's jeep keeps the engine, brakes,
 	   suspension and all collisions, so crashes between players stay the server's alone.
 
-	The work per car per tick is a few physics reads, four wheel contacts, the model's arithmetic
-	and (every other tick) one ~60 byte unreliable net message to its driver. No vehicle params
-	are set while driving.
+	The work per car per tick is a few physics reads, four wheel contacts and the model's
+	arithmetic. No vehicle params are set while driving (but Source's wheels over FastCarSpeed,
+	matchSteering below).
 
 	A car on a spiked/ tier script (tyres shot by a stinger) gets no model: it's meant to be hard
-	to drive. Its driver still gets the state, so the prediction runs on Source's physics alone.
+	to drive.
 ]]
 
 local AudioEngine = AUDIO_ENGINE
@@ -281,59 +280,10 @@ cvars.AddChangeCallback("audio_engine_drivemodel", function()
 end, "audio_engine_handling")
 
 ---------------------------------------------------------------------------
--- every tick: the model on the driven cars, their state to their drivers
+-- every tick: the model on the driven cars
 ---------------------------------------------------------------------------
-util.AddNetworkString("audio_engine_drive")
-
--- each player's user commands as the server gets them: the newest number, and the last
--- COMMAND_HISTORY commands' keys (IN_ bits) by number, for the model's input buffer.
--- Called once per command, before the vehicle moves with it
-local COMMAND_HISTORY = 64
-hook.Add("StartCommand", "audio_engine_handling", function(player, command)
-	local number = command:CommandNumber()
-	if number == 0 then return end
-	player.audioCommandNumber = number
-	local numbers, keys = player.audioCommandNumbers, player.audioCommandKeys
-	if not numbers then
-		numbers, keys = {}, {}
-		player.audioCommandNumbers, player.audioCommandKeys = numbers, keys
-	end
-	local slot = number % COMMAND_HISTORY
-	numbers[slot], keys[slot] = number, command:GetButtons()
-end)
-
--- whether the driver's client predicts (cl_handling: not in single player, not the listen host,
--- audio_engine_predict, a userinfo convar)
-local function predicts(driver)
-	return not game.SinglePlayer() and not driver:IsListenServerHost() and driver:GetInfoNum("audio_engine_predict", 1) ~= 0
-end
-
+-- the driver's keys as Source has them (the newest command)
 local function keyDown(player, key) return player:KeyDown(key) end
-local function bitsDown(bits, key) return bit.band(bits, key) ~= 0 end
-
--- the command whose keys the model runs this tick, and those keys (Handling.ButtonsFrom): with
--- the model on the car and a driver whose client predicts, one a tick from the input buffer
--- (Handling.NextCommand: their replay runs the same ones); else the newest, as Source has it (no
--- tick of lag added; with the model off Source alone turns the car, and the replay follows it)
-local function modelInput(driver, tickInterval, modelHere)
-	local newest = driver.audioCommandNumber
-	if not newest then return 0, Handling.ButtonsFrom(keyDown, driver) end
-	local command = newest
-	if modelHere and predicts(driver) then
-		driver.audioInputBuffer = driver.audioInputBuffer or Handling.NewInputBuffer()
-		command = Handling.NextCommand(driver.audioInputBuffer, newest, tickInterval)
-	else
-		driver.audioInputBuffer = nil
-	end
-	-- (a command the server never had: the nearest one before it)
-	local numbers, keys = driver.audioCommandNumbers, driver.audioCommandKeys
-	for number = command, command - 8, -1 do
-		local slot = number % COMMAND_HISTORY
-		if numbers[slot] == number then return command, Handling.ButtonsFrom(bitsDown, keys[slot]) end
-	end
-	return command, Handling.ButtonsFrom(keyDown, driver)
-end
-AudioEngine.HandlingModelInput = modelInput   -- (dev/baker/test_handling.js checks it)
 
 -- how much of the car is on its wheels: 0 (in the air, or 1 wheel) .. 1 (3 of 4 or more)
 local function groundShareOf(vehicle)
@@ -362,29 +312,6 @@ local function impactShareOf(vehicle, settings, now)
 	local share = (now - impactAt - settings.impactHold) / settings.impactEase
 	if share >= 1 then vehicle.audioImpactAt = nil return 1 end
 	return math.max(0, share)
-end
-
-local function sendState(vehicle, driver, body, state, command, buttons, impact)
-	net.Start("audio_engine_drive", true)
-	net.WriteUInt(vehicle:EntIndex(), 13)
-	-- (the command whose keys the model ran this tick: the driver's replay runs the ones after it)
-	net.WriteUInt(command % 4294967296, 32)
-	net.WriteDouble(CurTime())   -- (a float is ~0.06 s coarse after 11 days up)
-	net.WriteFloat(body.px) net.WriteFloat(body.py) net.WriteFloat(body.pz)
-	local angles = vehicle:GetAngles()
-	net.WriteFloat(angles.p) net.WriteFloat(angles.y) net.WriteFloat(angles.r)
-	net.WriteFloat(body.vx) net.WriteFloat(body.vy) net.WriteFloat(body.vz)
-	net.WriteFloat(body.yawRate)
-	net.WriteFloat(state.yawTarget or body.yawRate)   -- the eased turn the model holds the car on
-	net.WriteInt(math.Round(state.steer * 127), 8)
-	net.WriteBool(state.drift)
-	net.WriteBool(vehicle.audioDrivable == true)
-	net.WriteBool(impact)
-	net.WriteUInt(math.Round(body.groundShare * 100), 7)
-	net.WriteUInt(math.Round(body.controlShare * 100), 7)
-	net.WriteUInt(buttons, 5)
-	net.WriteUInt(vehicle.audioLimiterState or 0, 2)
-	net.Send(driver)
 end
 
 --[[
@@ -457,8 +384,7 @@ hook.Add("PlayerLeaveVehicle", "audio_engine_handling_steer", function(_, vehicl
 	if IsValid(vehicle) then clearSteering(vehicle) end
 end)
 
-local tickCount = 0
-local function drive(vehicle, driver, command, buttons, modelHere, deltaTime, now, sendNow)
+local function drive(vehicle, driver, buttons, modelHere, deltaTime, now)
 	local physics = vehicle:GetPhysicsObject()
 	if not IsValid(physics) or not physics:IsMotionEnabled() then return end
 	-- the model's numbers for this car (its shape is read once; settings read through)
@@ -496,28 +422,19 @@ local function drive(vehicle, driver, command, buttons, modelHere, deltaTime, no
 		physics:AddVelocity(Vector(rightX * sideChange + noseX * forwardChange, rightY * sideChange + noseY * forwardChange,
 			rightZ * sideChange + noseZ * forwardChange))
 	end
-	-- (the state sent is the one after this tick's model, as the client's replay expects)
-	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 	vehicle.audioLogAsked = asked
-	if sendNow then sendState(vehicle, driver, body, state, command, buttons, impactShare < 1) end
 end
 
 hook.Add("Tick", "audio_engine_handling", function()
 	local deltaTime = engine.TickInterval()
-	-- the state goes out ~33 times a second (every other tick at 66)
-	local sendEvery = math.max(1, math.Round(0.03 / deltaTime))
-	tickCount = tickCount + 1
-	local sendNow = tickCount % sendEvery == 0
 	local modelOn, now = driveModelConVar:GetBool(), CurTime()
 	for vehicle in pairs(AudioEngine.TrackedVehicles or {}) do
 		if IsValid(vehicle) then
 			local driver = vehicle:GetDriver()
 			if IsValid(driver) then
-				-- (carConfig.stability = false: a car registered without the model. The input buffer
-				-- moves on every tick the car is driven, frozen or not)
+				-- (carConfig.stability = false: a car registered without the model)
 				local modelHere = modelOn and modelAllowed(vehicle, AudioEngine.GetCarConfig(vehicle))
-				local command, buttons = modelInput(driver, deltaTime, modelHere)
-				drive(vehicle, driver, command, buttons, modelHere, deltaTime, now, sendNow)
+				drive(vehicle, driver, Handling.ButtonsFrom(keyDown, driver), modelHere, deltaTime, now)
 			end
 		end
 	end
