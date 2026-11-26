@@ -465,12 +465,16 @@ end
 local function updateBrakeWing(vehicle, brakeWingConfig, speedKmh, topSpeed, deltaTime, braking)
 	local wingUp = AudioEngine.WingSpeedUp(vehicle, speedKmh, topSpeed)
 	vehicle.audioBrakeHeldTime = braking and (vehicle.audioBrakeHeldTime or 0) + deltaTime or 0
-	local flapOn = vehicle.audioBrakeHeldTime >= AudioEngine.WING_BRAKE_HOLD or (vehicle.audioFlapShow or 0) > CurTime()   -- (wingflap preview)
+	local previewing = (vehicle.audioFlapShow or 0) > CurTime()   -- (wingflap preview)
+	local flapOn = vehicle.audioBrakeHeldTime >= AudioEngine.WING_BRAKE_HOLD or previewing
 	if brakeWingConfig.tuck then
-		-- the wing rises out of its tucked place (speed rules, or the flap needs it up)
-		local mainFraction = glide(vehicle.audioWingRaise or 0, (wingUp or flapOn) and 1 or 0, deltaTime * AudioEngine.WING_MAIN_RATE, deltaTime * AudioEngine.WING_MAIN_RATE)
+		-- the wing rises out of its tucked place by the speed rules only (braking doesn't raise it),
+		-- and stays out until the flap has folded; the flap tilts only once the wing is all the way out
+		local flapRaised = (vehicle.audioFlapRaise or 0) > 0
+		local mainFraction = glide(vehicle.audioWingRaise or 0, (wingUp or previewing or flapRaised) and 1 or 0, deltaTime * AudioEngine.WING_MAIN_RATE, deltaTime * AudioEngine.WING_MAIN_RATE)
 		vehicle.audioWingRaise = mainFraction
 		for i, tuck in ipairs(brakeWingConfig.tuck) do manipulateBone(vehicle, "tuck" .. i, tuck.bone, 1 - mainFraction, tuck.pos, tuck.ang) end
+		flapOn = flapOn and mainFraction >= 1
 	end
 	local flapFraction = glide(vehicle.audioFlapRaise or 0, flapOn and 1 or 0, deltaTime * AudioEngine.WING_FLAP_RATE, deltaTime * AudioEngine.WING_FLAP_RATE * 0.5)
 	vehicle.audioFlapRaise = flapFraction
@@ -509,9 +513,13 @@ hook.Add("Tick", "audio_engine_wings", function()
 					end
 				end
 				if brakeWingConfig then
+					-- braking = S held while rolling forwards: the speed along the nose (from the wheel
+					-- attachments, AudioEngine.CarGeometry), so S held reversing never counts
 					local driver = vehicle:GetDriver()
+					local noseDirection = vehicle:LocalToWorld(AudioEngine.CarGeometry(vehicle).forward) - vehicle:GetPos()
+					local forwardKmh = IsValid(physics) and physics:GetVelocity():Dot(noseDirection) * 0.09144 or 0
 					local braking = IsValid(driver) and driver:KeyDown(IN_BACK) and not driver:KeyDown(IN_FORWARD)
-						and speedKmh > AudioEngine.WING_BRAKE_MPH * 1.609344
+						and forwardKmh > AudioEngine.WING_BRAKE_MPH * 1.609344
 					updateBrakeWing(vehicle, brakeWingConfig, speedKmh, topSpeed, deltaTime, braking)
 				end
 				vehicle.audioWingsSettled = asleep and (vehicle.audioFlapRaise or 0) == 0 and (vehicle.audioWingRaise or 0) == 0

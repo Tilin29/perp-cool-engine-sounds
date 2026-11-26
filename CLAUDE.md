@@ -225,9 +225,11 @@ Porting the sounds into PERP: `PORTING.md`.
     with no driver once the power trim is back to 1 and no limiter is set. Source writes its speed value to this pose in the driver's move: writing
     ours over it server-side stuttered on real servers (fine in single player), set in Think it lost to the networked value. Both this and the tach pose are applied in the car's `RenderOverride`
     (`ent.audioGaugePose`, chains any existing override)
-  - brake wings `AudioEngine.BRAKE_WINGS` (P1, SLR; sv_engine, bone manipulation): S held 0.5 s over 15 mph tilts the flap (P1 `spoilerbrake`
+  - brake wings `AudioEngine.BRAKE_WINGS` (P1, SLR; sv_engine, bone manipulation): S held 0.15 s rolling forwards over 15 mph (speed along the nose: reversing never counts) tilts the flap
+    (up in ~0.2 s `WING_FLAP_RATE` 5, folds ~0.4 s; the user: was 0.5 s / 2, too slow; the P1 wing's rise out of its tuck, `WING_MAIN_RATE` 0.8, is a separate animation, left as it was) (P1 `spoilerbrake`
     pose, SLR `spoiler` bone 22.5 deg: its airbrake pose compiled empty); the P1 wing sits tucked (`tuck` = per-bone pos/ang, placed
-    with the sandbox bone editor) and rises by the spoiler speed rules (`AudioEngine.WingSpeedUp`) or while the flap is up.
+    with the sandbox bone editor) and rises by the spoiler speed rules (`AudioEngine.WingSpeedUp`) only; its flap tilts only with the wing all the way out
+    (the user: braking with the spoiler down raised it), and the wing stays out until the flap has folded.
     `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
     shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
 - `cl_hud.lua`: the instrument cluster (the old panel is gone), centred at the bottom of the screen, no panel behind it
