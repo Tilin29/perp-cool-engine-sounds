@@ -144,6 +144,8 @@ local function track(entity)
 	captureBase(entity)
 	-- after a lua refresh, a car that is already running stays drivable
 	if entity.audioDrivable == nil then entity.audioDrivable = entity:GetNW2Bool("audio_on", false) end
+	-- the parking brake starts off: a new car rolls (released for a while, Source spawns it braked)
+	entity.audioParkReleaseUntil = CurTime() + 1
 	local profile = AudioEngine.DecodeProfile(entity:GetNW2String("audio_prof", ""))
 	if profile then AudioEngine.ApplyPerformance(entity, profile) end
 end
@@ -209,36 +211,60 @@ end
 	    held then). Getting out keeps it as it is.
 	  * Off, the car is in neutral: it rolls (downhill, pushed). Engine running and driven, Space is
 	    Source's own handbrake as ever.
-	A car nobody has got into has it on (Source holds a driverless car's handbrake on); getting in
-	sets it off until the driver switches it on. A released one is released again (SetHandbrake +
-	ReleaseHandbrake) the tick after getting out and every Think while nobody drives it: Source
-	resets the controls as the driver gets out (after the hook) and holds a driverless car's
-	handbrake on itself
+	  * Getting in always sets it off (the user's rule).
+	Off is the default: a car nobody has got into rolls too.
+	Source brakes a car with nobody on the pedals (vphysics CVehicleController::Update): throttle 0,
+	brake 0 and no handbrake becomes brake 0.1, ~0.2 g against the wheels' turning, its sign
+	flipping at a standstill, so it holds a car on most slopes and against pushing (the user: the
+	brake "gets applied" getting out). Released, the car gets a throttle too small to drive it
+	(COAST_THROTTLE, ~10 N) the way it rolls, which skips that brake; against the roll it would lock
+	the wheels (Source's "overcome gravity" hack, over 5 in/s). Getting out, Source also puts the
+	handbrake on (ExitVehicle -> TurnOff -> ResetControls), after the hook: a released driverless car
+	is set every tick for PARK_RELEASE_SECONDS after spawning / getting out and while its physics
+	are awake (rolling, pushed); asleep the controls stay as they were last set
 ]]
+local PARK_RELEASE_SECONDS = 1
+local COAST_THROTTLE = 0.001
+
+-- which way the car rolls, by Source's own sign (+ forward); 0 when it can't be read
+local function rollingSign(vehicle)
+	if not vehicle.GetOperatingParams then return 0 end
+	local succeeded, params = pcall(vehicle.GetOperatingParams, vehicle)
+	local speed = succeeded and istable(params) and tonumber(params.speed) or 0
+	if speed < 0 then return -1 end
+	return 1
+end
+
 local function parkBrakeOf(vehicle)
-	if vehicle.audioParkBrake == nil then return true end
-	return vehicle.audioParkBrake
+	return vehicle.audioParkBrake == true
 end
 AudioEngine.ParkBrakeOf = parkBrakeOf
 
 local function setParkBrake(vehicle, on)
 	vehicle.audioParkBrake = on
-	if vehicle:GetNW2Bool("audio_parkbrake", true) ~= on then vehicle:SetNW2Bool("audio_parkbrake", on) end
+	if vehicle:GetNW2Bool("audio_parkbrake", false) ~= on then vehicle:SetNW2Bool("audio_parkbrake", on) end
 end
 
--- the brake (and no throttle: neutral) on Source's controls. Released, ReleaseHandbrake too: Source
--- holds a driverless jeep's handbrake on itself (getting out with the brake off, the car stayed
--- braked: the user), and ReleaseHandbrake is GMod's way to let one roll
+-- the brake on Source's controls: on = handbrake, no throttle; off = released, coasting (see above)
 local function applyParkBrake(vehicle, on)
 	if vehicle.SetHandbrake then vehicle:SetHandbrake(on) end
 	if not on and vehicle.ReleaseHandbrake then vehicle:ReleaseHandbrake() end
-	if vehicle.SetThrottle then vehicle:SetThrottle(0) end
+	if vehicle.SetThrottle then vehicle:SetThrottle(on and 0 or COAST_THROTTLE * rollingSign(vehicle)) end
+end
+
+-- a released car nobody drives (see above)
+local function releaseDriverless(vehicle)
+	local physics = vehicle:GetPhysicsObject()
+	local awake = IsValid(physics) and not physics:IsAsleep()
+	if not awake and CurTime() > (vehicle.audioParkReleaseUntil or 0) then return end
+	applyParkBrake(vehicle, false)
+	if IsValid(physics) and not awake then physics:Wake() end
 end
 
 local function updateParkBrake(vehicle, driver)
 	if not IsValid(driver) then
 		vehicle.audioParkSpace, vehicle.audioParkWasDrivable = nil, nil
-		if not parkBrakeOf(vehicle) then applyParkBrake(vehicle, false) end
+		if not parkBrakeOf(vehicle) then releaseDriverless(vehicle) end
 		return
 	end
 	local space = driver:KeyDown(IN_JUMP)
@@ -261,12 +287,43 @@ local function updateParkBrake(vehicle, driver)
 	applyParkBrake(vehicle, parkBrakeOf(vehicle))
 end
 
+-- what holds a car: the parking brake as this file has it, and what Source / PERP have
+concommand.Add("audio_engine_parkbrake_info", function(requester)
+	if IsValid(requester) and not requester:IsSuperAdmin() then return end
+	local function say(text)
+		if IsValid(requester) then requester:PrintMessage(HUD_PRINTCONSOLE, text) else print(text) end
+	end
+	local vehicle = IsValid(requester) and requester:GetVehicle()
+	if IsValid(requester) and not (IsValid(vehicle) and trackedVehicles[vehicle]) then
+		local entity = requester:GetEyeTrace().Entity
+		vehicle = IsValid(entity) and trackedVehicles[entity] and entity or nil
+	end
+	if not IsValid(vehicle) then say("[Audio Engine] sit in or look at a car") return end
+	local physics = vehicle:GetPhysicsObject()
+	local succeeded, params = pcall(vehicle.GetOperatingParams, vehicle)
+	local function call(name)
+		if not vehicle[name] then return "n/a" end
+		local ok, value = pcall(vehicle[name], vehicle)
+		return ok and tostring(value) or "error"
+	end
+	say(string.format("[Audio Engine] parking brake of %s (sv_engine build: coast throttle)", tostring(vehicle)))
+	say(string.format("  ours: %s  NW2 audio_parkbrake: %s  release window: %.2f s left",
+		tostring(vehicle.audioParkBrake), tostring(vehicle:GetNW2Bool("audio_parkbrake", false)),
+		math.max(0, (vehicle.audioParkReleaseUntil or 0) - CurTime())))
+	say(string.format("  driver: %s  engine audio_on: %s  drivable: %s  IsEngineStarted: %s  IsEngineEnabled: %s",
+		tostring(vehicle:GetDriver()), tostring(vehicle:GetNW2Bool("audio_on", false)), tostring(vehicle.audioDrivable),
+		call("IsEngineStarted"), call("IsEngineEnabled")))
+	say(string.format("  Source speed: %s in/s  gear: %s  physics asleep: %s  PERP IsHandBraking: %s  PERP IsTurnedOn: %s",
+		succeeded and istable(params) and tostring(params.speed) or "?", succeeded and istable(params) and tostring(params.gear) or "?",
+		IsValid(physics) and tostring(physics:IsAsleep()) or "?", call("IsHandBraking"), call("IsTurnedOn")))
+end, nil, "Print the parking brake state of the car you sit in or look at (superadmin)")
+
 hook.Add("PlayerEnteredVehicle", "audio_engine", function(player, vehicle)
 	if not isOurs(vehicle) then return end
 	trackedVehicles[vehicle] = true
-	-- (a car nobody has set the brake on: off from here, so it's only on getting out when the
-	-- driver switched it on, or held Space getting out with the engine on: the user's rule)
-	if vehicle.audioParkBrake == nil then setParkBrake(vehicle, false) end
+	-- getting in, the parking brake is off (the user's rule): it's only on again once the driver
+	-- switches it on with the engine off, or holds Space getting out with the engine on
+	setParkBrake(vehicle, false)
 	local running = vehicle:GetNW2Bool("audio_on", false)
 	if running then
 		-- still idling (audio_engine_keeprunning): drive off straight away, unless it's mid start-up
@@ -291,10 +348,9 @@ hook.Add("PlayerLeaveVehicle", "audio_engine", function(player, vehicle)
 	if not braked then
 		local physics = vehicle:GetPhysicsObject()
 		if IsValid(physics) then physics:Wake() end
-		-- (Source resets the controls after this hook: released again once it has)
-		timer.Simple(0, function()
-			if IsValid(vehicle) and not IsValid(vehicle:GetDriver()) and not parkBrakeOf(vehicle) then applyParkBrake(vehicle, false) end
-		end)
+		-- (Source resets the controls to braked after this hook: Think releases it again every
+		-- tick for a while, the car's own Think run each time)
+		vehicle.audioParkReleaseUntil = CurTime() + PARK_RELEASE_SECONDS
 	end
 	if not keepRunningConVar:GetBool() then setEngine(vehicle, false) end
 end)
@@ -409,12 +465,16 @@ end
 local function updateBrakeWing(vehicle, brakeWingConfig, speedKmh, topSpeed, deltaTime, braking)
 	local wingUp = AudioEngine.WingSpeedUp(vehicle, speedKmh, topSpeed)
 	vehicle.audioBrakeHeldTime = braking and (vehicle.audioBrakeHeldTime or 0) + deltaTime or 0
-	local flapOn = vehicle.audioBrakeHeldTime >= AudioEngine.WING_BRAKE_HOLD or (vehicle.audioFlapShow or 0) > CurTime()   -- (wingflap preview)
+	local previewing = (vehicle.audioFlapShow or 0) > CurTime()   -- (wingflap preview)
+	local flapOn = vehicle.audioBrakeHeldTime >= AudioEngine.WING_BRAKE_HOLD or previewing
 	if brakeWingConfig.tuck then
-		-- the wing rises out of its tucked place (speed rules, or the flap needs it up)
-		local mainFraction = glide(vehicle.audioWingRaise or 0, (wingUp or flapOn) and 1 or 0, deltaTime * AudioEngine.WING_MAIN_RATE, deltaTime * AudioEngine.WING_MAIN_RATE)
+		-- the wing rises out of its tucked place by the speed rules only (braking doesn't raise it),
+		-- and stays out until the flap has folded; the flap tilts only once the wing is all the way out
+		local flapRaised = (vehicle.audioFlapRaise or 0) > 0
+		local mainFraction = glide(vehicle.audioWingRaise or 0, (wingUp or previewing or flapRaised) and 1 or 0, deltaTime * AudioEngine.WING_MAIN_RATE, deltaTime * AudioEngine.WING_MAIN_RATE)
 		vehicle.audioWingRaise = mainFraction
 		for i, tuck in ipairs(brakeWingConfig.tuck) do manipulateBone(vehicle, "tuck" .. i, tuck.bone, 1 - mainFraction, tuck.pos, tuck.ang) end
+		flapOn = flapOn and mainFraction >= 1
 	end
 	local flapFraction = glide(vehicle.audioFlapRaise or 0, flapOn and 1 or 0, deltaTime * AudioEngine.WING_FLAP_RATE, deltaTime * AudioEngine.WING_FLAP_RATE * 0.5)
 	vehicle.audioFlapRaise = flapFraction
@@ -453,9 +513,13 @@ hook.Add("Tick", "audio_engine_wings", function()
 					end
 				end
 				if brakeWingConfig then
+					-- braking = S held while rolling forwards: the speed along the nose (from the wheel
+					-- attachments, AudioEngine.CarGeometry), so S held reversing never counts
 					local driver = vehicle:GetDriver()
+					local noseDirection = vehicle:LocalToWorld(AudioEngine.CarGeometry(vehicle).forward) - vehicle:GetPos()
+					local forwardKmh = IsValid(physics) and physics:GetVelocity():Dot(noseDirection) * 0.09144 or 0
 					local braking = IsValid(driver) and driver:KeyDown(IN_BACK) and not driver:KeyDown(IN_FORWARD)
-						and speedKmh > AudioEngine.WING_BRAKE_MPH * 1.609344
+						and forwardKmh > AudioEngine.WING_BRAKE_MPH * 1.609344
 					updateBrakeWing(vehicle, brakeWingConfig, speedKmh, topSpeed, deltaTime, braking)
 				end
 				vehicle.audioWingsSettled = asleep and (vehicle.audioFlapRaise or 0) == 0 and (vehicle.audioWingRaise or 0) == 0

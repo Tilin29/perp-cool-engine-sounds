@@ -1222,16 +1222,17 @@ AudioEngine.GAUGE_PARTS = {
 	WING_BRAKE_MPH for WING_BRAKE_HOLD s, and folds when the braking ends.
 	  tuck: { bone, pos, ang } list: where the wing's bones sit tucked into the body (bone manipulation,
 	        taken from the sandbox bone editor with audio_engine_bonedump); they go to 0 as it rises by
-	        the same speed rules as the spoilers above (and while the brake flap is up)
+	        the same speed rules as the spoilers above only (braking doesn't raise it); the flap tilts
+	        only once the wing is all the way out, and the wing stays out until the flap has folded
 	  flapPose/flapBone+flapAng: the brake flap, as a pose (0..1) or a bone rotation (pitch yaw roll)
 	P1: the model stores its wing raised. Its flap is
 	the spoilerbrake pose (named twice in the model, the wing uses the first). SLR: its airbrake pose
 	compiled empty; the source data has the flap at 22.5 deg about its own z.
 ]]
-AudioEngine.WING_BRAKE_HOLD = 0.5
-AudioEngine.WING_BRAKE_MPH = 15
+AudioEngine.WING_BRAKE_HOLD = 0.15 -- (was 0.5: the flap came up late in a stop)
+AudioEngine.WING_BRAKE_MPH = 15    -- forward speed: S held reversing never raises it
 AudioEngine.WING_MAIN_RATE = 0.8 -- share of the travel per second (~1.3 s)
-AudioEngine.WING_FLAP_RATE = 2   -- brake flap up per second (~0.5 s); folds at half this
+AudioEngine.WING_FLAP_RATE = 5   -- brake flap up per second (~0.2 s; was 2); folds at half this (~0.4 s)
 AudioEngine.BRAKE_WINGS = {
 	["McLaren P1"] = { flapPose = "spoilerbrake", tuck = {   -- placed with the bone editor (audio_engine_bonedump)
 		{ bone = "spoiler_main", pos = { 0, 9, -13 } },

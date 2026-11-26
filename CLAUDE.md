@@ -225,9 +225,11 @@ Porting the sounds into PERP: `PORTING.md`.
     with no driver once the power trim is back to 1 and no limiter is set. Source writes its speed value to this pose in the driver's move: writing
     ours over it server-side stuttered on real servers (fine in single player), set in Think it lost to the networked value. Both this and the tach pose are applied in the car's `RenderOverride`
     (`ent.audioGaugePose`, chains any existing override)
-  - brake wings `AudioEngine.BRAKE_WINGS` (P1, SLR; sv_engine, bone manipulation): S held 0.5 s over 15 mph tilts the flap (P1 `spoilerbrake`
+  - brake wings `AudioEngine.BRAKE_WINGS` (P1, SLR; sv_engine, bone manipulation): S held 0.15 s rolling forwards over 15 mph (speed along the nose: reversing never counts) tilts the flap
+    (up in ~0.2 s `WING_FLAP_RATE` 5, folds ~0.4 s; the user: was 0.5 s / 2, too slow; the P1 wing's rise out of its tuck, `WING_MAIN_RATE` 0.8, is a separate animation, left as it was) (P1 `spoilerbrake`
     pose, SLR `spoiler` bone 22.5 deg: its airbrake pose compiled empty); the P1 wing sits tucked (`tuck` = per-bone pos/ang, placed
-    with the sandbox bone editor) and rises by the spoiler speed rules (`AudioEngine.WingSpeedUp`) or while the flap is up.
+    with the sandbox bone editor) and rises by the spoiler speed rules (`AudioEngine.WingSpeedUp`) only; its flap tilts only with the wing all the way out
+    (the user: braking with the spoiler down raised it), and the wing stays out until the flap has folded.
     `audio_engine_bonedump` (superadmin) writes the car's bone manipulations to data/audio_engine_bones.txt; `audio_engine_wingflap`
     shows the flap for 10 s. `lua_run` lines over ~255 chars are cut, and pasting several lines joins them
 - `cl_hud.lua`: the instrument cluster (the old panel is gone), centred at the bottom of the screen, no panel behind it
@@ -274,9 +276,14 @@ Porting the sounds into PERP: `PORTING.md`.
     again every Think while driverless). Engine off it's set on Source's controls every Think (+ throttle 0); driving, Space is
     Source's handbrake and the latch is off. The cluster's handbrake lamp shows it while the engine isn't running.
     Released = SetHandbrake(false) + ReleaseHandbrake() (Source holds a driverless jeep's handbrake on: getting out with it off,
-    the car stayed braked, the user), also the tick after getting out. A car nobody has set it on gets it off on being got into
-    (it was on: getting in and out of a parked car untouched put it on; the user's rule: only on if switched on, or Space held
-    getting out with the engine on).
+    the car stayed braked, the user), also the tick after getting out. Off by default (a new car rolls too) and off on getting in, always
+    (the user's rule: only on if switched on with the engine off, or Space held getting out with the engine on). What held the cars
+    (the user: getting out without Space, the car stopped rolling) wasn't the handbrake: vphysics `CVehicleController::Update` turns
+    throttle 0 + brake 0 + no handbrake into brake 0.1 (~0.2 g, sign flipping at a standstill: holds a car on slopes and against
+    pushing). Released, the car gets `COAST_THROTTLE` 0.001 (~10 N) signed by `GetOperatingParams().speed` (against the roll Source's
+    "overcome gravity" hack would lock the wheels), set every tick for `PARK_RELEASE_SECONDS` 1 after spawning / getting out (exit's
+    TurnOff -> ResetControls puts the handbrake on after the hook) and while its physics are awake. Source code checked: SDK 2013
+    vehicle_base / fourwheelvehiclephysics / hl2 vehicle_jeep, vphysics physics_vehicle.cpp (nillerusr/source-engine).
     Engine off, Source doesn't steer: sv_handling's tick puts the model's steering (`state.steer`) on with `SetSteering(-steer, 0)`.
     The user's design; not yet run in game (whether Source re-applies a driverless handbrake by itself is unknown).
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
