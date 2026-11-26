@@ -275,10 +275,13 @@ Porting the sounds into PERP: `PORTING.md`.
     Source's handbrake and the latch is off. The cluster's handbrake lamp shows it while the engine isn't running.
     Released = SetHandbrake(false) + ReleaseHandbrake() (Source holds a driverless jeep's handbrake on: getting out with it off,
     the car stayed braked, the user), also the tick after getting out. Off by default (a new car rolls too) and off on getting in, always
-    (the user's rule: only on if switched on with the engine off, or Space held getting out with the engine on). Source stops a
-    driverless jeep's own Think, which is what hands the controls to the physics, so a released driverless car gets the release +
-    `NextThink` every tick for `PARK_RELEASE_SECONDS` 1 after spawning / getting out and while its physics are awake (it was
-    default-on and SetHandbrake alone: cars stayed braked, the user).
+    (the user's rule: only on if switched on with the engine off, or Space held getting out with the engine on). What held the cars
+    (the user: getting out without Space, the car stopped rolling) wasn't the handbrake: vphysics `CVehicleController::Update` turns
+    throttle 0 + brake 0 + no handbrake into brake 0.1 (~0.2 g, sign flipping at a standstill: holds a car on slopes and against
+    pushing). Released, the car gets `COAST_THROTTLE` 0.001 (~10 N) signed by `GetOperatingParams().speed` (against the roll Source's
+    "overcome gravity" hack would lock the wheels), set every tick for `PARK_RELEASE_SECONDS` 1 after spawning / getting out (exit's
+    TurnOff -> ResetControls puts the handbrake on after the hook) and while its physics are awake. Source code checked: SDK 2013
+    vehicle_base / fourwheelvehiclephysics / hl2 vehicle_jeep, vphysics physics_vehicle.cpp (nillerusr/source-engine).
     Engine off, Source doesn't steer: sv_handling's tick puts the model's steering (`state.steer`) on with `SetSteering(-steer, 0)`.
     The user's design; not yet run in game (whether Source re-applies a driverless handbrake by itself is unknown).
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.

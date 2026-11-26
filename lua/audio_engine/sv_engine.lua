@@ -212,15 +212,28 @@ end
 	  * Off, the car is in neutral: it rolls (downhill, pushed). Engine running and driven, Space is
 	    Source's own handbrake as ever.
 	  * Getting in always sets it off (the user's rule).
-	Off is the default: a car nobody has got into rolls too. Source brakes a driverless car itself
-	(it spawns braked, and resets the controls to braked as the driver gets out, after the hook),
-	and stops running a driverless jeep's Think, which is what hands the controls to the physics:
-	a SetHandbrake(false) alone never reached the wheels. So a released driverless car gets
-	SetHandbrake(false) + ReleaseHandbrake() and its Think run (NextThink) every tick for
-	PARK_RELEASE_SECONDS after spawning / getting out, and while its physics are awake (rolling,
-	pushed); asleep the wheels stay as they were last set
+	Off is the default: a car nobody has got into rolls too.
+	Source brakes a car with nobody on the pedals (vphysics CVehicleController::Update): throttle 0,
+	brake 0 and no handbrake becomes brake 0.1, ~0.2 g against the wheels' turning, its sign
+	flipping at a standstill, so it holds a car on most slopes and against pushing (the user: the
+	brake "gets applied" getting out). Released, the car gets a throttle too small to drive it
+	(COAST_THROTTLE, ~10 N) the way it rolls, which skips that brake; against the roll it would lock
+	the wheels (Source's "overcome gravity" hack, over 5 in/s). Getting out, Source also puts the
+	handbrake on (ExitVehicle -> TurnOff -> ResetControls), after the hook: a released driverless car
+	is set every tick for PARK_RELEASE_SECONDS after spawning / getting out and while its physics
+	are awake (rolling, pushed); asleep the controls stay as they were last set
 ]]
 local PARK_RELEASE_SECONDS = 1
+local COAST_THROTTLE = 0.001
+
+-- which way the car rolls, by Source's own sign (+ forward); 0 when it can't be read
+local function rollingSign(vehicle)
+	if not vehicle.GetOperatingParams then return 0 end
+	local succeeded, params = pcall(vehicle.GetOperatingParams, vehicle)
+	local speed = succeeded and istable(params) and tonumber(params.speed) or 0
+	if speed < 0 then return -1 end
+	return 1
+end
 
 local function parkBrakeOf(vehicle)
 	return vehicle.audioParkBrake == true
@@ -232,23 +245,20 @@ local function setParkBrake(vehicle, on)
 	if vehicle:GetNW2Bool("audio_parkbrake", false) ~= on then vehicle:SetNW2Bool("audio_parkbrake", on) end
 end
 
--- the brake (and no throttle: neutral) on Source's controls. Released, ReleaseHandbrake too: Source
--- holds a driverless jeep's handbrake on itself (getting out with the brake off, the car stayed
--- braked: the user), and ReleaseHandbrake is GMod's way to let one roll
+-- the brake on Source's controls: on = handbrake, no throttle; off = released, coasting (see above)
 local function applyParkBrake(vehicle, on)
 	if vehicle.SetHandbrake then vehicle:SetHandbrake(on) end
 	if not on and vehicle.ReleaseHandbrake then vehicle:ReleaseHandbrake() end
-	if vehicle.SetThrottle then vehicle:SetThrottle(0) end
+	if vehicle.SetThrottle then vehicle:SetThrottle(on and 0 or COAST_THROTTLE * rollingSign(vehicle)) end
 end
 
--- a released car nobody drives: the controls set and handed to the physics (see above)
+-- a released car nobody drives (see above)
 local function releaseDriverless(vehicle)
 	local physics = vehicle:GetPhysicsObject()
 	local awake = IsValid(physics) and not physics:IsAsleep()
 	if not awake and CurTime() > (vehicle.audioParkReleaseUntil or 0) then return end
 	applyParkBrake(vehicle, false)
 	if IsValid(physics) and not awake then physics:Wake() end
-	vehicle:NextThink(CurTime())
 end
 
 local function updateParkBrake(vehicle, driver)
