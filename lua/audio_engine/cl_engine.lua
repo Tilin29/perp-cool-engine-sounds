@@ -2,7 +2,7 @@
 	Audio Engine - per-car engine sound (client)
 
 	Each client runs the rpm/gear model for every registered car near it (from the car's speed and
-	the driver's keys, which the server networks) and plays the generated loops:
+	the driver's keys, which the server networks) and plays the baked loops:
 	  * two neighbouring rpm bands at a time, pitched to the exact rpm and cross-faded
 	  * on/off throttle layers of a band cross-faded by throttle (they share firing phase)
 	  * a rev-limiter loop, start-up / shut-down one-shots and overrun pops
@@ -11,7 +11,6 @@
 local AudioEngine = AUDIO_ENGINE
 local Drivetrain = AudioEngine.Drivetrain
 local Bank = AudioEngine.Bank
-local Synth = AudioEngine.Synth
 
 local volumeConVar = CreateClientConVar("audio_engine_volume", "1", true, false, "Engine sound volume (0-2)", 0, 2)
 -- the key that switches the engine on and off, e.g. i, k, f1, or none
@@ -171,13 +170,15 @@ local VOLUME_SLEW = 4
 -- the car's top speed, down to SC_FAST_GAIN (-8 dB): by km/h slow cars never reached the fade
 local SC_GAIN = 0.7
 local SC_FADE_FROM, SC_FADE_TO, SC_FAST_GAIN = 0.4, 0.8, 0.4
--- setGroup keys of the whine's bands, and each env bank's { on, off } sound names per variant.
--- Built on first use, not at load: a Lua refresh can run this file against an older Synth
+-- the whine's baked loops (env bank sc_<variant>_<band>): the rpm each band was rendered at, and
+-- each variant's level (as the old synth baked them)
+local SUPERCHARGER_BANDS = { 375, 750, 1500, 3000, 6000 }
+local SUPERCHARGER_LEVELS = { sport = 1, regular = 0.6, heavy = 0.45 }
+-- setGroup keys of the whine's bands, and each env bank's { on, off } sound names per variant
 local SUPERCHARGER_GROUP_KEYS = {}
+for bandIndex = 1, #SUPERCHARGER_BANDS do SUPERCHARGER_GROUP_KEYS[bandIndex] = "sc" .. bandIndex end
 local superchargerNameCache = setmetatable({}, { __mode = "k" })
 local function superchargerBandNames(env, variant)
-	if not Synth.SC_BANDS then return nil end
-	for bandIndex = #SUPERCHARGER_GROUP_KEYS + 1, #Synth.SC_BANDS do SUPERCHARGER_GROUP_KEYS[bandIndex] = "sc" .. bandIndex end
 	local byVariant = superchargerNameCache[env]
 	if not byVariant then
 		byVariant = {}
@@ -186,7 +187,7 @@ local function superchargerBandNames(env, variant)
 	local names = byVariant[variant]
 	if names == nil then
 		names = {}
-		for bandIndex = 1, #Synth.SC_BANDS do
+		for bandIndex = 1, #SUPERCHARGER_BANDS do
 			local onName = env["sc_" .. variant .. "_" .. bandIndex]
 			local offName = env["sc_" .. variant .. "_" .. bandIndex .. "_off"]
 			if not (onName and offName) then
@@ -641,7 +642,7 @@ local function updateSound(car, deltaTime)
 		-- (0.06 from 60 km/h roared over the engine on fast cars)
 		windVolume = windLevel * math.Clamp((speedKmh - 80) / 240, 0, 1) ^ 2 * 0.015
 	end
-	-- each sound's real peak (measured when it was generated); the on/off layers of a band
+	-- each sound's real peak (measured when it was rendered); the on/off layers of a band
 	-- share their firing phase so they add directly, separate sounds add by power
 	local peaks = bank.peak or NO_PEAKS
 	-- turbo sounds live in the shared bank (Bank.env): any engine can have them
@@ -683,18 +684,18 @@ local function updateSound(car, deltaTime)
 		At speed it fades back (to SC_FAST_GAIN by SC_FADE_TO of top speed): cruising, the steady
 		whine wore on the ear over the engine; revving and pulling away it's at full level.
 		config.scPitch (sh_carlist SC_PITCH) moves the whine for a blower geared unlike the others.
-		The whine is in octave bands (cl_synth SC_BANDS), cross-faded at equal power by the revs x
+		The whine is in octave bands (SUPERCHARGER_BANDS), cross-faded at equal power by the revs x
 		scPitch: one loop pitched from idle to redline stepped audibly at low revs.
 	]]
 	local superchargerKind = config.supercharger
-	local superchargerVariant = superchargerKind and Synth.SC_VARIANTS[superchargerKind]
-	local superchargerNames = superchargerVariant and not config.electric and sharedBank and sharedBank.ready and superchargerBandNames(sharedBank, superchargerKind)
+	local superchargerLevel = superchargerKind and SUPERCHARGER_LEVELS[superchargerKind]
+	local superchargerNames = superchargerLevel and not config.electric and sharedBank and sharedBank.ready and superchargerBandNames(sharedBank, superchargerKind)
 	local superchargerPlaying = superchargerNames and true or false
 	local superchargerRpm = rpm + (config.redline * 0.985 - rpm) * car.limiterWeight
 	-- the two bands around the whine's rpm and their weights
 	local lowerBand, lowerBandWeight, upperBandWeight = 1, 1, 0
 	local whineRpm = (config.scPitch or 1) * superchargerRpm
-	local whineBands = Synth.SC_BANDS
+	local whineBands = SUPERCHARGER_BANDS
 	if not superchargerPlaying then
 		-- no whine: nothing to weigh
 	elseif whineRpm >= whineBands[#whineBands] then
@@ -712,7 +713,7 @@ local function updateSound(car, deltaTime)
 	if superchargerPlaying and engineState.on and not idleOnly then
 		local topSpeedShare = abs(car.speedAlongNose) * 3.6 / max(config.topSpeed or 250, 30)
 		local fastFade = math.Clamp((topSpeedShare - SC_FADE_FROM) / (SC_FADE_TO - SC_FADE_FROM), 0, 1)
-		superchargerVolume = loopVolume * SC_GAIN * superchargerVariant.level * min(1, superchargerRpm / config.redline) ^ 0.9 * (1 - (1 - SC_FAST_GAIN) * fastFade)
+		superchargerVolume = loopVolume * SC_GAIN * superchargerLevel * min(1, superchargerRpm / config.redline) ^ 0.9 * (1 - (1 - SC_FAST_GAIN) * fastFade)
 	end
 	local bypassTarget = max(engineState.soundThrottle, engineState.fuelCut and engineState.throttle or 0)
 	car.superchargerThrottle = approach(car.superchargerThrottle or 0, bypassTarget, deltaTime / (bypassTarget > (car.superchargerThrottle or 0) and 0.15 or 0.1))
@@ -771,7 +772,7 @@ local function updateSound(car, deltaTime)
 	-- turbos: the whistle rises with boost, the blow-off valve sighs when the throttle shuts
 	if turboPlaying then
 		local pitch = math.Clamp(100 * pitchScale * (0.45 + 0.55 * boost) * (0.9 + 0.2 * rpm / config.redline), 20, 220)
-		-- the turbo sounds are generated 6 dB hot: half volume is the default level, so the
+		-- the turbo sounds are rendered 6 dB hot: half volume is the default level, so the
 		-- profile's turbo and blow-off volumes can go to 200%
 		local turboVolume = config.profile.turboVol or 1
 		setGroup(car, "turbo", singleNameList(sharedBank.turbo), volumeList(car, "turbo", loopVolume * boost ^ 1.5 * 0.5 * turboVolume), pitch, deltaTime)
@@ -991,18 +992,14 @@ local function median(samples, value)
 	return max(min(samples[1], samples[2]), min(max(samples[1], samples[2]), samples[3]))
 end
 
--- isOwnCar: the car you drive, whose speed is taken from the driving prediction when it runs
--- (cl_handling): Source's position is ~a ping + interpolation behind, and the revs and gear
--- changes pulling away or braking followed it that late
-local function sampleSpeed(car, noseDirection, isOwnCar)
+local function sampleSpeed(car, noseDirection)
 	local now = RealTime()
 	local elapsed = now - car.sampleTime
 	if elapsed < SPEED_SAMPLE then return end
 	local position = car.position   -- (this frame's, from updateCar)
-	local predictedVelocity = isOwnCar and AudioEngine.PredictedVelocity and AudioEngine.PredictedVelocity(car.entity)
-	local measuredVelocity = predictedVelocity or (position - car.samplePosition) / elapsed   -- inches/s
+	local measuredVelocity = (position - car.samplePosition) / elapsed   -- inches/s
 	car.samplePosition, car.sampleTime = position, now
-	if not predictedVelocity and (elapsed > SPEED_GAP or measuredVelocity:Length() * 0.0254 > 150) then return end   -- (over 150 m/s: teleported)
+	if elapsed > SPEED_GAP or measuredVelocity:Length() * 0.0254 > 150 then return end   -- (over 150 m/s: teleported)
 	car.velocity = car.velocity + (measuredVelocity - car.velocity) * min(1, elapsed * 8)
 	local upDirection = car.entity:GetUp()
 	car.measuredSpeedAlongNose = median(car.speedAlongNoseSamples, measuredVelocity:Dot(noseDirection) * 0.0254)
@@ -1083,8 +1080,6 @@ local function updateCar(car, deltaTime)
 		cameBackFromDormancy = true
 	end
 
-	-- follow the car's engine profile (retuned in game); its sounds are generated on demand,
-	-- the old engine keeps playing until the new one is ready
 	local config = AudioEngine.GetEngineConfig(entity) or car.config
 	car.config = config
 	local player = LocalPlayer()
@@ -1106,16 +1101,16 @@ local function updateCar(car, deltaTime)
 	if car.outOfRange and not car.silencedByRange then stopAll(car) end
 	car.silencedByRange = car.outOfRange
 
-	-- its sounds: loaded (or generated) only once someone can hear the car
+	-- its sounds (baked files): loaded only once someone can hear the car
 	if not car.outOfRange then
-		local bank = Bank.Get(config, car.stockConfig, isOwnCar)
-		if bank ~= car.bank and bank.ready then
+		local bank = Bank.Get(config, car.stockConfig)
+		if bank and bank ~= car.bank then
 			stopAll(car)
 			car.bank = bank
 		end
 	end
-	-- the shared bank was rebuilt (Bank.RebuildAll): its sounds have new names, and the loops still
-	-- on the old ones would play on unheld. Start over on the new ones
+	-- the shared bank loaded (the content mounted after joining): start over on it
+	Bank.GetEnv()
 	if Bank.env ~= car.envBank then
 		if car.envBank then stopAll(car) end
 		car.envBank = Bank.env
@@ -1161,7 +1156,7 @@ local function updateCar(car, deltaTime)
 	car.worldNoseDirection = noseDirection
 	noseDirection:Set(localForward(car))
 	noseDirection:Rotate(entity:GetAngles())
-	sampleSpeed(car, noseDirection, isOwnCar)
+	sampleSpeed(car, noseDirection)
 	car.speedAlongNose = car.speedAlongNose + (car.measuredSpeedAlongNose - car.speedAlongNose) * min(1, deltaTime * 10)
 	-- driving it but watching from a camera, you hear it from outside like anyone else
 	local listenerInside = isOwnCar and GetViewEntity() == player
@@ -1294,8 +1289,6 @@ local function updateCarSafely(car, stepTime)
 	end
 end
 hook.Add("Think", "audio_engine_cars", function()
-	-- (the prediction moves your car's position for the frame's sound update: back first, cl_handling)
-	if AudioEngine.PredictSoundBack then AudioEngine.PredictSoundBack() end
 	local now = RealTime()
 	if now >= nextVehicleScan then
 		nextVehicleScan = now + 0.5
@@ -1388,19 +1381,17 @@ end
 	start again on its next update (a short fade in). Other modules (siren, horn) restart theirs on
 	the audio_engine/restart-sounds hook.
 ]]
--- (the banks too: a generated one, a tuned engine's, is as dead as the siren's tones; baked ones
--- load again from their files at once)
+-- (the banks are baked WAV files: they play again at once)
 local function restartEngineSounds()
 	for _, car in pairs(cars) do stopAll(car) end
-	Bank.RebuildAll()
 end
 function AudioEngine.RestartSounds()
 	restartEngineSounds()
 	hook.Run("audio_engine/restart-sounds")
 end
 
--- "clean up everything" (game.CleanUpMap) leaves generated sounds silent as stopsound does (the
--- user: the sirens stopped working); unlike stopsound it's announced, so everything restarts at once.
+-- "clean up everything" (game.CleanUpMap) stops the cars' loops as stopsound does (and leaves the
+-- siren's generated tones silent: the user); unlike stopsound it's announced, so everything restarts at once.
 -- The siren and horn modules hook it themselves (each works without the engine)
 hook.Add("PostCleanupMap", "audio_engine_restart", restartEngineSounds)
 

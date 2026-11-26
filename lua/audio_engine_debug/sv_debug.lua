@@ -84,7 +84,7 @@ net.Receive("audio_dbg_tune", function(_, requester)
 	local targetTable = tunable and AudioEngine[tunable[1]]
 	if not (targetTable and newValue == newValue) then return end
 	targetTable[tunable[2]] = math.Clamp(newValue, tunable[3], tunable[4])
-	-- the clients' prediction runs the same model: they get the tuned values too
+	-- the clients get the tuned values too (the debug menu shows them)
 	if tunable[1] == "HANDLING" then SetGlobal2String("audio_dbg_handling", EngineDebug.EncodeHandling(EngineDebug.HANDLING_DEFAULT)) end
 	sendState(requester)
 end)

@@ -24,25 +24,17 @@
 AUDIO_ENGINE = AUDIO_ENGINE or {}
 AUDIO_ENGINE.Cars = AUDIO_ENGINE.Cars or {}
 
--- the in-game engine editor (the Rev Bench tuning menu): off unless the server turns it on
-AUDIO_ENGINE.editorConVar = CreateConVar("audio_engine_editor", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED,
-	"1 = the in-game engine editor (Rev Bench menu: !engine, audio_engine_menu, context menu) is available; 0 = off")
-function AUDIO_ENGINE.EditorEnabled() return AUDIO_ENGINE.editorConVar:GetBool() end
-
 --[[ The engine's convars by name, for audio_engine_settings (below) and audio_engine_reset_settings (cl_engine).
-	PLAYER_SETTINGS: client convars, made in cl_engine, cl_hud, cl_handling, cl_soundbank and cl_police.
-	SERVER_SETTINGS: made in sh_config, sh_perp, sh_handling, sv_engine, sv_cruise and sv_seats; a client can
+	PLAYER_SETTINGS: client convars, made in cl_engine, cl_hud and cl_police.
+	SERVER_SETTINGS: made in sh_perp, sh_handling, sv_engine, sv_cruise and sv_seats; a client can
 	read only the replicated ones. A new convar goes in one of these lists. ]]
 AUDIO_ENGINE.PLAYER_SETTINGS = {
 	"audio_engine_volume", "audio_engine_startkey", "audio_engine_roadnoise", "audio_engine_windnoise",
 	"audio_engine_doppler", "audio_engine_passby", "audio_engine_tunnel", "audio_engine_maxcars", "audio_engine_range",
 	"audio_engine_hud", "audio_engine_units", "audio_engine_hud_scale", "audio_engine_cluster",
-	"audio_engine_predict", "audio_engine_predict_amount", "audio_engine_predict_others", "audio_engine_predict_debug", "audio_engine_predict_sound",
-	"audio_engine_samplerate", "audio_engine_genbudget", "audio_engine_maxsounds", "audio_engine_baked",
 	"audio_engine_lightkey", "audio_engine_indicator_volume",
 }
 AUDIO_ENGINE.SERVER_SETTINGS = {
-	"audio_engine_editor", "audio_engine_tuneaccess", "audio_engine_tunecooldown",
 	"audio_engine_mutestock", "audio_engine_muteskid", "audio_engine_mutetyrescrape",
 	"audio_engine_drivemodel", "audio_engine_autostart", "audio_engine_keeprunning", "audio_engine_emotionstart",
 	"audio_engine_cruise", "audio_engine_seats",

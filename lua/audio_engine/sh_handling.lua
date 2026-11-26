@@ -1,32 +1,13 @@
 --[[
 	Audio Engine - handling model (shared)
 
-	Why it is shared: Source simulates every car on the server only. A driver's key reaches the
-	server half a ping later, and what the server did comes back the other half later, then sits
-	in the client's interpolation buffer (cl_interp, ~0.1 s). At 150 ms ping a steering key shows
-	on screen ~0.25 s after it was pressed. Moving the car to the client would make crashes
-	between players disagree, so the server stays the only authority, and this model is what
-	lets the driver's client run ahead of it:
-
-	  server (sv_handling.lua)  Source's jeep still does the engine, brakes, suspension and every
-	                            collision. On top of it, each tick, this model takes over the
-	                            car's rotation and sideways grip: the yaw rate follows what the
-	                            steering asks (bicycle model, capped by the tyres' grip), and the
-	                            sideways speed is held by a grip limit. A car's motion on the
-	                            ground is then mostly this model, which both sides know exactly.
-	                            The driver gets the car's state every other tick, tagged with the
-	                            last user command the server ran.
-	  client (cl_handling.lua)  runs the same model from that state through every command it
-	                            sent since (Source's own player prediction, for the car), and by
-	                            default turns the car where Source shows it to the heading that
-	                            gives (the heading lead, below); audio_engine_predict_position 1
-	                            draws the whole car there instead. Crashes, kerbs and other cars
-	                            are still the server's: they show up one ping late, blended,
-	                            never as a different outcome.
+	Source simulates every car on the server only. On top of Source's jeep (engine, brakes,
+	suspension and every collision), sv_handling.lua runs this model each tick: it takes over the
+	car's rotation and sideways grip. The yaw rate follows what the steering asks (bicycle model,
+	capped by the tyres' grip), and the sideways speed is held by a grip limit.
 
 	Everything below is plain Lua on numbers (no Vector/Angle), so the server can run it for 40
-	cars a tick without allocating, the client can replay ~25 commands a frame, and dev/baker/
-	test_prediction.js runs it offline with a simulated 150 ms connection.
+	cars a tick without allocating, and dev/baker/test_handling.js runs it offline.
 
 	Units: positions and velocities in inches (Source units) and inches/s; yaw rate in deg/s,
 	left (counter-clockwise from above) = +; settings in m/s, g and degrees.
@@ -39,7 +20,7 @@ local Handling = AudioEngine.Handling or {}
 AudioEngine.Handling = Handling
 
 local abs, min, max, sqrt, floor = math.abs, math.min, math.max, math.sqrt, math.floor
-local sin, cos, tan, exp = math.sin, math.cos, math.tan, math.exp
+local tan = math.tan
 local atan2 = math.atan2 or math.atan
 local DEG, RAD = 180 / math.pi, math.pi / 180
 
@@ -56,10 +37,10 @@ local function approach(value, target, step)
 end
 Handling.Clamp = clamp
 
--- the server's switch (replicated: the clients' prediction reads it too)
+-- the server's switch (replicated: clients read it for audio_engine_settings)
 Handling.driveModelConVar = Handling.driveModelConVar or CreateConVar("audio_engine_drivemodel", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
 	"1 = the addon's handling model on registered cars (rotation follows the steering, grip limit, handbrake drifts; "
-		.. "sh_handling.lua); 0 = Source's own tyres alone. The driver's prediction runs either way")
+		.. "sh_handling.lua); 0 = Source's own tyres alone")
 
 ---------------------------------------------------------------------------
 -- settings (per car: AudioEngine.CAR_HANDLING[name] over these; tuned live by the debug menu)
@@ -184,74 +165,6 @@ function Handling.TurnLimit(settings, speed)
 	return limit
 end
 
---[[
-	The model's input buffer (server, once a tick, for a driver whose client predicts, on a car the
-	model runs on): the user
-	command whose keys the model runs this tick. Source runs a packet's commands as it arrives, the
-	car's physics steps once a tick, and the model used to take the newest command's keys: whenever
-	packets didn't line up with ticks (cl_cmdrate 30 at 66 tick; at 22 tick any network jitter near
-	a tick's edge) one tick ran no new command and the next skipped one. The driver's replay can't
-	know which ticks those will be, so every key change could land a tick early or late: at 22 tick
-	the drawn car turned on ~2.5 deg past the server's after a turn and turned back (the user: "it's
-	done turning, then it snaps into the server's"), and in held turns the rotation jittered.
-	So the model takes them one a tick, in order, with one waiting (as Rocket League's server buffers
-	inputs): a command up to a tick late is still there in time. Nothing new: the last again (the
-	buffer refills a command); one spare all of BUFFER_TRIM seconds: one dropped, a tick of lag less;
-	more than BUFFER_RESET behind, back of it (a lag spike, a new driver).
-	The number goes to the driver: their replay starts after it, one command a tick (test_prediction
-	at 22 tick, 150 ms: the turn-back after a release 2.5 -> 0.9 deg). It costs one tick of lag on the
-	server's car (the model's turn; Source's throttle, brakes and wheels take the newest command)
-]]
-local BUFFER_TRIM, BUFFER_RESET = 1, 8
-function Handling.NewInputBuffer() return { command = nil, fewest = math.huge, ticks = 0 } end
-
--- the command to run this tick, given the newest one the server has had (nil: none yet)
-function Handling.NextCommand(buffer, newest, tickInterval)
-	if not newest then return buffer.command end
-	local command = buffer.command
-	if not command or command > newest or newest - command > BUFFER_RESET then
-		command = newest - 1
-		buffer.fewest, buffer.ticks = math.huge, 0
-	elseif newest > command then
-		command = command + 1
-	end
-	buffer.fewest = min(buffer.fewest, newest - command)
-	buffer.ticks = buffer.ticks + 1
-	if buffer.ticks * tickInterval >= BUFFER_TRIM then
-		if buffer.fewest >= 2 then command = command + 1 end
-		buffer.fewest, buffer.ticks = math.huge, 0
-	end
-	buffer.command = command
-	return command
-end
-
---[[
-	The client's command clock: the command number now, continuously (client). Commands are made at
-	the start of the frame their tick falls in, so the time a command was seen is up to a frame late,
-	and at 50 fps against 22 or 66 tick the replay's length (newest command + time since it) jumped
-	by up to a frame each frame: at 100 mph up to ~0.9 m back and forth, the camera with it (the
-	user: "stuttery"). Command numbers run at one a tick in real time, so number = time / tick +
-	offset: each command seen gives a lower bound of the offset (it was made at or before the frame),
-	and the clock keeps their upper envelope, sinking CLOCK_SETTLE commands a second so a clock
-	adjustment by the engine still gets through, dropping at once under CLOCK_DROP
-]]
-local CLOCK_SETTLE, CLOCK_DROP = 0.2, 2
-function Handling.NewClientClock() return { offset = nil, at = 0 } end
-
-function Handling.ClientClockSeen(clock, number, now, tickInterval)
-	local sample = number - now / tickInterval
-	local offset = clock.offset
-	if offset then offset = offset - CLOCK_SETTLE * max(0, now - clock.at) end
-	if not offset or sample > offset or sample < offset - CLOCK_DROP then offset = sample end
-	clock.offset, clock.at = offset, now
-end
-
--- the command number now (continuous), between the newest one made and the next
-function Handling.ClientClockNow(clock, now, tickInterval, newest)
-	if not clock.offset then return newest end
-	return clamp(now / tickInterval + clock.offset, newest, newest + 1)
-end
-
 function Handling.Lock(settings, speed)
 	local share = 1 - min(1, speed / settings.lockFadeSpeed)
 	return settings.lockFast + (settings.lockSlow - settings.lockFast) * share ^ settings.lockFadePower
@@ -294,31 +207,12 @@ local function noseOf(body, spec)
 end
 Handling.NoseOf = noseOf
 
--- whether a turn held at `eased` (deg/s) is on its way back towards none, `target` being the one
--- asked: letting go of the key, or swapping to the other one (until the car turns that way)
-local function unwindingOf(eased, target)
-	local gap = target - eased
-	return gap * eased < 0 and abs(gap) > 0.5 and abs(eased) > 0.5
-end
-
--- the rotation the steering asks of a body (deg/s): Control's target on grip, before it's eased
-function Handling.AskedYawRate(body, steer, spec)
-	local settings = spec.settings
-	local nx, ny, nz, rx, ry, rz = noseOf(body, spec)
-	local forwardSpeed = body.vx * nx + body.vy * ny + body.vz * nz
-	local sideSpeed = body.vx * rx + body.vy * ry + body.vz * rz
-	local speed = sqrt(forwardSpeed * forwardSpeed + sideSpeed * sideSpeed) * INCH
-	local kinematic = DEG * forwardSpeed * INCH * tan(Handling.Lock(settings, speed) * RAD) / spec.wheelbase * steer
-	local turnLimit = Handling.TurnLimit(settings, speed)
-	return clamp(kinematic, -turnLimit, turnLimit)
-end
-
 --[[
 	One tick of the model: moves the steering (state.steer) and the drift flag, and returns the
 	change to the yaw rate (deg/s, about the car's up), to the sideways speed (inches/s along the
 	car's right) and to the speed along the nose that keeps the car's speed as it was: it only
-	turns the velocity, so a car can't be launched by it and corners don't scrub speed. The caller applies them (server:
-	the physics object; client: its predicted body). Also returns the yaw rate asked (logs).
+	turns the velocity, so a car can't be launched by it and corners don't scrub speed. The caller applies them (the server:
+	the physics object; the offline tests: ApplyControl). Also returns the yaw rate asked (logs).
 ]]
 function Handling.Control(body, state, buttons, spec, deltaTime)
 	local settings = spec.settings
@@ -336,7 +230,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	local fade = clamp((speed - settings.minSpeed) / settings.fadeSpeed, 0, 1)
 	if share <= 0 or fade <= 0 then
 		if fade <= 0 then state.drift = false end
-		state.yawTarget, state.yawSet, state.blockedFor, state.unwinding = nil, nil, nil, nil
+		state.yawTarget, state.yawSet, state.blockedFor = nil, nil, nil
 		return 0, 0, 0, 0
 	end
 	share = share * fade
@@ -377,7 +271,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	local yawChange
 	if handbrake or state.drift then
 		-- a slide: the rotation only drawn towards the target, the car's own momentum does the rest
-		state.yawTarget, state.unwinding = nil, nil
+		state.yawTarget = nil
 		yawChange = (target - body.yawRate) * min(1, follow * deltaTime) * share
 	else
 		-- on grip: the target eases in at yawFollow and the car is put on it every tick. Source's own
@@ -385,9 +279,6 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 		-- 12%), the car settled well short of the turn asked (the user: fast cars "barely turn" at
 		-- 40-70 mph once Source's front wheels no longer pulled it round)
 		local eased = state.yawTarget or body.yawRate
-		-- (unwinding: the turn held on its way back towards none; the prediction learns how much of
-		-- it the server's car really turns apart, Handling.YawShareAt)
-		state.unwinding = unwindingOf(eased, target)
 		eased = eased + (target - eased) * min(1, follow * deltaTime)
 		state.yawTarget = eased
 		-- held against something (a wall: the front corner stopped every tick, slammed round again by
@@ -424,7 +315,7 @@ function Handling.Control(body, state, buttons, spec, deltaTime)
 	return yawChange, sideChange, asked, forwardChange
 end
 
--- the yaw, sideways and forward changes onto a body (prediction; the server puts them on the physics object)
+-- the yaw, sideways and forward changes onto a body (offline tests; the server puts them on the physics object)
 function Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 	body.yawRate = body.yawRate + yawChange
 	forwardChange = forwardChange or 0
@@ -436,495 +327,9 @@ function Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
 	end
 end
 
--- rotate (x, y, z) about the unit axis (ux, uy, uz) by angle (radians), Rodrigues
-local function rotate(x, y, z, ux, uy, uz, angle)
-	local c, s = cos(angle), sin(angle)
-	local dot = (x * ux + y * uy + z * uz) * (1 - c)
-	return x * c + (uy * z - uz * y) * s + ux * dot,
-		y * c + (uz * x - ux * z) * s + uy * dot,
-		z * c + (ux * y - uy * x) * s + uz * dot
-end
-Handling.Rotate = rotate
-
---[[
-	Moves a predicted body one step: gravity (along the ground while the wheels are on it, all of
-	it in the air), `acceleration` (m/s2) along the nose while on the ground, then position and
-	rotation about the car's up. The velocity is not turned with the body (the tyres do that,
-	through Control's grip), as in the real thing. stopping: the acceleration only slows the car
-	(brakes, rolling resistance): it doesn't drive it backwards.
-]]
-function Handling.Integrate(body, spec, acceleration, deltaTime, stopping, yawShare)
-	local ground = body.groundShare
-	-- gravity minus what the ground holds up (g . up taken out on the ground)
-	local gravityAlongUp = -GRAVITY_INCHES * body.cz
-	local gx = -(gravityAlongUp * body.cx) * ground
-	local gy = -(gravityAlongUp * body.cy) * ground
-	local gz = -GRAVITY_INCHES - (gravityAlongUp * body.cz) * ground
-	local nx, ny, nz = noseOf(body, spec)
-	local push = acceleration / INCH * ground
-	local forwardBefore = body.vx * nx + body.vy * ny + body.vz * nz
-	body.vx = body.vx + (gx + nx * push) * deltaTime
-	body.vy = body.vy + (gy + ny * push) * deltaTime
-	body.vz = body.vz + (gz + nz * push) * deltaTime
-	if stopping and forwardBefore ~= 0 then
-		local forwardAfter = body.vx * nx + body.vy * ny + body.vz * nz
-		if forwardAfter * forwardBefore < 0 then
-			body.vx, body.vy, body.vz = body.vx - nx * forwardAfter, body.vy - ny * forwardAfter, body.vz - nz * forwardAfter
-		end
-	end
-	-- on its wheels, no speed along the car's up is carried on (the ground decides that: a bump's
-	-- kick or the suspension's bounce, carried over the lead, drew the car floating up and pulled
-	-- back down by the next state, a bobble over rough ground; the user). Along the ground (slopes
-	-- too) it moves as before; in the air it flies
-	local upSpeed = (body.vx * body.cx + body.vy * body.cy + body.vz * body.cz) * ground
-	if upSpeed ~= 0 then
-		body.vx, body.vy, body.vz = body.vx - body.cx * upSpeed, body.vy - body.cy * upSpeed, body.vz - body.cz * upSpeed
-	end
-	body.px, body.py, body.pz = body.px + body.vx * deltaTime, body.py + body.vy * deltaTime, body.pz + body.vz * deltaTime
-	-- (yawShare: how much of the yaw rate the car really turns between ticks, learned, Handling.YawShareAt)
-	local turn = body.yawRate * RAD * deltaTime * (yawShare or 1)
-	if turn ~= 0 then
-		local ux, uy, uz = body.cx, body.cy, body.cz
-		body.ax, body.ay, body.az = rotate(body.ax, body.ay, body.az, ux, uy, uz, turn)
-		body.bx, body.by, body.bz = rotate(body.bx, body.by, body.bz, ux, uy, uz, turn)
-	end
-end
-
----------------------------------------------------------------------------
--- the speed along the nose, learned (client): Source's engine, gears, brakes and drag aren't
--- modelled here, so the driver's client learns how its car accelerates per key and speed from
--- the states the server sends, minus the slope. Starts from a guess from the car's power to
--- weight and top speed.
----------------------------------------------------------------------------
-Handling.MODE_COAST, Handling.MODE_THROTTLE, Handling.MODE_BRAKE, Handling.MODE_REVERSE = 1, 2, 3, 4
-Handling.MODE_HANDBRAKE, Handling.MODE_LIMITED, Handling.MODE_IDLE = 5, 6, 7
-local MODE_COUNT = 7
--- modes that only slow the car (the value is along the travel, and never reverses it)
-local STOPPING = { [1] = true, [3] = true, [5] = true, [6] = false, [7] = true }
-Handling.STOPPING = STOPPING
-
-local LEARN_BIN = 2.5     -- m/s per speed bin
-local LEARN_BINS = 32     -- up to 80 m/s
-local LEARN_RATE = 0.2    -- share of each new sample
-
--- forwardSpeed m/s along the nose; driving = the engine may drive (started); limiter = sv_cruise state
-function Handling.DriveMode(buttons, forwardSpeed, driving, limiter)
-	local forward, back = has(buttons, 1), has(buttons, 2)
-	if has(buttons, 16) then return 5 end
-	if forward and not back then
-		if not driving then return 7 end
-		if forwardSpeed < -0.5 then return 3 end          -- W while rolling backwards: braking
-		if (limiter or 0) >= 1 then return 6 end
-		return 2
-	end
-	if back and not forward then
-		if forwardSpeed > 0.5 then return 3 end
-		return driving and 4 or 7
-	end
-	if (limiter or 0) == 2 then return 3 end
-	return 1
-end
-
--- a guess before anything is learned (m/s2): power to weight in W/kg, top speed in m/s
-local function guess(mode, speed, powerToWeight, topSpeed)
-	if mode == 2 then
-		local traction = 5.5
-		local fromPower = powerToWeight * 0.55 / max(speed, 2)
-		return max(0, min(traction, fromPower) * (1 - (speed / topSpeed) ^ 3))
-	elseif mode == 3 then return -7.5
-	elseif mode == 4 then return speed > 8 and 0 or -3
-	elseif mode == 5 then return -4.5
-	elseif mode == 6 then return 0
-	end
-	return -(0.35 + 0.0005 * speed * speed)
-end
-
-function Handling.NewLearner(powerToWeight, topSpeed)
-	local learner = { powerToWeight = powerToWeight or 120, topSpeed = max(topSpeed or 50, 10), samples = 0 }
-	for mode = 1, MODE_COUNT do
-		local bins = {}
-		for bin = 1, LEARN_BINS do bins[bin] = guess(mode, (bin - 0.5) * LEARN_BIN, learner.powerToWeight, learner.topSpeed) end
-		learner[mode] = bins
-	end
-	return learner
-end
-
-local function binOf(speed) return clamp(floor(abs(speed) / LEARN_BIN) + 1, 1, LEARN_BINS) end
-
--- acceleration along the nose (m/s2) for a mode at forwardSpeed (m/s, signed)
-function Handling.LearnedAcceleration(learner, mode, forwardSpeed)
-	local speed = abs(forwardSpeed)
-	local position = clamp(speed / LEARN_BIN - 0.5, 0, LEARN_BINS - 1)
-	local low = floor(position)
-	local share = position - low
-	local bins = learner[mode]
-	local value = bins[low + 1] + ((bins[min(low + 2, LEARN_BINS)]) - bins[low + 1]) * share
-	if STOPPING[mode] then
-		if speed < 0.3 then return 0 end
-		return value * sign(forwardSpeed)              -- along the travel: against it
-	end
-	return value
-end
-
--- one observed acceleration along the nose (m/s2, slope taken out) in a mode at forwardSpeed
-function Handling.Learn(learner, mode, forwardSpeed, acceleration)
-	if STOPPING[mode] then
-		if abs(forwardSpeed) < 0.5 then return end
-		acceleration = acceleration * sign(forwardSpeed)
-	end
-	local bins = learner[mode]
-	local bin = binOf(forwardSpeed)
-	bins[bin] = bins[bin] + (acceleration - bins[bin]) * LEARN_RATE
-	-- a little into the neighbours: a bin nobody drove through yet still moves towards the car
-	if bin > 1 then bins[bin - 1] = bins[bin - 1] + (acceleration - bins[bin - 1]) * LEARN_RATE * 0.25 end
-	if bin < LEARN_BINS then bins[bin + 1] = bins[bin + 1] + (acceleration - bins[bin + 1]) * LEARN_RATE * 0.25 end
-	learner.samples = learner.samples + 1
-end
-
--- the slope's pull along the nose (m/s2) on a body on the ground
-function Handling.SlopeAcceleration(body, spec)
-	local nx, ny, nz = noseOf(body, spec)
-	local gravityAlongUp = -GRAVITY * body.cz
-	-- gravity in the ground plane, along the nose
-	return (-GRAVITY * nz) - gravityAlongUp * (body.cx * nx + body.cy * ny + body.cz * nz)
-end
-
----------------------------------------------------------------------------
--- prediction (client): from the server's state through the commands it hasn't run yet
----------------------------------------------------------------------------
-local BODY_FIELDS = { "px", "py", "pz", "vx", "vy", "vz", "ax", "ay", "az", "bx", "by", "bz", "cx", "cy", "cz", "yawRate", "groundShare", "controlShare" }
-Handling.BODY_FIELDS = BODY_FIELDS
-
-function Handling.CopyBody(source, target)
-	target = target or {}
-	for i = 1, #BODY_FIELDS do local key = BODY_FIELDS[i]; target[key] = source[key] end
-	return target
-end
-
-local function forwardSpeedOf(body, spec)
-	local nx, ny, nz = noseOf(body, spec)
-	return (body.vx * nx + body.vy * ny + body.vz * nz) * INCH
-end
-Handling.ForwardSpeed = forwardSpeedOf
-
--- one predicted command: the server's order (physics, then the model)
---[[
-	How much of the yaw rate the model sets the car really turns before the next tick (client,
-	learned per speed band from the server's states). The model puts the car on its turn every
-	tick, but Source's own tyres take some of it back in between: on the test server (22 tick)
-	the car turned 65-89% of what the prediction drew, more of a shortfall the faster it went
-	(dev log, 2026-11-24). Drawn at the full rate, the car turned further than the server's,
-	was pulled back by every state: the user's "turn and then the vehicle snaps", drift-like
-	(the prediction's rotation is scaled by it; its yaw rate, the server's, is kept).
-	Learned apart while a turn unwinds (the key let go, Control's state.unwinding): the server's car
-	stops turning sooner than the model eases out (Source's tyres, and at 22 tick a key change
-	landing a tick early or late), and with one share for both the prediction turned on past the
-	server's car after every turn, then snapped back (the user; offline at 22 tick 3-4 degrees)
-]]
-local YAW_BAND = 10        -- m/s per speed band
-local YAW_BANDS = 8
-local YAW_LEARN_RATE = 0.25
-local function yawBandOf(speed) return clamp(floor(abs(speed) / YAW_BAND) + 1, 1, YAW_BANDS) end
-
-function Handling.YawShareAt(learner, speed, unwinding)
-	local shares = learner and (unwinding and learner.yawUnwindShares or learner.yawShares)
-	return shares and shares[yawBandOf(speed)] or 1
-end
-
--- sample: the server's turn over a replay / the replay's own (made with the share learned then)
-function Handling.LearnYaw(learner, speed, sample, unwinding)
-	if not learner then return end
-	local key = unwinding and "yawUnwindShares" or "yawShares"
-	local shares = learner[key]
-	if not shares then
-		shares = {}
-		for band = 1, YAW_BANDS do shares[band] = 1 end
-		learner[key] = shares
-	end
-	local band = yawBandOf(speed)
-	shares[band] = clamp(shares[band] + (clamp(sample, 0.4, 1.2) - shares[band]) * YAW_LEARN_RATE, 0.4, 1.2)
-	learner.yawSamples = (learner.yawSamples or 0) + 1
-end
-
---[[
-	The road under a body (pure numbers; the caller traces): roadFront / roadRear = the road's
-	height under the front and rear axle (half = half the wheelbase, inches, along the nose),
-	clearance = how high the car's origin rides over the road. On the ground the body is put on
-	it: height, pitch along the road, no speed into or out of it. It leaves the road where the road
-	drops away faster than gravity can pull the car after it (a crest at speed), and lands when it
-	comes down to it again
-]]
--- it flies once the road under it drops away more than TAKEOFF_GAP inches in a step (a ramp's end, a
--- ledge). Taken as soon as the road fell away faster than gravity (a gap of ~0.1 inch a step at
--- 66 tick), the car's own bounce in a fast corner (the body an inch over its average) counted as
--- flying: no grip, steering or throttle in the replay, the drawn car slowed and ran wide in corners
--- and was pulled on by every state (the user). A car flying off a smooth crest now shows as flying
--- once the server's state says so
-local TAKEOFF_GAP = 2
-function Handling.RoadResponse(body, spec, roadFront, roadRear, half, clearance, deltaTime)
-	local nx, ny, nz = noseOf(body, spec)
-	local road = (roadFront + roadRear) * 0.5
-	local gap = body.pz - clearance - road
-	if body.groundShare >= 0.5 then
-		if gap > TAKEOFF_GAP then
-			body.groundShare = 0
-			return
-		end
-	elseif gap > 0 then
-		return
-	end
-	-- on the road (or landing on it): its height, and its pitch about the car's right
-	body.pz = road + clearance
-	local flat = sqrt(nx * nx + ny * ny)
-	if flat > 0.1 then
-		local wanted = atan2(roadFront - roadRear, 2 * half)
-		local pitch = atan2(nz, flat)
-		local turn = wanted - pitch
-		if abs(turn) > 1e-5 then
-			-- the axis nose x world up (turning about it by + raises the nose)
-			local ux, uy = ny / flat, -nx / flat
-			body.ax, body.ay, body.az = rotate(body.ax, body.ay, body.az, ux, uy, 0, turn)
-			body.bx, body.by, body.bz = rotate(body.bx, body.by, body.bz, ux, uy, 0, turn)
-			body.cx, body.cy, body.cz = rotate(body.cx, body.cy, body.cz, ux, uy, 0, turn)
-		end
-	end
-	-- no speed into the road (a landing stops there) or off it along the car's up
-	local upSpeed = body.vx * body.cx + body.vy * body.cy + body.vz * body.cz
-	body.vx, body.vy, body.vz = body.vx - body.cx * upSpeed, body.vy - body.cy * upSpeed, body.vz - body.cz * upSpeed
-	body.groundShare = 1
-end
-
---[[
-	A wall the replay ran into: the body put back to where it touched (x, y, z), the speed into the
-	wall (normal nx, ny flat, pointing out of it) taken off with a little bounce, some of the speed
-	along it scrubbed, and a hit hard enough to be an impact on the server lets go of the model for
-	the rest of the replay (the server does that for impactHold s, more than any lead)
-]]
-local WALL_BOUNCE = 0.1
-local WALL_SCRUB = 0.3
-function Handling.WallResponse(body, spec, x, y, z, normalX, normalY)
-	body.px, body.py, body.pz = x, y, z
-	local length = sqrt(normalX * normalX + normalY * normalY)
-	if length < 0.1 then return end
-	normalX, normalY = normalX / length, normalY / length
-	local into = body.vx * normalX + body.vy * normalY
-	if into >= 0 then return end
-	local alongX, alongY = body.vx - normalX * into, body.vy - normalY * into
-	local along = sqrt(alongX * alongX + alongY * alongY)
-	local scrub = along > 0 and max(0, 1 - WALL_SCRUB * -into / along) or 0
-	body.vx = alongX * scrub - normalX * into * WALL_BOUNCE
-	body.vy = alongY * scrub - normalY * into * WALL_BOUNCE
-	local change = -into * (1 + WALL_BOUNCE)
-	if change > spec.settings.impactSpeed then
-		body.controlShare = 0
-		body.yawRate = body.yawRate * 0.3
-	end
-end
-
---[[
-	world (optional, client): the replay's surroundings, world.move(body, fromX, fromY, fromZ,
-	deltaTime, fromNoseX, fromNoseY, fromNoseZ) after each step's motion (from = before it): puts the body on the road under it (or lets it fly off a
-	crest and land), and stops it at walls (Handling.WallResponse). Without it the replay ran on the
-	slope it started on and through everything: into the road in dips, pinned to it over crests
-	the server's car flew off, into walls, then a snap each time the server's state came back
-]]
-local function step(body, state, buttons, spec, learner, base, deltaTime, world)
-	local forwardSpeed = forwardSpeedOf(body, spec)
-	local mode = Handling.DriveMode(buttons, forwardSpeed, base.driving, base.limiter)
-	local fromX, fromY, fromZ = body.px, body.py, body.pz
-	local fromNoseX, fromNoseY, fromNoseZ = noseOf(body, spec)
-	-- (the rotation this step is the one the last step's Control set: its phase's share)
-	if state.unwinding then state.unwindingSteps = (state.unwindingSteps or 0) + 1 end
-	Handling.Integrate(body, spec, Handling.LearnedAcceleration(learner, mode, forwardSpeed), deltaTime, STOPPING[mode],
-		Handling.YawShareAt(learner, forwardSpeed, state.unwinding))
-	if world then world.move(body, fromX, fromY, fromZ, deltaTime, fromNoseX, fromNoseY, fromNoseZ) end
-	local yawChange, sideChange, _, forwardChange = Handling.Control(body, state, buttons, spec, deltaTime)
-	Handling.ApplyControl(body, spec, yawChange, sideChange, forwardChange)
-end
-
---[[
-	base: the server's state (a body + steer, drift, driving, limiter, impact), commands: the
-	buttons of each command after the one it ran, in order (count of them), fraction: how far into
-	the next command the frame is (0..1, with fractionButtons, else the last buttons). Returns the predicted body (into
-	`out`) and the steering state it ends with.
-]]
-function Handling.Predict(base, commands, count, fraction, spec, learner, deltaTime, out, outState, fractionButtons, world)
-	local body = Handling.CopyBody(base, out)
-	-- (the world measures what it needs from where the replay starts: world.begin)
-	if world and world.begin then world.begin(body) end
-	local state = outState or {}
-	state.steer, state.drift, state.yawTarget = base.steer, base.drift, base.yawTarget
-	-- (the turn unwinding where the server's state stands: the one it holds against the one asked)
-	state.unwinding = base.yawTarget ~= nil and not base.drift and unwindingOf(base.yawTarget, Handling.AskedYawRate(base, base.steer or 0, spec))
-	state.unwindingSteps = 0
-	-- (no walls in the prediction: never obstructed; the server's state carries the result)
-	state.yawSet, state.blockedFor = nil, nil
-	for i = 1, count do step(body, state, commands[i], spec, learner, base, deltaTime, world) end
-	if fraction > 0 then
-		local buttons = fractionButtons or (count > 0 and commands[count]) or base.buttons or 0
-		local savedSteer, savedDrift, savedTarget, savedSet, savedBlocked = state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor
-		step(body, state, buttons, spec, learner, base, deltaTime * fraction, world)
-		state.steer, state.drift, state.yawTarget, state.yawSet, state.blockedFor = savedSteer, savedDrift, savedTarget, savedSet, savedBlocked
-	end
-	return body, state
-end
-
----------------------------------------------------------------------------
--- smoothing (client): what's on screen = the prediction + an offset that dies away. A new state
--- from the server moves the prediction; the offset takes the jump, so the car never snaps
----------------------------------------------------------------------------
-function Handling.NewSmoother()
-	return { x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, last = 0 }
-end
-
--- a jump of the prediction from `before` to `after`: kept on screen as offset, faded out later
-function Handling.SmootherAbsorb(smoother, before, after)
-	smoother.x = smoother.x + before.px - after.px
-	smoother.y = smoother.y + before.py - after.py
-	smoother.z = smoother.z + before.pz - after.pz
-	-- the small rotation from after's axes to before's: 1/2 sum(after_i x before_i)
-	local function cross(ax, ay, az, bx, by, bz) return ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx end
-	local x1, y1, z1 = cross(after.ax, after.ay, after.az, before.ax, before.ay, before.az)
-	local x2, y2, z2 = cross(after.bx, after.by, after.bz, before.bx, before.by, before.bz)
-	local x3, y3, z3 = cross(after.cx, after.cy, after.cz, before.cx, before.cy, before.cz)
-	smoother.rx = smoother.rx + (x1 + x2 + x3) * 0.5
-	smoother.ry = smoother.ry + (y1 + y2 + y3) * 0.5
-	smoother.rz = smoother.rz + (z1 + z2 + z3) * 0.5
-end
-
--- let it die away over deltaTime (timeConstant: s to 1/e); snapDistance: a bigger jump is dropped
-function Handling.SmootherDecay(smoother, deltaTime, timeConstant, snapDistance)
-	if smoother.x * smoother.x + smoother.y * smoother.y + smoother.z * smoother.z > snapDistance * snapDistance then
-		smoother.x, smoother.y, smoother.z, smoother.rx, smoother.ry, smoother.rz = 0, 0, 0, 0, 0, 0
-		return
-	end
-	local keep = exp(-deltaTime / timeConstant)
-	smoother.x, smoother.y, smoother.z = smoother.x * keep, smoother.y * keep, smoother.z * keep
-	smoother.rx, smoother.ry, smoother.rz = smoother.rx * keep, smoother.ry * keep, smoother.rz * keep
-end
-
--- the body on screen: `body` moved and turned by the offset (into out)
-function Handling.SmootherApply(smoother, body, out)
-	out = Handling.CopyBody(body, out)
-	out.px, out.py, out.pz = body.px + smoother.x, body.py + smoother.y, body.pz + smoother.z
-	local angle = sqrt(smoother.rx * smoother.rx + smoother.ry * smoother.ry + smoother.rz * smoother.rz)
-	if angle > 1e-6 then
-		local ux, uy, uz = smoother.rx / angle, smoother.ry / angle, smoother.rz / angle
-		out.ax, out.ay, out.az = rotate(body.ax, body.ay, body.az, ux, uy, uz, angle)
-		out.bx, out.by, out.bz = rotate(body.bx, body.by, body.bz, ux, uy, uz, angle)
-		out.cx, out.cy, out.cz = rotate(body.cx, body.cy, body.cz, ux, uy, uz, angle)
-	end
-	return out
-end
-
-function Handling.SmootherSize(smoother)
-	return sqrt(smoother.x * smoother.x + smoother.y * smoother.y + smoother.z * smoother.z)
-end
-
----------------------------------------------------------------------------
--- the heading lead (client, audio_engine_predict_position 0, the default): your car is drawn
--- where Source shows it, the same place every other player sees it, and only turned about its
--- rear axle by how far the prediction's heading is ahead of Source's. Drawn the whole car ahead
--- (audio_engine_predict_position 1), every client saw a different street: your car a lead
--- (~7 m at 30 m/s) ahead of where others see it, the cars around it carried on over the same
--- lead and wrong whenever they braked or turned (the user: cars "lagging behind a lot", the
--- clients "completely desynced", wonky, little feedback; their idea: predict the turning, not
--- the acceleration). The lead fades out where the model has no hold of the rotation (crawling,
--- in the air, spiked, model off), goes quickly after a crash, and is capped softly
----------------------------------------------------------------------------
-Handling.HEADING_LEAD = {
-	shareRise = 0.3,     -- s: the lead comes in over this as the model takes the car (setting off, landing)...
-	shareFall = 0.3,     -- ...and goes over this as it lets go (slowing to a crawl, leaving the ground)...
-	impactFall = 0.08,   -- ...or over this after a crash: it plays out as every other player sees it
-	staleTime = 0.3,     -- s: no state from the server for this long: no lead
-	snapAngle = 90,      -- degrees: a prediction this far from Source's car is a respawn, a teleport or a spin: the lead goes (impactFall)
-	-- a lead over kneeAngle (a long ping in a hard turn: 75 deg/s x 0.25 s is 19) eases towards maxAngle
-	-- instead of growing on (the nose that far ahead of the path); under it it's shown as it is
-	kneeAngle = 20,
-	maxAngle = 30,
-}
-
--- how much of a body's rotation the model has, 0..1 (what Control's share comes to)
-function Handling.Authority(body, spec)
-	local settings = spec.settings
-	local nx, ny, nz, rx, ry, rz = noseOf(body, spec)
-	local forwardSpeed = body.vx * nx + body.vy * ny + body.vz * nz
-	local sideSpeed = body.vx * rx + body.vy * ry + body.vz * rz
-	local speed = sqrt(forwardSpeed * forwardSpeed + sideSpeed * sideSpeed) * INCH
-	return body.controlShare * body.groundShare * clamp((speed - settings.minSpeed) / settings.fadeSpeed, 0, 1)
-end
-
--- the signed angle (degrees, left +) from `from`'s nose to `to`'s, about `from`'s up
-function Handling.YawBetween(from, to, spec)
-	local ax, ay, az = noseOf(from, spec)
-	local bx, by, bz = noseOf(to, spec)
-	local ux, uy, uz = from.cx, from.cy, from.cz
-	-- both noses laid flat on `from`'s ground
-	local alongA, alongB = ax * ux + ay * uy + az * uz, bx * ux + by * uy + bz * uz
-	ax, ay, az = ax - ux * alongA, ay - uy * alongA, az - uz * alongA
-	bx, by, bz = bx - ux * alongB, by - uy * alongB, bz - uz * alongB
-	local cross = (ay * bz - az * by) * ux + (az * bx - ax * bz) * uy + (ax * by - ay * bx) * uz
-	return DEG * atan2(cross, ax * bx + ay * by + az * bz)
-end
-
--- a point given in the body's own frame (Entity:LocalToWorld: x, y = left, z = up), in the world
-function Handling.PointOf(body, x, y, z)
-	return body.px + body.ax * x + body.bx * y + body.cx * z,
-		body.py + body.ay * x + body.by * y + body.cy * z,
-		body.pz + body.az * x + body.bz * y + body.cz * z
-end
-
--- the body turned by `angle` (degrees, left +) about its up axis through the point (pivotX, pivotY, pivotZ), into out
-function Handling.TurnAbout(body, angle, pivotX, pivotY, pivotZ, out)
-	out = Handling.CopyBody(body, out)
-	local ux, uy, uz = body.cx, body.cy, body.cz
-	local radians = angle * RAD
-	out.ax, out.ay, out.az = rotate(body.ax, body.ay, body.az, ux, uy, uz, radians)
-	out.bx, out.by, out.bz = rotate(body.bx, body.by, body.bz, ux, uy, uz, radians)
-	local x, y, z = rotate(body.px - pivotX, body.py - pivotY, body.pz - pivotZ, ux, uy, uz, radians)
-	out.px, out.py, out.pz = pivotX + x, pivotY + y, pivotZ + z
-	return out
-end
-
-local function tanh(value)
-	if value > 10 then return 1 elseif value < -10 then return -1 end
-	local e = exp(2 * value)
-	return (e - 1) / (e + 1)
-end
-
--- the lead as shown: as it is up to the knee, then easing towards the cap
-local function softCap(angle, knee, cap)
-	local size = abs(angle)
-	if size <= knee then return angle end
-	return sign(angle) * (knee + (cap - knee) * tanh((size - knee) / (cap - knee)))
-end
-
-function Handling.NewHeadingLead() return { share = 0, full = 0, offset = 0 } end
-
---[[
-	One frame (cl_handling.lua; dev/baker/test_prediction.js runs the same). Returns the angle
-	(degrees, left +) to turn Source's car by on screen.
-	  source   Source's car as shown now (a body: its axes)
-	  shown    the prediction as the whole-car mode would draw it (predicted + its smoothing): its
-	           heading is the one shown; its position isn't used
-	  base     the newest state from the server (its authority, its impact flag)
-	  scale    how much of the lead to show (audio_engine_predict_amount)
-	  fresh    false when no state came for HEADING_LEAD.staleTime
-]]
-function Handling.HeadingLeadFrame(lead, source, shown, base, spec, frameTime, scale, fresh)
-	local settings = Handling.HEADING_LEAD
-	local full = Handling.YawBetween(source, shown, spec)
-	local snapped = abs(full) > settings.snapAngle
-	local target = (fresh and not snapped and not base.impact) and Handling.Authority(base, spec) or 0
-	local fadeTime = target >= lead.share and settings.shareRise or ((base.impact or snapped) and settings.impactFall or settings.shareFall)
-	lead.share = approach(lead.share, target, frameTime / fadeTime)
-	lead.full, lead.offset = full, softCap(full * lead.share * scale, settings.kneeAngle, settings.maxAngle)
-	return lead.offset
-end
-
 ---------------------------------------------------------------------------
 -- the car's shape (Garry's Mod; both realms): nose direction, wheelbase and the middle of the
--- rear axle (model space; the heading lead turns the car about it) from the wheel attachments,
+-- rear axle (model space) from the wheel attachments,
 -- cached per model
 ---------------------------------------------------------------------------
 local geometryCache = {}
@@ -950,7 +355,7 @@ function AudioEngine.CarGeometry(vehicle)
 	return geometryCache[model]
 end
 
--- the model's numbers for a car: { settings, wheelbase, noseX/Y/Z, pivotX/Y/Z (the rear axle's middle, model space) }
+-- the model's numbers for a car: { settings, wheelbase, noseX/Y/Z }
 function Handling.SpecFor(vehicle)
 	local carConfig = AudioEngine.GetCarConfig(vehicle)
 	local geometry = AudioEngine.CarGeometry(vehicle)
@@ -958,7 +363,6 @@ function Handling.SpecFor(vehicle)
 		settings = Handling.SettingsFor(carConfig and carConfig.name),
 		wheelbase = geometry.wheelbase,
 		noseX = geometry.forward.x, noseY = geometry.forward.y, noseZ = geometry.forward.z,
-		pivotX = geometry.rearAxle.x, pivotY = geometry.rearAxle.y, pivotZ = geometry.rearAxle.z,
 	}
 end
 
@@ -968,9 +372,4 @@ function Handling.SetAxes(body, angles)
 	body.ax, body.ay, body.az = forward.x, forward.y, forward.z
 	body.bx, body.by, body.bz = -right.x, -right.y, -right.z
 	body.cx, body.cy, body.cz = up.x, up.y, up.z
-end
-
--- the Angle of a body's axes (Garry's Mod)
-function Handling.AnglesOf(body)
-	return Vector(body.ax, body.ay, body.az):AngleEx(Vector(body.cx, body.cy, body.cz))
 end
