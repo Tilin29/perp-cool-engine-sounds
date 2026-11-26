@@ -224,7 +224,7 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     }
     -- sv_handling.lua's sendState, field by field in its order
     function SEND_STATE(state)
-      reading = { VEHICLE:EntIndex(), state.command, 0, state.time, state.px, state.py, state.pz, state.p, state.y, state.r,
+      reading = { VEHICLE:EntIndex(), state.command, state.time, state.px, state.py, state.pz, state.p, state.y, state.r,
         state.vx, state.vy, state.vz, state.yawRate, state.yawRate, math.Round(state.steer * 127), state.drift, true, state.impact,
         100, 100, state.buttons, 0 }
       receivers.audio_engine_drive()

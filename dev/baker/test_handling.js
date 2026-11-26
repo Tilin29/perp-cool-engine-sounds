@@ -51,6 +51,11 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
     util = util or {}
     util.AddNetworkString = function() end
     IN_FORWARD, IN_BACK, IN_MOVELEFT, IN_MOVERIGHT, IN_JUMP = 8, 16, 512, 1024, 2
+    -- (hooks kept, so a check can run one; game / bit as GMod's)
+    HOOKS = {}
+    hook.Add = function(event, name, callback) HOOKS[event] = HOOKS[event] or {} HOOKS[event][name] = callback end
+    game = game or { SinglePlayer = function() return false end }
+    bit = bit or { band = function(a, b) return a & b end }
     AUDIO_ENGINE = {}`)
   for (const f of ['sh_config.lua', 'sh_presets.lua', 'sh_drivetrain.lua', 'sh_handling.lua', 'sh_carlist.lua', 'sv_perp_physics.lua', 'sv_handling.lua'])
     await run(f, fs.readFileSync(path.join(LUA, f), 'utf8'))
@@ -343,6 +348,58 @@ const LUA = path.join(ADDON, 'lua', 'audio_engine')
   console.log('full-lock turn at 20/25/30/40/50/60 mph:', turns.map((x) => x.toFixed(1)).join(' | '))
   check(turns.slice(1).every((x, i) => x > turns[i] * 0.8 && x < turns[i] * 1.2) && turns[5] < turns[2],
     'the turn eases off with speed, no cliff: each step (20/25/30/40/50/60 mph) keeps over 80% of the one before')
+
+  // 6. the model's input buffer (sv_handling's StartCommand and HandlingModelInput, Handling.NextCommand):
+  // commands reaching the server 2 / 0 / 3 a tick still reach the model one a tick, in order, each with
+  // its own keys; a driver whose client doesn't predict runs the newest, as Source does
+  await L.doString(`
+    local startCommand = HOOKS.StartCommand.audio_engine_handling
+    local function newDriver(predict)
+      local driver = { predict = predict, keys = 0 }
+      function driver:IsValid() return true end
+      function driver:GetInfoNum(name, default) if name == "audio_engine_predict" then return self.predict end return default end
+      function driver:IsListenServerHost() return false end
+      function driver:KeyDown(key) return self.keys & key ~= 0 end
+      return driver
+    end
+    local function newCommand(number, keys)
+      return { CommandNumber = function() return number end, GetButtons = function() return keys end }
+    end
+    -- command n's keys: W, with A on 4..9 and D from 12
+    local function keysOf(n) return IN_FORWARD + ((n >= 4 and n <= 9) and IN_MOVELEFT or 0) + (n >= 12 and IN_MOVERIGHT or 0) end
+    local arrivals = { 1, 2, 0, 1, 2, 0, 0, 3, 1, 1, 0, 2, 1, 1, 1, 1 }
+    local out = {}
+    for _, predict in ipairs({ 1, 0 }) do
+      local driver = newDriver(predict)
+      local nextNumber, newest, runs, keysRight = 100, 0, {}, true
+      for _, count in ipairs(arrivals) do
+        for _ = 1, count do startCommand(driver, newCommand(nextNumber, keysOf(nextNumber))) newest, nextNumber = nextNumber, nextNumber + 1 end
+        driver.keys = keysOf(newest)
+        local run, buttons = E.HandlingModelInput(driver, 1 / 66, true)
+        runs[#runs + 1] = run - 100
+        if buttons ~= H.ButtonsFrom(function(keys, key) return keys & key ~= 0 end, keysOf(run)) then keysRight = false end
+      end
+      out[#out + 1] = table.concat(runs, ",") .. "/" .. tostring(keysRight)
+    end
+    -- a spare command waiting a whole second: one dropped (a tick of lag less), once; a lag spike: back of it
+    local buffer, newest = H.NewInputBuffer(), 10
+    H.NextCommand(buffer, newest, 1 / 66)
+    newest = newest + 2
+    H.NextCommand(buffer, newest, 1 / 66)
+    local levels, changes, lowest = {}, 0, math.huge
+    for i = 1, 140 do
+      newest = newest + 1
+      levels[i] = newest - H.NextCommand(buffer, newest, 1 / 66)
+      lowest = math.min(lowest, levels[i])
+      if i > 1 and levels[i] ~= levels[i - 1] then changes = changes + 1 end
+    end
+    out[#out + 1] = string.format("%d,%d,%d,%d,%d", levels[1], levels[140], changes, lowest, newest + 20 - H.NextCommand(buffer, newest + 20, 1 / 66))
+    __result(table.concat(out, ";"))`)
+  const [buffered, newestRuns, trim] = res.split(';')
+  console.log('model input, commands run each tick (buffer / newest):', buffered, '|', newestRuns, '| trim:', trim)
+  check(buffered === '-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14/true', `input buffer: one command a tick, in order, with its own keys (${buffered})`)
+  check(newestRuns === '0,2,2,3,5,5,5,8,9,10,10,12,13,14,15,16/true', `no prediction: the newest command, as Source runs it (${newestRuns})`)
+  check(trim === '2,1,1,1,1', `input buffer: a spare command for a second is dropped once, a lag spike skipped (${trim})`)
 
   console.log(fail ? `${fail} check(s) FAILED` : 'all checks passed')
   process.exit(fail ? 1 : 0)
