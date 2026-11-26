@@ -274,9 +274,11 @@ Porting the sounds into PERP: `PORTING.md`.
     again every Think while driverless). Engine off it's set on Source's controls every Think (+ throttle 0); driving, Space is
     Source's handbrake and the latch is off. The cluster's handbrake lamp shows it while the engine isn't running.
     Released = SetHandbrake(false) + ReleaseHandbrake() (Source holds a driverless jeep's handbrake on: getting out with it off,
-    the car stayed braked, the user), also the tick after getting out. A car nobody has set it on gets it off on being got into
-    (it was on: getting in and out of a parked car untouched put it on; the user's rule: only on if switched on, or Space held
-    getting out with the engine on).
+    the car stayed braked, the user), also the tick after getting out. Off by default (a new car rolls too) and off on getting in, always
+    (the user's rule: only on if switched on with the engine off, or Space held getting out with the engine on). Source stops a
+    driverless jeep's own Think, which is what hands the controls to the physics, so a released driverless car gets the release +
+    `NextThink` every tick for `PARK_RELEASE_SECONDS` 1 after spawning / getting out and while its physics are awake (it was
+    default-on and SetHandbrake alone: cars stayed braked, the user).
     Engine off, Source doesn't steer: sv_handling's tick puts the model's steering (`state.steer`) on with `SetSteering(-steer, 0)`.
     The user's design; not yet run in game (whether Source re-applies a driverless handbrake by itself is unknown).
   - Also: `audio_engine_autostart`, input bits NW2, `ApplyPerformance` (accel/top speed), the tuning net message.
