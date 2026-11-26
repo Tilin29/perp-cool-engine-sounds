@@ -665,7 +665,7 @@ to 250 m). Global `CAR_HORN` (`CarHorn`). Key: held `lalt` (`CONFIG.keys.honk`, 
   silent 1 } in shares of the engine's range at the horn's soundLevel (the user's spec: loud close up, 30% at 60% of the
   engine's distance, still falling), x Source's own falloff; inside: cabin volume, no fall-off/Doppler. Nearest
   `car_horn_maxcars` 8 honking cars heard (yours always). Revived once a second if the game dropped it. Key ignored while
-  typing, in menus or unfocused (alt-tab lets go). Client: `car_horn_volume`, `car_horn_doppler`, `car_horn_maxcars`, `car_horn_key`.
+  typing, in menus or unfocused (alt-tab lets go). Client: `car_horn_volume`, `car_horn_doppler` (x CONFIG.doppler 0.5: the user's, half real is the new 1), `car_horn_maxcars`, `car_horn_key`.
   Offline check: a mock (mocked GMod + the real config/synth/cl_horn under the baker's wasmoon) is not in the repo.
 - `sh_horn_config.lua`: `CAR_HORN.CONFIG` (volume, soundLevel, sampleRate, cabin, keys, `default` horn, `models[model]` = horn id,
   `horns[id]` { units { f, level }, harmonics, strike, rasp, air, jitter { rate, depth }, shimmer, grille, roughness, growl, flutter,
