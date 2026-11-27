@@ -8,12 +8,18 @@
 
     node dev/drive_demo/render.js "Audi S5" "Volvo S60" ...   -> dev/drive_demo/out/<car>.wav
 
+  DRIVE=pops: blips in neutral, then lifts in gear; POPLOG=1 prints each pop; POP_ONCE=0 plays the burble
+  instead of cl_engine's one pop per lift.
   AE_SOUND=<dir> plays a test bake instead (bake.js --out <dir> --only ...: its WAVs and its
   <dir>/cl_baked.lua; the env bank stays the addon's); AE_OUT=<dir> writes there.
 */
 const fs = require('fs'), path = require('path')
 const { LuaFactory } = require(path.resolve(__dirname, '../baker/node_modules/wasmoon'))
 const ADDON = path.resolve(__dirname, '../..'), LUA = path.join(ADDON, 'lua/audio_engine')
+// one pop per lift at most, as cl_engine's POP_ONCE_PER_LIFT (POP_ONCE=0: the burble)
+const POP_ONCE = process.env.POP_ONCE !== '0'
+// cl_engine's POPS_ON_LIFT (off for now; POP_LIFT=1 plays them)
+const POPS_ON_LIFT = process.env.POP_LIFT === '1'
 const OUT = process.env.AE_OUT || path.join(__dirname, 'out'); fs.mkdirSync(OUT, { recursive: true })
 const SOUND = process.env.AE_SOUND || path.join(ADDON, 'sound/audio_engine')
 const SR = 44100, FPS = 60
@@ -48,6 +54,7 @@ const LUA_DRIVE = `
 local E, DT = AUDIO_ENGINE, AUDIO_ENGINE.Drivetrain
 local name = CAR_NAME
 local SPAM = DRIVE_SPAM
+local POPS = DRIVE_POPS
 local m = E.CAR_MODELS[name]; local car = m and E.Cars[m[1]]
 if not car then __result("ERR no car " .. name) return end
 local p = PHYS[m[2]]
@@ -64,7 +71,7 @@ local vmax = cfg.topSpeed / 3.6
 local stage, stageT, pullT = "start", 0, 0
 while t < 60 do
 	local inp = { speed = v }
-	if stage == "start" then if st.phase == "run" then stageT = stageT + dt end if stageT > 1.2 then stage, stageT = SPAM and "spam" or "pull", 0 end
+	if stage == "start" then if st.phase == "run" then stageT = stageT + dt end if stageT > 1.2 then stage, stageT = SPAM and "spam" or POPS and "blips" or "pull", 0 end
 	elseif stage == "spam" then
 		-- DRIVE=spam: W and Space mashed at a standstill for 6 s, each toggled every SPAM_W / SPAM_SPACE
 		-- seconds (env; 0 = held; defaults 0.12 / 0.2)
@@ -72,6 +79,16 @@ while t < 60 do
 		inp.forward = SPAM_W <= 0 or math.floor(stageT / SPAM_W) % 2 == 0
 		inp.handbrake = SPAM_SPACE <= 0 or math.floor(stageT / SPAM_SPACE) % 2 == 0
 		if stageT > 6 then stage, stageT = "idle", 0 end
+	elseif stage == "blips" then
+		-- DRIVE=pops: four blips in neutral (Space held, W for 0.7 s of every 2.4 s), then three lifts in
+		-- gear (pull until 0.7 x redline in 2nd or higher, after any shift, coast 2.5 s), then the usual coast and brake
+		stageT = stageT + dt; inp.handbrake = true; inp.forward = stageT > 0.6 and (stageT - 0.6) % 2.4 < 0.7
+		if stageT > 10.2 then stage, stageT, POP_LIFTS = "lifts", 0, 0 end
+	elseif stage == "lifts" then stageT = stageT + dt
+		if LIFTING then if stageT > 2.5 then LIFTING, stageT = false, 0 end
+		else inp.forward = true; PULL_T = (PULL_T or 0) + dt
+			if PULL_T > 0.6 and st.gear >= 2 and st.shiftTimer <= 0 and st.rpm > cfg.redline * 0.7 then LIFTING, stageT, POP_LIFTS, PULL_T = true, 0, POP_LIFTS + 1, 0 end end
+		if POP_LIFTS >= 3 and not LIFTING then stage, stageT = "coast", 0 end
 	elseif stage == "pull" then inp.forward = true; pullT = pullT + dt
 		if v > vmax * 0.93 or pullT > 26 then stage, stageT = "coast", 0 end
 	elseif stage == "coast" then stageT = stageT + dt; if stageT > 3 then stage, stageT = "brake", 0 end
@@ -84,9 +101,9 @@ while t < 60 do
 	elseif inp.backward then v = math.max(0, v - 7 * dt)
 	else v = math.max(0, v - (0.4 + 0.0006 * v * v) * dt) end
 	local limTarget = (drive and st.gear == 0 and st.limiterHoldTimer > 0 and st.lastPedal and st.rpm > cfg.redline * 0.9) and 1 or 0
-	out[#out + 1] = string.format("%.1f,%.3f,%d,%.3f,%d,%.3f,%.3f,%d,%.3f,%d", st.rpm, st.soundThrottle, st.gear, v, limTarget,
+	out[#out + 1] = string.format("%.1f,%.3f,%d,%.3f,%d,%.3f,%.3f,%d,%.3f,%d,%.3f", st.rpm, st.soundThrottle, st.gear, v, limTarget,
 		st.boost or 0, st.blowOffEvent or 0, (st.phase == "run") and 1 or 0, st.fuelCut and 1 or 0,
-		(st.shiftTimer > 0 and st.shiftDirection == 1) and 1 or 0)
+		(st.shiftTimer > 0 and st.shiftDirection == 1) and 1 or 0, st.throttle)
 	t = t + dt
 end
 local L = {} for i, r in ipairs(bk.layers) do L[i] = r end
@@ -115,7 +132,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
   const env = path.join(ADDON, 'sound/audio_engine', (fs.readdirSync(path.join(ADDON, 'sound/audio_engine')).find(d => d.startsWith('env_'))))
   const cache = {}; const W = f => cache[f] || (cache[f] = readWav(f))
   for (const name of process.argv.slice(2)) {
-    L.global.set('CAR_NAME', name); L.global.set('DRIVE_SPAM', process.env.DRIVE === 'spam'); L.global.set('SPAM_W', +(process.env.SPAM_W || 0.12)); L.global.set('SPAM_SPACE', +(process.env.SPAM_SPACE || 0.2)); res = ''
+    L.global.set('CAR_NAME', name); L.global.set('DRIVE_SPAM', process.env.DRIVE === 'spam'); L.global.set('DRIVE_POPS', process.env.DRIVE === 'pops'); L.global.set('SPAM_W', +(process.env.SPAM_W || 0.12)); L.global.set('SPAM_SPACE', +(process.env.SPAM_SPACE || 0.2)); res = ''
     await L.doString(LUA_DRIVE)
     if (res.startsWith('ERR')) { console.log(name, res); continue }
     const f = res.split('|')
@@ -134,6 +151,8 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     const SCB = [375, 750, 1500, 3000, 6000]
     const scOn = sc ? SCB.map((_, k) => W(path.join(env, `sc_${sc}_${k + 1}.wav`))) : null, scOff = sc ? SCB.map((_, k) => W(path.join(env, `sc_${sc}_${k + 1}_off.wav`))) : null
     const popsW = []; for (let i = 1; i <= +nPops; i++) popsW.push(W(path.join(D, `pop${i}.wav`)))
+    const bangsW = []; for (let i = 1; i <= 3; i++) { const f = path.join(D, `bang${i}.wav`); if (fs.existsSync(f)) bangsW.push(W(f)) }
+    let lastGear = 0, lastRpm = 0, lastPopAt = -1, antilagAt = -1, liftArmed = false
     const N = Math.ceil(frames.length * SR / FPS) + SR, out = new Float32Array(N)
     // a voice: a loop (or one-shot) played at a pitch, its volume gliding per sample
     const voices = new Map()
@@ -143,14 +162,14 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
     const stems = process.env.STEMS ? { motor: new Float32Array(N), hum: new Float32Array(N), road: new Float32Array(N), other: new Float32Array(N) } : null
     const stemOf = (vo) => /^(on|off)\d|^lim$/.test(vo.key) ? 'motor' : vo.key === 'evhum' ? 'hum' : vo.key === 'road' || vo.key === 'wind' ? 'road' : 'other'
     const shots = []
-    const spf = SR / FPS; let thrS = 0, limW = 0, xr = null, loopGain = 0, scThr = 0, lastThr = 0, popUntil = -1, nextPop = 0, rr = Math.random
+    const spf = SR / FPS; let thrS = 0, limW = 0, xr = null, loopGain = 0, scThr = 0, lastThr = 0, burble = null, nextPop = -1, rr = Math.random
     let seed = 7; rr = () => (seed = (seed * 16807) % 2147483647) / 2147483647
     shots.push({ w: start, pos: 0, vol: 0.9, pitch: 1 })
     if (+electric) shots.push({ w: W(path.join(env, 'evpowerup.wav')), pos: 0, vol: 0.03, pitch: 1 })   // cl_engine EV_POWERUP_VOLUME
     let chimed = !+electric   // the chime plays once the car is ready (cl_engine EV_CHIME_VOLUME)
     let tPhase = null
     for (let fi = 0; fi < frames.length; fi++) {
-      const [rpm0, sThr, gear, v, limT, boost, bovE, run, cut, upshifting] = frames[fi]; const dt = 1 / FPS, t = fi * dt
+      const [rpm0, sThr, gear, v, limT, boost, bovE, run, cut, upshifting, pedal] = frames[fi]; const dt = 1 / FPS, t = fi * dt
       const rpm = Math.max(rpm0, 50)
       if (!chimed && +run) { chimed = true; shots.push({ w: W(path.join(env, 'evchime.wav')), pos: 0, vol: 0.3, pitch: 1, at: fi }) }
       // loops muted until the start one-shot reaches its fade point
@@ -162,7 +181,10 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       const w = new Array(layers.length).fill(0), n = layers.length
       if (Math.exp(xr) <= layers[0]) w[0] = 1; else if (Math.exp(xr) >= layers[n - 1]) w[n - 1] = 1
       else for (let i = 0; i < n - 1; i++) if (Math.exp(xr) < layers[i + 1]) { const x = (xr - Math.log(layers[i])) / (Math.log(layers[i + 1]) - Math.log(layers[i])); w[i] = Math.cos(x * Math.PI / 2); w[i + 1] = Math.sin(x * Math.PI / 2); break }
-      const g = 0.62 * loopGain * +volume * (+electric ? EV_VOLUME : 1)
+      const gBase = 0.62 * loopGain * +volume * (+electric ? EV_VOLUME : 1)
+      // cl_engine's ANTILAG_DIP: the engine's loops dip 8 dB under the upshift anti-lag (0.08 s, back over 0.17 s)
+      const antilagAge = t - antilagAt, dip = antilagAge < 0.08 ? 0.4 : antilagAge < 0.25 ? 1 - 0.6 * (1 - (antilagAge - 0.08) / 0.17) : 1
+      const g = gBase * dip
       for (let i = 0; i < n; i++) {
         const wi = w[i] * (1 - limW) * g * trims[i], pitch = Math.min(2.5, rpm / layers[i])
         const a = voice('on' + i, on[i], true), b = voice('off' + i, off[i], true)
@@ -191,15 +213,49 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
           const a = voice('sc' + k, scOn[k], true), b = voice('sco' + k, scOff[k], true)
           a.target = scVol * wk * scThr; b.target = scVol * wk * (1 - scThr) * 0.5; a.pitch = b.pitch = Math.min(2.55, scE / SCB[k]) }
       }
-      // pops: lifting off above half redline starts a burble that thins out over (0.8 + 2.2 x pops) s
-      if (+pops > 0 && popsW.length) {
-        if (lastThr > 0.5 && sThr < 0.2 && rpm > red * 0.5) { popUntil = t + 0.8 + 2.2 * pops; nextPop = t + 0.12 + 0.18 * rr() }
-        if (t < popUntil && t >= nextPop && sThr < 0.2 && rpm > red * 0.3) {
-          const left = (popUntil - t) / (0.8 + 2.2 * pops)
-          if (rr() < 0.35 + 0.6 * pops) shots.push({ w: popsW[Math.floor(rr() * popsW.length)], pos: 0, vol: 0.7 * g * (0.5 + 0.5 * left), pitch: 0.92 + 0.16 * rr(), at: fi })
-          nextPop = t + (0.04 + 0.2 * rr()) / Math.max(0.3, left)
+      // pops: cl_engine's burble (each pop file one burst of cracks; see the comment there). Not mirrored: the
+      // bang files (the closing one is a loud pop here), lone pops for P < 0.35, the idle floor
+      const P = +pops
+      if (P > 0 && popsW.length) {
+        const popShot = (vol) => (process.env.POPLOG && console.log("pop", t.toFixed(2), Math.round(rpm), gear), shots.push({ w: popsW[Math.floor(rr() * popsW.length)], pos: 0, vol: 0.7 * g * vol, pitch: 0.92 + 0.16 * rr(), at: fi }))
+        // a lift as cl_engine finds it: the pedal over 0.8 arms it, under 0.5 fires it
+        if (+pedal > 0.8) liftArmed = true
+        const lifted = liftArmed && +pedal < 0.5; if (lifted) liftArmed = false
+        if (lifted && rpm > red * 0.5) { if (process.env.POPLOG) console.log('lift', t.toFixed(2), Math.round(rpm), +gear)
+          nextPop = -1
+          if ((!POP_ONCE || POPS_ON_LIFT) && rr() < (POP_ONCE ? 1.4 * P : 0.3 + 0.65 * P)) {
+            burble = { start: t, dur: 0.5 + 2 * P, free: +gear === 0, endRpm: 0.55 * rpm }
+            nextPop = t + (POP_ONCE ? 0.06 + 0.04 * rr() : P >= 0.6 ? 0.03 + 0.09 * rr() : 0.2 + 0.15 * rr())
+            burble.bang = rr() < 0.6 * P * P ? t + (burble.free ? 0.3 + 0.4 * rr() : burble.dur * (0.6 + 0.35 * rr())) : null
+          }
+        }
+        if (+pedal > 0.6) nextPop = -1   // back on the throttle (cl_engine: the pedal)
+        if (POP_ONCE && burble && nextPop >= 0 && t >= nextPop && sThr < 0.04 && rpm > red * 0.35 && t - lastPopAt < 0.3) nextPop = -1
+        else if (POP_ONCE && burble && nextPop >= 0 && t >= nextPop && sThr < 0.04 && rpm > red * 0.35) {
+          lastPopAt = t
+          // cl_engine's POP_ONCE_PER_LIFT: one pop, random level and a wider pitch (bangs not mirrored)
+          shots.push({ w: popsW[Math.floor(rr() * popsW.length)], pos: 0, vol: gBase * (0.8 + 0.2 * rr()), pitch: 0.96 + 0.08 * rr(), at: fi })
+          if (process.env.POPLOG) console.log("pop", t.toFixed(2), Math.round(rpm), gear)
+          nextPop = -1
+        } else if (burble && nextPop >= 0 && t >= nextPop && sThr < 0.04 && rpm > red * 0.35) {
+          const age = (t - burble.start) / burble.dur
+          if (age >= 1 || (burble.free && rpm < burble.endRpm)) nextPop = -1
+          else if (burble.bang && t >= burble.bang) { popShot(0.85 + 0.15 * rr()); nextPop = -1 }
+          else {
+            const intensity = age < 0.7 ? 1 : (1 - age) / 0.3
+            popShot((0.6 + 0.4 * rr()) * (0.6 + 0.4 * intensity))
+            nextPop = t + (0.15 + 0.3 * rr()) / (0.5 + P) / Math.max(0.35, intensity)
+            if (burble.bang && nextPop > burble.bang && t < burble.bang) nextPop = burble.bang
+          }
         }
       }
+      // the upshift anti-lag (cl_engine: every flat-out upshift from over 0.75 x redline, full level, a bang file)
+      if (POP_ONCE && +pops > 0 && bangsW.length && +gear > lastGear && lastGear > 0 && +upshifting && lastRpm > red * 0.75) {
+        const fire = true   // every flat-out upshift (cl_engine)
+        if (process.env.POPLOG) console.log('upshift', t.toFixed(2), lastGear, '->', +gear, Math.round(lastRpm), (lastRpm / red).toFixed(2), fire ? 'ANTILAG' : '-')
+        if (fire) { shots.push({ w: bangsW[Math.floor(rr() * bangsW.length)], pos: 0, vol: gBase, pitch: 0.96 + 0.08 * rr(), at: fi }); antilagAt = t; lastPopAt = t }
+      } else if (process.env.POPLOG && +gear > lastGear && lastGear > 0) console.log('upshift', t.toFixed(2), lastGear, '->', +gear, Math.round(lastRpm), (lastRpm / red).toFixed(2), 'not counted (upshifting', upshifting + ')')
+      lastGear = +gear; lastRpm = rpm
       lastThr = sThr
       // render this frame
       const s0 = Math.round(fi * spf), s1 = Math.round((fi + 1) * spf)

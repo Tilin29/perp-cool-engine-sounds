@@ -342,21 +342,42 @@ local function playIgnitionChime(car)
 	car.chimePatch = patch
 end
 
-local function playPop(car, volume, isBang)
+-- a lift pops once at most (true) or bursts into a burble (false): see the pops comment in updateSound
+local POP_ONCE_PER_LIFT = true
+-- lift pops on or off (2026-11-27, the user: "let's remove the pops for now"); the upshift anti-lag stays
+local POPS_ON_LIFT = false
+local POP_HEADROOM = 1.5                -- see playPop
+local POP_GAIN = 1.0                    -- pops' playback level (x masterVolume, loop gain, popVol; popgen.py's POP_PLAYBACK)
+local ANTILAG_DIP, ANTILAG_DIP_HOLD, ANTILAG_DIP_RELEASE = 0.6, 0.08, 0.17   -- the engine's dip under the upshift anti-lag (-8 dB)
+local POP_MIN_GAP = 0.3                -- s between two pops at least (one-pop mode)
+local POP_ONCE_PITCH = { 96, 104 }     -- its pitch spread, percent (the burble's pops: 92-108; the user: only slight)
+
+-- pitchRange: { low, high } percent, default 92-108
+local function playPop(car, volume, isBang, pitchRange)
 	local bank = car.bank
 	local sounds = isBang and bank.bangs or bank.pops
 	if not sounds or #sounds == 0 then return end
+	-- never one of the last two played (bursts overlap now and then: the same name again would cut
+	-- the one still ringing, the game knows a sound by entity + name)
 	local pickField = isBang and "lastBangIndex" or "lastPopIndex"
+	local previousField = isBang and "previousBangIndex" or "previousPopIndex"
 	local pickIndex = math.random(#sounds)
-	if pickIndex == car[pickField] and #sounds > 1 then pickIndex = pickIndex % #sounds + 1 end
+	for _ = 1, #sounds do
+		local recent = pickIndex == car[pickField] or (#sounds > 2 and pickIndex == car[previousField])
+		if not recent then break end
+		pickIndex = pickIndex % #sounds + 1
+	end
+	car[previousField] = car[pickField]
 	car[pickField] = pickIndex
-	-- headroom: the pop's peak on top of the engine's, and of any pop still ringing, must stay
-	-- under full scale
+	-- headroom: the pop's peak on top of the engine's (mixPeak: every loop's peak lined up, a worst case)
+	-- and of any pop still ringing stays under POP_HEADROOM. It was 0.98: on a flat-out upshift (mixPeak ~0.66)
+	-- the anti-lag came out ~7 dB down, lift pops ~2 dB ("too quiet, can barely hear them", the user); a pop is
+	-- too short for its peak to land on the engine's often
 	local peak = bank.peak and bank.peak[sounds[pickIndex]] or 0.98
-	volume = min(volume, max(0.05, 0.98 - (car.mixPeak or 0) - (car.popPeakLoad or 0)) / max(peak, 0.05))
+	volume = min(volume, max(0.05, POP_HEADROOM - (car.mixPeak or 0) - (car.popPeakLoad or 0)) / max(peak, 0.05))
 	car.popPeakLoad = (car.popPeakLoad or 0) + volume * peak
 	getPatch(car, sounds[car[pickField]]):Stop()
-	startPatch(car, sounds[car[pickField]], math.min(1, volume), math.Clamp(math.random(92, 108) * (car.dopplerRatio or 1), 20, 255))
+	startPatch(car, sounds[car[pickField]], math.min(1, volume), math.Clamp(math.random(pitchRange and pitchRange[1] or 92, pitchRange and pitchRange[2] or 108) * (car.dopplerRatio or 1), 20, 255))
 end
 
 ---------------------------------------------------------------------------
@@ -540,6 +561,32 @@ end
 
 local NO_PEAKS = {}
 
+--[[
+	Engine loudness on top of the baked levels (runtime: no re-bake). The bands are baked capped at
+	the same level above 250 Hz, so the brighter top bands came out 2-7 dB quieter than idle on every
+	engine (the low end ~7-8 dB down by redline), and a W16 or V12 no louder than a four-cylinder:
+	pulling hard sounded weak and screamy, big engines quiet (players' complaint, 2026-11-27).
+	  LOAD_LIFT_DB       at full throttle, from LOAD_LIFT_FROM x redline up to redline (smoothstep),
+	                     the band loops and the limiter loop go up by this much; off throttle none
+	  CYLINDER_GAIN_DB   by the bank's cylinder count, on the engine's loops always
+	Both are under the car's headroom ceiling like everything else: an engine whose idle band
+	already sits at it (peaky V8s) only gets louder where there's room, i.e. higher up.
+]]
+local LOAD_LIFT_DB, LOAD_LIFT_FROM = 4, 0.25
+local CYLINDER_GAIN_DB = { [5] = 0.5, [6] = 1, [8] = 2, [10] = 2.5, [12] = 3, [16] = 3.5 }
+
+local function engineLoudness(bank, config, rpm, throttle)
+	if config.electric then return 1 end
+	local cylinders = bank.cyl or 4
+	local cylinderDb = 0
+	for count, gainDb in pairs(CYLINDER_GAIN_DB) do
+		if cylinders >= count and gainDb > cylinderDb then cylinderDb = gainDb end
+	end
+	local share = math.Clamp((rpm / config.redline - LOAD_LIFT_FROM) / (1 - LOAD_LIFT_FROM), 0, 1)
+	share = share * share * (3 - 2 * share)
+	return 10 ^ ((cylinderDb + LOAD_LIFT_DB * throttle * share) / 20)
+end
+
 local function updateSound(car, deltaTime)
 	local bank, config, engineState, entity = car.bank, car.config, car.engineState, car.entity
 	if not bank or not bank.ready then return end
@@ -599,7 +646,20 @@ local function updateSound(car, deltaTime)
 	car.headroomCeiling = approach(car.headroomCeiling or 0.66, targetCeiling, deltaTime * 0.5)
 	-- revving in neutral sits a few dB above driving (driving leaves that headroom)
 	car.neutralRevGain = approach(car.neutralRevGain or 0.85, inNeutral and 1.2 or 0.85, deltaTime * 2)
-	local loopVolume = masterVolume * car.loopGain * car.neutralRevGain * (config.electric and AudioEngine.EV_VOLUME or 1)
+	-- the upshift anti-lag (a DSG "fart") comes with the ignition cut: the engine's loops dip under it,
+	-- ANTILAG_DIP for ANTILAG_DIP_HOLD s, back over ANTILAG_DIP_RELEASE s (VOLUME_SLEW smooths the edges).
+	-- Without it the torque cut's partial dip left the anti-lag under the flat-out engine ("cannot really
+	-- hear the DSG farts on the Furai", the user)
+	local antilagDip = 1
+	if car.antilagAt then
+		local age = RealTime() - car.antilagAt
+		if age < ANTILAG_DIP_HOLD + ANTILAG_DIP_RELEASE then
+			antilagDip = 1 - ANTILAG_DIP * (age < ANTILAG_DIP_HOLD and 1 or 1 - (age - ANTILAG_DIP_HOLD) / ANTILAG_DIP_RELEASE)
+		else
+			car.antilagAt = nil
+		end
+	end
+	local loopVolume = masterVolume * car.loopGain * car.neutralRevGain * (config.electric and AudioEngine.EV_VOLUME or 1) * antilagDip
 	local rpm = max(engineState.rpm, 50)
 	local layers = bank.layers
 	local bandCount = #layers
@@ -719,7 +779,9 @@ local function updateSound(car, deltaTime)
 	car.superchargerThrottle = approach(car.superchargerThrottle or 0, bypassTarget, deltaTime / (bypassTarget > (car.superchargerThrottle or 0) and 0.15 or 0.1))
 	local superchargerThrottle = car.superchargerThrottle
 	local smoothedThrottle = car.smoothedThrottle
-	local estimatedPowerSum = (car.limiterWeight * loopVolume * (peaks[bank.limiter.off] or 0.9)) ^ 2
+	-- (the band and limiter loops' extra loudness, see engineLoudness: in the estimate too, so the headroom holds it)
+	local engineGain = engineLoudness(bank, config, rpm, max(smoothedThrottle, car.limiterWeight))
+	local estimatedPowerSum = (car.limiterWeight * loopVolume * engineGain * (peaks[bank.limiter.off] or 0.9)) ^ 2
 		+ (superchargerPlaying and superchargerVolume * (superchargerThrottle * (sharedBank.peak[superchargerNames[lowerBand][1]] or 0.3)
 			+ (1 - superchargerThrottle) * 0.5 * (sharedBank.peak[superchargerNames[lowerBand][2]] or 0.3)) or 0) ^ 2
 		+ (humVolume * (sharedBank and sharedBank.peak and sharedBank.peak.evhum or 0.3)) ^ 2
@@ -727,7 +789,7 @@ local function updateSound(car, deltaTime)
 		+ (sharedBank and (roadVolume * (sharedBank.peak and sharedBank.peak.road or 0.3)) or 0) ^ 2
 		+ (sharedBank and (windVolume * (sharedBank.peak and sharedBank.peak.wind or 0.3)) or 0) ^ 2
 	for i = 1, bandCount do
-		local layer, bandVolume = layers[i], (bandWeights[i] or 0) * (1 - car.limiterWeight) * loopVolume
+		local layer, bandVolume = layers[i], (bandWeights[i] or 0) * (1 - car.limiterWeight) * loopVolume * engineGain
 		if bandVolume > 0 then
 			estimatedPowerSum = estimatedPowerSum + (bandVolume * (smoothedThrottle * (peaks[layer.on] or 0.9) + (1 - smoothedThrottle) * (peaks[layer.off] or 0.9))) ^ 2
 		end
@@ -737,7 +799,8 @@ local function updateSound(car, deltaTime)
 	-- pull down quickly, recover slowly
 	if headroomTarget < car.headroomGain then car.headroomGain = car.headroomGain + (headroomTarget - car.headroomGain) * min(1, deltaTime * 30)
 	else car.headroomGain = car.headroomGain + (headroomTarget - car.headroomGain) * min(1, deltaTime * 3) end
-	car.popPeakLoad = (car.popPeakLoad or 0) * math.exp(-deltaTime / 0.08)
+	-- (a pop is a 0.1-0.25 s burst of cracks: its peak load goes over about that)
+	car.popPeakLoad = (car.popPeakLoad or 0) * math.exp(-deltaTime / 0.06)
 	-- the pass-by swell goes on after the headroom, so a car pinned at its ceiling still swells
 	local passbyGain = car.passbyGain or 1
 	if passbyGain > 1 then
@@ -755,7 +818,7 @@ local function updateSound(car, deltaTime)
 	local pitchScale = car.detune * (car.dopplerRatio or 1)
 	for i = 1, bandCount do
 		local layer = layers[i]
-		local bandVolume = (bandWeights[i] or 0) * (1 - car.limiterWeight) * loopVolume
+		local bandVolume = (bandWeights[i] or 0) * (1 - car.limiterWeight) * loopVolume * engineGain
 		-- (bands out of the cross-fade and silent: nothing to do)
 		if bandVolume > 0 or car.activeGroups[i] then
 			local pitch = math.Clamp(100 * pitchScale * rpm / layer.rpm, 5, 250)
@@ -766,7 +829,7 @@ local function updateSound(car, deltaTime)
 	-- a family bank (or the stock fallback) may be rendered at another redline: pitch it to ours
 	if car.limiterWeight > 0 or car.activeGroups.lim then
 		local limiterPitch = math.Clamp(100 * pitchScale * config.redline / (bank.limiter.rpm or config.redline), 5, 250)
-		setGroup(car, "lim", singleNameList(bank.limiter.off), volumeList(car, "lim", car.limiterWeight * loopVolume), limiterPitch, deltaTime)
+		setGroup(car, "lim", singleNameList(bank.limiter.off), volumeList(car, "lim", car.limiterWeight * loopVolume * engineGain), limiterPitch, deltaTime)
 	end
 
 	-- turbos: the whistle rises with boost, the blow-off valve sighs when the throttle shuts
@@ -811,61 +874,123 @@ local function updateSound(car, deltaTime)
 
 	--[[
 		Pops & bangs: profile "pops" = how often (0 = off), "popVolume" = how loud (1 = default).
-		Timed like a real overrun: lifting off high in the revs starts a burble a moment later (the
-		fuel has to reach the hot exhaust), pops in uneven clusters, thick at first and thinning out
-		as the revs fall and the seconds pass; back on the throttle ends it. A long coast only pops
-		now and then. (A per-frame chance spread lone pops evenly over every coast: popcorn.)
-		The big events (a bang to open the burble, upshift crack, limiter) go with P squared: a Rare
-		or Occasional car crackles now and then, only a Frequent one bangs on most lifts.
+		Timed after recordings (SOUND_IMPROVEMENTS.md section 1: F-Type SVR, R8 V10, C63). Each pop
+		file is one burst, a 0.1-0.25 s train of cracks at the engine's firing rate (popgen.py; single
+		cracks played in tight groups sounded like popcorn, the user); the bursts' rhythm is made here.
+		  - a lift high in the revs pops at all with chance 0.3 + 0.65 P (an F-Type or R8 nearly
+		    always, a C63 about half the time)
+		  - it starts 0.03-0.12 s after the lift on a crackly car (P >= 0.6, factory-crackle style),
+		    0.2-0.35 s otherwise
+		  - bursts (0.15-0.45 s) / (0.5 + P) apart (the F-Type: ~3 a second, nearly running
+		    together), steady, easing off only over the last 30% of the window
+		  - the window: in gear 0.5 + 2 P s (the revs fall slowly); free-revving (neutral) it ends
+		    once the revs are under max(1.6 x idle, 0.55 x the lift's revs) (they crash in under a
+		    second, taking the pops with them); never under 0.35 x redline; back on the throttle ends it
+		  - each burst random over ~4 dB; now and then (0.6 x P squared) a louder lone bang closes the
+		    burble: 0.3-0.7 s in free-revving, in gear over 60-95% of the window
+		  - a car with little crackle (P < 0.35) gets one or two lone pops instead of a burst
+		A long coast only pops now and then. The upshift crack and the limiter's pops stay, with P
+		squared: a Rare or Occasional car crackles now and then, only a Frequent one bangs on most lifts.
+		POP_ONCE_PER_LIFT (the user's trial, 2026-11-27): a lift plays at most one pop instead of the
+		burble above: chance min(1, 1.4 P) (a rare-popping car stays rare), always 0.06-0.1 s after the lift, at least POP_MIN_GAP apart, a
+		random pop file at a random level and pitch; no odd pops on a long coast, none on the limiter; the
+		bang files (recorded: an anti-lag blat) play on a flat-out upshift, chance 0.4 + P. false = the burble.
 	]]
 	local popFrequency = config.profile.pops or 0
-	-- 0.7: about 3 dB over the 0.5 they were baked for (they came out a little too quiet)
-	local popVolume = masterVolume * car.loopGain * 0.7 * (config.profile.popVol or 1) * (car.passbyGain or 1)
+	-- POP_GAIN: the level popgen.py levels the pops for (0.7 until the recorded pops: "too quiet", the user)
+	local popVolume = masterVolume * car.loopGain * POP_GAIN * (config.profile.popVol or 1) * (car.passbyGain or 1)
 	if popFrequency > 0 and popVolume > 0 and #bank.pops > 0 and engineState.on and engineState.phase == "run" then
 		local redline, now = config.redline, RealTime()
 		local bigEventChance = popFrequency * popFrequency
 		local overrun = engineState.soundThrottle < 0.04 and engineState.rpm > redline * 0.35 and not engineState.fuelCut
-		-- lift-off high in the revs: a burble starts, longer the higher the revs and the more it pops
-		if (car.lastThrottle or 0) > 0.8 and engineState.throttle < 0.5 and engineState.rpm > redline * 0.5 then
-			local highRevShare = math.Clamp((engineState.rpm / redline - 0.5) / 0.4, 0, 1)
-			car.burbleStart = now
-			car.burbleDuration = (0.8 + 2.2 * popFrequency) * (0.5 + 0.5 * highRevShare)
-			car.nextPopTime = now + 0.12 + 0.18 * math.random()
-			car.burbleOpensWithBang = math.random() < bigEventChance * (0.4 + 0.6 * highRevShare)
+		-- lift-off high in the revs
+		-- (armed over 0.8, fired under 0.5: the throttle falls at 7/s, ~0.12 a frame at 60 fps, so the old
+		-- "over 0.8 last frame, under 0.5 now" only ever caught a lift under ~23 fps; the pops heard
+		-- revving were the limiter's random ones, the user's "popcorn")
+		if engineState.throttle > 0.8 then car.liftArmed = true end
+		local lifted = car.liftArmed and engineState.throttle < 0.5
+		if lifted then car.liftArmed = false end
+		if lifted and engineState.rpm > redline * 0.5 then
+			car.nextPopTime = nil
+			if POP_ONCE_PER_LIFT then
+				-- one pop per lift: chance 1.4 P (0.6 + 0.4 P made the GTI, P 0.1, pop on most lifts: "acts like a
+				-- pressure relief valve", the user) and always about as long after letting go, so revving
+				-- goes "vroom - pop" each time (random chances and 0.03-0.35 s delays sounded like popcorn)
+				if POPS_ON_LIFT and math.random() < 1.4 * popFrequency then
+					car.burbleStart, car.burbleDuration = now, 1
+					car.nextPopTime = now + 0.06 + 0.04 * math.random()
+				end
+			elseif math.random() < 0.3 + 0.65 * popFrequency then
+				local crackly = popFrequency >= 0.6
+				car.burbleStart = now
+				car.burbleDuration = 0.5 + 2 * popFrequency
+				car.burbleFreeRev = engineState.gear == 0
+				car.burbleEndRpm = math.max(1.6 * config.idle, 0.55 * engineState.rpm)
+				car.burbleLonePops = popFrequency < 0.35 and math.random(1, 2) or nil
+				car.nextPopTime = now + (crackly and 0.03 + 0.09 * math.random() or 0.2 + 0.15 * math.random())
+				car.burbleBangTime = nil
+				if math.random() < 0.6 * bigEventChance then
+					car.burbleBangTime = now + (car.burbleFreeRev and 0.3 + 0.4 * math.random() or car.burbleDuration * (0.6 + 0.35 * math.random()))
+				end
+			end
 		end
-		if engineState.soundThrottle > 0.3 then car.nextPopTime = nil end    -- back on the throttle
-		if overrun and car.nextPopTime and now >= car.nextPopTime then
-			local burbleAge = (now - car.burbleStart) / car.burbleDuration
-			local burbleIntensity = (burbleAge < 1 and (1 - burbleAge) ^ 1.5 or 0) * math.Clamp((engineState.rpm / redline - 0.35) / 0.5, 0, 1)
-			if burbleIntensity > 0.03 then
-				if car.burbleOpensWithBang then
-					playPop(car, popVolume * (0.8 + 0.2 * math.random()), true)
-					car.burbleOpensWithBang = false
-				else
-					playPop(car, popVolume * (0.5 + 0.5 * burbleIntensity) * (0.75 + 0.25 * math.random()), false)
+		-- back on the throttle (the pedal: the sound throttle is still ~0.4 when a lift fires, which cancelled it)
+		if engineState.throttle > 0.6 then car.nextPopTime = nil end
+		if POP_ONCE_PER_LIFT then
+			-- one pop at most per lift: one of the pop files (the bank's set at five pitches), at a random
+			-- level and a slight pitch spread (the bang files are the upshift's anti-lag blat)
+			if overrun and car.nextPopTime and now >= car.nextPopTime then
+				if now - (car.lastPopAt or -1) >= POP_MIN_GAP then
+					playPop(car, popVolume * (0.8 + 0.2 * math.random()), false, POP_ONCE_PITCH)
+					car.lastPopAt = now
 				end
-				-- a quick follow-up (a cluster), or a pause that grows as the burble dies away
-				if math.random() < 0.25 + 0.3 * burbleIntensity then
-					car.nextPopTime = now + 0.05 + 0.08 * math.random()
-				else
-					car.nextPopTime = now + (0.15 + 0.5 * math.random()) / (0.3 + 1.5 * burbleIntensity * popFrequency)
-				end
-			else
 				car.nextPopTime = nil
+			end
+		elseif overrun and car.nextPopTime and now >= car.nextPopTime then
+			local burbleAge = (now - car.burbleStart) / car.burbleDuration
+			local revsDone = car.burbleFreeRev and engineState.rpm < car.burbleEndRpm
+			if burbleAge >= 1 or revsDone then
+				car.nextPopTime = nil
+			elseif car.burbleBangTime and now >= car.burbleBangTime then
+				-- the louder lone one that closes the burble
+				playPop(car, popVolume * (0.85 + 0.15 * math.random()), #bank.bangs > 0)
+				car.nextPopTime = nil
+			elseif car.burbleLonePops then
+				playPop(car, popVolume * (0.6 + 0.4 * math.random()), false)
+				car.burbleLonePops = car.burbleLonePops - 1
+				local remaining = car.burbleStart + car.burbleDuration - now
+				car.nextPopTime = car.burbleLonePops > 0 and remaining > 0.2 and now + 0.15 + (remaining - 0.15) * math.random() or nil
+			else
+				local intensity = burbleAge < 0.7 and 1 or (1 - burbleAge) / 0.3
+				playPop(car, popVolume * (0.6 + 0.4 * math.random()) * (0.6 + 0.4 * intensity), false)
+				-- the next burst: (0.15-0.45 s) / (0.5 + P) later, so they overlap now and then
+				car.nextPopTime = now + (0.15 + 0.3 * math.random()) / (0.5 + popFrequency) / math.max(0.35, intensity)
+			end
+			if car.nextPopTime and car.burbleBangTime and car.nextPopTime > car.burbleBangTime and now < car.burbleBangTime then
+				car.nextPopTime = car.burbleBangTime
 			end
 		end
 		-- a long coast at high revs: an odd pop now and then
-		if overrun and not car.nextPopTime and engineState.rpm > redline * 0.55 and math.random() < bigEventChance * 0.25 * deltaTime then
+		if not POP_ONCE_PER_LIFT and overrun and not car.nextPopTime and engineState.rpm > redline * 0.55 and math.random() < bigEventChance * 0.25 * deltaTime then
 			playPop(car, popVolume * (0.4 + 0.3 * math.random()), false)
 		end
-		-- upshift crack, flat out high in the revs
+		-- upshift, flat out high in the revs: the anti-lag blat (the bang files; the user: "the antilag
+		-- when shifting", a DSG-upshift fart) on every one (the user: "100% of the time"; it was a chance,
+		-- 0.4 + P), at full level ("slightly louder": was 0.8-1); the burble mode keeps the old crack
 		if engineState.gear > (car.lastGear or 0) and (car.lastGear or 0) > 0 and engineState.shiftDirection == 1 and engineState.throttle > 0.8
-			and (car.lastRpm or 0) > redline * 0.75 and math.random() < bigEventChance * 0.6 then
-			playPop(car, popVolume * 0.8, popFrequency > 0.7 and math.random() < 0.3)
+			and (car.lastRpm or 0) > redline * 0.75 then
+			if POP_ONCE_PER_LIFT then
+				if #bank.bangs > 0 then
+					playPop(car, popVolume, true, POP_ONCE_PITCH)
+					car.lastPopAt, car.antilagAt = now, now
+				end
+			elseif math.random() < bigEventChance * 0.6 then
+				playPop(car, popVolume * 0.8, popFrequency > 0.7 and math.random() < 0.3)
+			end
 		end
-		-- limiter
-		if engineState.limiterEvent and math.random() < bigEventChance then
-			playPop(car, popVolume * 0.8, popFrequency > 0.7 and math.random() < 0.25)
+		-- limiter (not in one-pop mode: a chance on every fuel cut, ~7 a second, was the popcorn when revving)
+		if not POP_ONCE_PER_LIFT and engineState.limiterEvent and math.random() < bigEventChance then
+			playPop(car, popVolume * 0.8, not POP_ONCE_PER_LIFT and popFrequency > 0.7 and math.random() < 0.25)
 		end
 	end
 	car.lastRpm = engineState.rpm

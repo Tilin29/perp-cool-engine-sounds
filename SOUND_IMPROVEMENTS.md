@@ -6,6 +6,167 @@ against how real cars crackle. Nothing in the addon is changed by this file; it 
 generator and for the runtime changes that can be made now. The sounds stay synthesized: the recordings were only
 measured, nothing from them is meant to ship.
 
+## Progress (work on these suggestions, newest last)
+
+Kept up to date while working, so the next session can carry on from here.
+
+- 2026-11-27, started on items 1-2 (pops). Plan: a pop-only generator `dev/popgen/popgen.py` (Python, numpy/scipy:
+  the new generator isn't in Lua) re-renders `pop1-5` / `bang1-3` in every bank folder as single cracks (same names,
+  same count) and rewrites their peaks in `cl_baked.lua`; `cl_engine.lua`'s burble timing changes in the same step
+  (the new dense timing only works with single-crack files, the old cluster files need the old timing).
+  Level measured on the recordings: a real pop's first 25 ms is about as loud, full band, as the engine around it
+  (median 0..+3 dB, strong ones +5..7, `poplevel.py` in the session scratchpad); it stands out by its treble.
+  The recordings and a working Python venv from the research session are in
+  `%TEMP%\claude\d3135cb6556adea7\a7194552-de70-4106-9084-5d5168a793cf\scratchpad\` (`ref/`, `venv/`, `tools/`):
+  temporary, may be gone.
+  - [x] `dev/popgen/popgen.py` written (`--preview <dir>` / `--write`, `--only <dir prefix>`)
+  - [x] rendered and measured: first 25 ms, median over all banks, dB under the loudest octave at
+    63..16k: -8.5 -8.0 0 -9.2 -14.2 -10.7 -9.4 -15.4 -23.5 (recordings: 2k -3..-24, 4k -1..-30, 8k -9..-40,
+    16k -21..-53; old files 8k -51..-63, 16k -79..-88); -20 dB in ~19 ms (real 15-45), -40 dB by ~83 ms.
+    Took four tries: a bare 0.5 ms pulse was right in spectrum but decayed -20 dB in 8 ms and was all peak (a
+    click); too much body was too dark; now a ~1 ms pulse + a 3 ms 0.9-6 kHz sizzle, pipe reflections, body, ring.
+    Nearly every file sits at the 0.95 peak cap: the level target (engine loop + 1 dB) wants more than fits,
+    so they're as loud as the peak allows. Engines with louder loops (W16, V8 trucks) get relatively quieter pops.
+  - [x] written into all 42 combustion banks (336 files) and their peaks into `cl_baked.lua` (header line names
+    popgen). The old files are in git (`git checkout HEAD~ -- sound/audio_engine/*/pop*.wav ...` once committed).
+  - [x] `cl_engine.lua` burble timing (comment above `local popFrequency`). Section 1's suggested rate
+    (6 + 10 P a second) overshot the recordings when simulated (19 cracks per lift vs the F-Type's 9): now
+    3 + 6 P, groups of 1-3, closing bang 0.6 P^2 late in the window. `playPop` avoids the last two names;
+    `popPeakLoad` decays at 0.012 s.
+  - [x] `dev/drive_demo/render.js` mirrors it, `DRIVE=pops` drive (blips, then lifts in gear). In that mix the 3+ kHz
+    band peaks at -28 dB on the pops against a -72 dB median (old: -40 max: the pops had no treble at all).
+  - [x] CLAUDE.md updated (Pop timing, the baked-WAV contract's pop line, drive demo)
+  - [ ] heard in game (the user). Not committed (the user's rule: cl_* changes stay on the cc/ branch until asked).
+    Knobs if they're off: loudness `POP_OVER_ENGINE_DB` / `BANG_OVER_ENGINE_DB` in popgen (or cl_engine's 0.7);
+    brightness the crack lowpass (6500 / turbo 4600 Hz) and `SIZZLE`; length the body taus and the ring's 0.035 s.
+  - The user's verdict on that first version: "the pops sound like popcorn". Compared with the F-Type on a
+    spectrogram: a real burble pop isn't one crack but a ~180 ms train of cracks at one bank's exhaust pulse rate
+    (~9 ms apart at ~3500 rpm), swelling and fading; the R8's are shorter trains. Ours were lone ~1 ms ticks.
+    popgen-2: each file is such a train (pop 8-20 pulses at ~0.5 x redline, bang 16-28; see `render_event`),
+    the crack darker (lowpass 5000 / turbo 3600 Hz, less sizzle: summed in a train they were too bright),
+    median over all banks 1k..16k -13 -14.5 -14 -20 -26 dB (the recordings' median -10 -11 -15 -20 -33).
+    cl_engine plays bursts (0.15-0.45 s) / (0.5 + P) apart instead of crack groups; `popPeakLoad` 0.06 s.
+    In the F-Type demo the in-gear burble now looks like the real one (bursts ~0.1-0.15 s, ~3-4 a second); what
+    still differs is between the bursts: the engine itself is dark there (item 3). Written to all banks.
+  - The user on popgen-2: "sounds like tin foil being shouted into". Measured over the whole burst (the earlier
+    check only looked at the first 25 ms, which is bright on real pops too): ours were 8-15 dB too bright from
+    4 kHz up (F-Type bursts 4k -18..-24, 8k -29..-40, 16k -41..-48; ours -12..-18, -20..-25, -24..-30), and a
+    pulse train through fixed Q 4-6 ring modes at 700-4500 Hz is how a voice makes vowels ("shouted").
+    popgen-3: crack lowpass 3000 / turbo 2200 Hz (`CRACK_TOP`), sizzle 0.35 to 3.5 kHz, ring modes 400-2600 Hz
+    at Q 2-3 (moving with every crack) rolled off at `RING_TOP` 6500 Hz with the scatter, more body (1.6) and
+    thump; popgen now reports whole-file spectra. Median over all banks, whole file, 1k..16k:
+    -13 -18 -22 -31 -48 (the F-Type's bursts -8..-13 -8..-18 -18..-24 -29..-40 -41..-48). RING_TOP 4000 gave
+    8k -38 / 16k -56: too dull again (the original complaint), so the F-Type's range is the target, not darker.
+  - The user on popgen-3: "closer, but it should be more bassy, like a BRAP sound". The cracks were near
+    zero-mean clicks with the body at 150-450 Hz; the "BR" is the exhaust pulses themselves, a few ms of positive
+    pressure each, whose train puts its weight at the firing rate (~100-300 Hz). popgen-4: a `PUFF` (1.5, a 4.5 ms
+    half-sine push and a 3x longer, third-height suction, no net flow) under every crack, the body at 0.8 x
+    (`BODY_PITCH`), and each burst a duration (pop 0.08-0.2 s, bang 0.18-0.32 s) filled at the engine's pulse rate
+    instead of a pulse count (V12s got ~50 ms bursts). Whole file, all banks: 63..16k -3 -0.5 -0.7 -8 -14 -19 -23
+    -32 -49 (125 Hz now 14 dB over 1 kHz, was 5; the F-Type's ~11). Waveforms now show its big periodic low pulses.
+  - The user on popgen-4: "more like a BRAP sound, but otherwise good" (the bass and top end stay). The bursts
+    swelled up softly and faded, 85% of pulses firing: a smooth buzz. popgen-5: B-R-A-P shape, a hard first
+    thump (`B_LEVEL` 1), a rattle at `RATTLE_LEVEL` 0.7 falling 30% with only `FIRE_CHANCE` 0.6 of the pulses
+    burning (the gaps are the "R"), then a pause of 0.5-1.5 pulses and a closing crack (`P_LEVEL` 0.9); pops
+    0.12-0.24 s, bangs 0.2-0.32 s (one rattle crack 1.6x). Spectrum as popgen-4.
+  - The user asked to try "pops only once at most, but random sounds": cl_engine `POP_ONCE_PER_LIFT` (true now;
+    false = the burble, kept): a lift pops at most once (same chance 0.3 + 0.65 P and start delay), any of the
+    pop / bang files (a bang with chance 0.25 + 0.35 P), level 0.65-1, pitch `POP_ONCE_PITCH` 85-115% (burble
+    92-108); no odd pops on a long coast. Upshift crack and limiter pops unchanged. The drive demo mirrors it
+    (`POP_ONCE=0` for the burble; its lift test uses the sound throttle, so a blip held on the limiter can count
+    twice there, not in game, where it's the pedal).
+  - The user on popgen-5 (one pop per lift): "getting closer, still missing the sound being a BRAP. Also a bit
+    more bass. Like a DSG fart". A DSG upshift blat is the exhaust pulse train heard as a low pitched buzz: every
+    pulse there, evenly timed, levels rough; the F-Type's bursts show it too (harmonic lines to 2-3 kHz: the
+    pulses alike cycle to cycle). popgen-6: `FIRE_CHANCE` 0.93, `CRACK_JITTER` 0.05, `PITCH_DROP` 0.15 (the
+    pulses slow over the burst), `RATTLE_LEVEL` 0.85, `P_LEVEL` 0.8 after a 0.2-0.7 pulse pause, `PUFF` 2.6 /
+    `PUFF_WIDTH` 6.2 ms, less random noise per crack (`PULSE` 0.9, `SIZZLE` 0.15, `RING` 0.2) so the train is
+    coherent: harmonic lines to ~1 kHz now (popgen-5: noise above ~600 Hz); pop 0.1-0.2 s, bang 0.18-0.3 s.
+    Whole file, all banks, 63..16k: -0.7 -0.5 -2.7 -9.3 -15.8 -24 -29 -37 -52: the weight at 63-125 Hz (was 250),
+    the top 5-7 dB lower relative to it (CRACK_TOP 4000 barely changed that: it's the bass, so left at 3000).
+  - The user on popgen-6: "Nope. Can you get some help off the internet. Try to find if there's any sound
+    available already. You're not that great at generating these". So pops may now be recorded (an exception to
+    "synthesized, not recorded", the user's call). Searched: nothing ready-made and free (Fab "Muffler Crackle
+    Sounds" pack is EUR 4.55; Soundstripe / Artlist are subscriptions). Cut 79 candidate pops (`cut_pops.py` in the
+    session scratchpad: 800-10k energy 10 dB over a 0.5 s median, bursts 10-600 ms, top 8 per clip, peak 0.9) from
+    20 free clips: the research refs (F-Type / C63 Commons CC BY, R8 / crackle / SLS / M3 CC BY, anti-lag / S63 /
+    rally pass CC0) and 12 new CC0 Freesound backfire clips (nsstudios 351738/351739, craigsmith 675723/481663,
+    Pól 385935, CeebFrack 105351, mudflea2 705363, Mihacappy 875056/827175, Yoyodaman234 667592, inspire153 828733).
+    Listening page: `<scratchpad>\candidates\index.html` (+ cuts.json). Waiting for the user's picks. Next: put the
+    picks in as pop1-5 / bang1-3 (one shared set, or per engine type), levelled as popgen does, CC BY ones credited
+    in a credits file; popgen stays for anything without a recording.
+  - The user's picks from the 79: `antilag_3` (modusmogulus 797835, CC0, at 1.77 s: "sounds like a DSG fart kind
+    of") and `antique_2` / `antique_3` (craigsmith 481663 "Antique auto sputter and backfire", CC0, at 23.28 /
+    21.16 s) "would be good for pops if they had some bass added"; all the others bad. The antique ones peak at
+    2 kHz with 63 Hz -31 dB under it. Bass versions of all three (`bassup.py` in the scratchpad, page
+    `<scratchpad>\bass\index.html`): orig, low shelf +9 / +15 dB under 180 Hz (EQ alone gets 125 Hz to only -7),
+    thump layer light / heavy (popgen's puff under every crack of the recording + an 85 Hz thump at the first:
+    63-125 Hz to the top), and thump + shelf +6. Waiting for the user's pick; then they become pop1-5 / bang1-3
+    (variants by pitch / level) in every bank.
+  - The user picked `antique_2_thumpH`, `antique_3_both`, `antilag_3_both`. Installed in all 42 banks (popgen.py's
+    default now; `--synth` for the generated ones): pop1-5 = the three + antique_2 at 0.93 and antique_3 at 1.07
+    pitch, bang1-3 = antilag_3 0.86, antique_2 0.82, antique_3 0.85; the set pitched per layout (V8/V12 ~0.9,
+    fours ~1.05); levelled as before. Files + README (sources, CC0, cut times) in `dev/popgen/recorded/`. Still
+    one pop per lift (`POP_ONCE_PER_LIFT`). Whole file, all banks: 63 Hz loudest, 2k -5, 4k -6.5, 8k -22, 16k -52.
+  - The user on the installed recordings: "maybe they're too loud as they sound more like exhaust or valve than an
+    actual pop. Maybe they still lack that bass of a pop". Read as: the 1-5 kHz chuff (2k only 5 dB under the top)
+    sounds like breath / a valve, and a pop's bass is a short kick-drum punch at the onset, not a buzz. Versions
+    (`punch.py` in the scratchpad, page `<scratchpad>\punch\index.html`): now / mid cut (-7 dB at 2.5 kHz, -3 at
+    1.2 kHz) / cut + light, heavy or deep punch (a sine swept 130 -> 55 Hz decaying in 60 ms; deep 100 -> 45 Hz,
+    90 ms). Waiting for the pick; then install it with the level lowered (popgen `POP_OVER_ENGINE_DB`, ~-4 dB).
+  - The user's picks: `antique_2_thumpH_cutkickH` ("for more sporty cars"), `antique_3_both_cutkickD` ("for
+    sporty bassy cars"), `antilag_3_both_cutkickL` ("the antilag when shifting"), "switch the antiques up and down
+    in pitch slightly (not a lot)". Installed: pop1-5 = the sporty or (`BASSY_LAYOUTS`) the bassy one at 0.96-1.04
+    pitch; bang1-3 = the anti-lag at 0.97-1.03; no per-layout pitching; -4 dB (`RECORDED_LEVEL_DB`). cl_engine:
+    lifts play pops only, pitch 96-104%; a flat-out upshift over 0.75 x redline plays the anti-lag with chance P
+    (was a crack with chance 0.6 P^2); limiter plays pops. Old recorded files replaced (untracked, never committed).
+  - The user: "too quiet now, all of the sounds, can barely hear them". Measured (perceived, K-weighting-like):
+    they played about as loud as the engine's OFF-throttle loop, 8 dB under the on loop: levelled by peak, and the
+    kick holds the peak while the ear hardly counts it; then -4 dB. And cl_engine's pop headroom (pop peak + the
+    engine's worst-case mixPeak <= 0.98) took ~7 dB off the upshift anti-lag (mixPeak ~0.66 flat out), ~2 dB off
+    lift pops. Now: popgen levels the recorded pops by perceived loudness (`perceived_db`, loudest 50 ms) to
+    `RECORDED_OVER_ENGINE_DB` over the on loop, soft-limiting peaks over half of 0.95 (`soft_limit`);
+    `RECORDED_LEVEL_DB` gone. cl_engine: `POP_GAIN` (was a bare 0.7), `POP_HEADROOM` (was 0.98) for pops only.
+    The user then: "still needs to be louder" -> `RECORDED_OVER_ENGINE_DB` +2 (peaks limited up to 7 dB),
+    `POP_GAIN` 1.0, `POP_HEADROOM` 1.5, a lift pop's random level 0.8-1 (was 0.65-1). Against the version that was
+    "too quiet": roughly +13 dB perceived on lift pops, more on the upshift anti-lag.
+  - The user: "cannot really hear the DSG farts on the Furai. The pops still sound like popcorn, the pattern of how
+    they pop is weird when revving." Found:
+    - lift detection was broken (old code): "throttle over 0.8 last frame, under 0.5 now", but the throttle falls
+      at 7/s (~0.12 a frame at 60 fps): lifts only registered under ~23 fps. What popped when revving was the
+      limiter: a P^2 chance on every fuel cut, ~7 a second (Furai ~2-3 random pops a second): the popcorn. Now
+      armed over 0.8, fired under 0.5 (`car.liftArmed`), and "back on the throttle" is the pedal over 0.6 (the
+      sound throttle is still ~0.4 when the lift fires, which cancelled every pop).
+    - one-pop mode: a lift pops with chance 0.6 + 0.4 P, always 0.06-0.1 s after it, `POP_MIN_GAP` 0.3 s; no
+      limiter pops.
+    - the anti-lag: chance P (the Furai 0.6, 1 of 4 upshifts in the demo) -> 0.4 + P; levelled against the engine
+      at 60% redline it played ~4 dB under the Furai flat out (its top band is much louder). Now levelled to
+      max(off loop at 95% + 6, flat-out on loop at 95% + load lift - 3) and cl_engine dips the engine's loops
+      `ANTILAG_DIP` 0.6 (-8 dB) for 0.08 s, back over 0.17 s, when it fires (a DSG's ignition cut). Demo: every
+      Furai upshift fires it, 2-4 dB over the engine just before (was ~4 under).
+    - drive demo: pedal throttle in its frames, the same lift detection, the anti-lag on upshifts (bang files) with
+      the dip, `DRIVE=pops` lifts only after a shift has settled. Revving in neutral: a pop 0.08-0.1 s after every
+      lift.
+  - The user on the GTI (P 0.1, no audible BOV): "when you let go of the gas, the pop just acts like a pressure
+    relief valve now". With lifts now registering, 0.6 + 0.4 P had it pop on 64% of lifts (before the fix: hardly
+    ever), and the sporty antique cut's breath reads as a blow-off on a quiet four. Lift chance now min(1, 1.4 P):
+    Furai / F-Type 0.84, R8 0.49, GTI 0.14. The GTI's upshift anti-lag stays (0.4 + P = 0.5: a GTI DSG fart).
+  - The user: "okay let's remove the pops for now". cl_engine `POPS_ON_LIFT = false`: no lift pops (and in one-pop
+    mode no coast or limiter pops either). Kept: the upshift anti-lag (bang files, `ANTILAG_DIP`), the recorded
+    pop files in every bank, popgen.py, the lift-detection fix. The drive demo mirrors it (`POP_LIFT=1` plays them).
+    Open: a pop sound that doesn't read as a blow-off valve on quiet fours (the sporty antique cut did on the GTI).
+  - The user: "make cars that use the DSG fart sound just slightly louder and 100% of the time": the anti-lag now
+    plays on every flat-out upshift (over 0.75 x redline) of a car with pops > 0, at full level (was 0.8-1 x),
+    baked 1 dB hotter (`BANG_OVER_SHIFT_DB` 7, `BANG_UNDER_FLAT_OUT_DB` -2): ~+2 dB. Peaks limited up to 7.7 dB.
+  - (popgen-6, generated, superseded.) Knobs (popgen.py top): bass `PUFF` / `PUFF_WIDTH`
+    (wider = lower); buzz vs rattle `FIRE_CHANCE` / `CRACK_JITTER`; length `POP_SECONDS_RANGE`; top `CRACK_TOP`,
+    `SIZZLE`, `RING`.
+  - Not done from section 1: the limiter's pops following the limiter's own irregular cuts (needs item 6's new limiter).
+- Next: items 3-6 need the new offline generator for the engine loops (not started). Its brief is sections 2.1-2.5;
+  popgen.py's manifest reading / WAV writing / peak patching can be its start (same Python, same format).
+- Also uncommitted in the working tree, from an earlier session (not this work): `engineLoudness` in cl_engine.lua
+  (load lift and cylinder gain) and its CLAUDE.md note.
+
 ## The short version, most important first
 
 1. **Pops are the wrong sound.** Each of our pop files is a 0.25-0.6 s *cluster* of 16-50 dull thumps with nothing
