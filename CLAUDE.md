@@ -8,6 +8,8 @@ recorded (no recordings). The old Lua synth, its baker and the editing pages (To
 (2026-11-26, the user: not enough control, and vague); a new offline generator, not in Lua, is being started from scratch. Until it
 exists the shipped WAVs can't be re-rendered (the old baker is in git history before branch `cc/baked-only`).
 Porting the sounds into PERP: `PORTING.md`.
+What real engines and pops measure like against ours, and the targets for the new generator: `SOUND_IMPROVEMENTS.md`
+(2026-11-27; its measuring scripts and a list of 443 CC BY Commons engine recordings in `dev/sound_research/`).
 
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_handling, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_soundbank, cl_engine, cl_hud, cl_police, cl_camera. Server: sv_perp_physics, sv_handling, sv_engine, sv_cruise, sv_police, sv_seats.
@@ -28,9 +30,25 @@ Porting the sounds into PERP: `PORTING.md`.
   Stock pops/BOV are per car, not per preset: `CAR_POPS[name]` (frequency, unlisted = off), `CAR_BOV[name]` (audible stock
   blow-off only), volumes `STOCK_POP_VOLUME` 0.7 / `STOCK_BOV_VOLUME` 0.6, applied in `CarStockProfile` (runtime only: no re-bake).
   Preset pops/bov are just the starting point when retuning in the menu. Big pop events scale with pops^2 (cl_engine).
-  Pop timing (cl_engine): lifting off over half redline starts a burble 0.12-0.3 s later, uneven clusters thinning out over
-  (0.8 + 2.2 x pops) s and with the revs; back on the throttle ends it; a long coast only pops now and then (a per-frame chance
-  spread lone pops over every coast: popcorn).
+  Pop timing (cl_engine, 2026-11-27, after recordings: SOUND_IMPROVEMENTS.md section 1; each pop file is one burst, the bursts'
+  rhythm is made at runtime): a lift over half redline pops with chance 0.3 + 0.65 P, starting 0.03-0.12 s later (P >= 0.6) or
+  0.2-0.35 s; bursts (0.15-0.45 s) / (0.5 + P) apart, steady, easing over the last 30% of the window (in gear 0.5 + 2 P s; in
+  neutral until the revs fall under max(1.6 x idle, 0.55 x the lift's)); 0.6 P^2: a louder closing bang; P < 0.35: one or two
+  lone pops. Back on the throttle ends it; a long coast only pops now and then (a per-frame chance spread lone pops over every
+  coast: popcorn). `playPop` never repeats one of the last two names (a repeat cuts the one still ringing); `popPeakLoad` decays
+  at 0.06 s. LIFT POPS ARE OFF for now (`POPS_ON_LIFT = false`, the user: "let's remove the pops for now"; the upshift anti-lag
+  stays; the drive demo's `POP_LIFT=1` plays them). A lift = the pedal (`engineState.throttle`) over 0.8 arms `car.liftArmed`, under 0.5 fires it (it was "over 0.8 last
+  frame, under 0.5 now": the throttle falls ~0.12 a frame at 60 fps, so lifts only registered under ~23 fps and the pops heard
+  revving were the limiter's random ones); back on the throttle = the pedal over 0.6 (not the sound throttle, still ~0.4 then).
+  `POP_ONCE_PER_LIFT` (top of cl_engine, true: the user's trial): instead of the burble a lift pops at most once, chance
+  min(1, 1.4 P) (0.6 + 0.4 P made the GTI, P 0.1, pop on most lifts: "acts like a pressure relief valve", the user), always
+  0.06-0.1 s after the lift, `POP_MIN_GAP` 0.3 s apart, a random pop file, level 0.8-1, pitch
+  `POP_ONCE_PITCH` 96-104% (the user: only slight); no odd coast pops, no limiter pops (a chance per fuel cut, ~7 a second, was
+  the "popcorn when revving"); the bang files (the recorded anti-lag blat) play on EVERY flat-out upshift over 0.75 x redline
+  of a car with pops (the user: "100% of the time", "slightly louder": full level, baked +1 dB), and dip the engine's loops `ANTILAG_DIP` 0.6 (-8 dB, 0.08 s + 0.17 s back: the ignition cut; without it the Furai's
+  were masked). Pops play at `POP_GAIN` 1 (was 0.7) and their headroom check allows pop peak + the engine's worst-case mixPeak
+  up to `POP_HEADROOM` 1.5 (was 0.98: the upshift anti-lag came out ~7 dB down). The first try (single-crack files in groups of
+  1-3, 20-60 ms apart) "sounded like popcorn" (the user). Not yet heard in game in this form.
   `CAR_SUPERCHARGER[name]` = "sport" | "regular" | "heavy" (13 cars; heavy: trucks, none stock): the blower whine, locked to the revs
   (env loops `sc_<v>_<k>` in octave bands (cl_engine `SUPERCHARGER_BANDS`) 375..6000 rpm, cross-faded by rpm x scPitch so the pitch stays ~55-200%:
   one loop at rpm / 2800 played at 27% at idle, stepping 3.7% a whole-percent pitch step; level x `SC_VARIANTS[v].level` x (rpm/redline)^0.9,
@@ -135,7 +153,22 @@ Porting the sounds into PERP: `PORTING.md`.
   `sc_<sport|regular|heavy>_<1..5>` (+ `_off`, the bypass) at the rpm `SUPERCHARGER_BANDS` 375..6000 in cl_engine, levels `SUPERCHARGER_LEVELS`.
   Levels are natural (the user's: matching every band of every engine to -21 dB made them sound alike): one gain for all, a band's on loop
   (rms above 250 Hz) capped at -18.4 dB (the user: never louder than that); electric: the top band's on loop at -22 dB rms full band.
-  Pops 4 dB under the loudest band, bangs 3 dB over, played at 0.7 (cl_engine `popVolume`).
+  Pops and bangs are RECORDINGS (2026-11-27; the user, after six generated versions: "you're not that great at generating
+  these"), an exception to "synthesized, not recorded": three cuts the user picked by ear from CC0 Freesound clips, bass
+  added, the 1-5 kHz chuff cut and a kick-like low punch at the onset (the first install sounded "like exhaust or valve", too
+  loud, lacking a pop's bass), in `dev/popgen/recorded/` (README: sources, cut times, processing). `dev/popgen/popgen.py <root>
+  --write` (Python + numpy/scipy; header line in cl_baked.lua) installs them: pop1-5 = `antique_2_thumpH_cutkickH` ("for
+  more sporty cars") or, on `BASSY_LAYOUTS` (crossplane V8s, v10l, v12r, v12t, sl65, w16, v6odd), `antique_3_both_cutkickD`
+  ("for sporty bassy cars"), at pitch 0.96 / 0.98 / 1 / 1.02 / 1.04; bang1-3 = `antilag_3_both_cutkickL` (an anti-lag blat,
+  "sounds like a DSG fart kind of": cl_engine plays it on upshifts) at 0.97 / 1 / 1.03. Levelled by perceived loudness
+  (`perceived_db`: K-weighting-like, the loudest 50 ms) to `RECORDED_OVER_ENGINE_DB` +2 dB over the bank's on loop at 60%
+  redline as cl_engine plays them (`POP_PLAYBACK` / `BANG_PLAYBACK` 0.9); the anti-lag (bang files) to max(the off loop at 95%
+  redline + 6, the on loop there + the 4 dB load lift - 3): it plays in an upshift's cut; peaks over half of 0.95 soft-limited (`soft_limit`,
+  up to ~7 dB on the kicks). Levelled by peak (and -4 dB) they played no louder than the off-throttle loop: "too quiet, can
+  barely hear them", then "still needs to be louder" (the user). Writes the WAVs (new file + rename) and their peaks into cl_baked.lua. `--preview <dir>` renders elsewhere. `--synth` renders the generated ones instead (popgen-6: exhaust-pulse
+  trains; the user's verdicts on the way: single cracks "like popcorn", brighter trains "like tin foil being shouted into",
+  then not "BRAP" / bassy enough, then "nope"). All 79 candidates and the bass versions were cut by scratchpad scripts
+  (`cut_pops.py`, `bassup.py`, `punch.py`, not in the repo).
 - The user's verdicts on the old synth's sound (worth keeping in mind for the new one): engines all sounded alike with one random seed
   ("too similar, robotic": every engine needs its own unevenness); intake, valvetrain and gear whine must stay faint (louder they covered
   the engine, "mainly the gears", revving sounded like a vacuum cleaner; a steady whine sounded robotic); compared with recordings (M3 E92,
@@ -155,6 +188,10 @@ Porting the sounds into PERP: `PORTING.md`.
   pitch +0.8% per km/h (the UN rule); chime once the car is ready, only in the car (2D) at `EV_CHIME_VOLUME` 0.3; power-up at the key
   at `EV_POWERUP_VOLUME` 0.06, sound level 65.- `cl_engine.lua`: per-car playback.
   - band crossfade with pitch; volumes glide (VOLUME_SLEW), which avoids per-frame zipper clicks
+  - engine loudness (`engineLoudness`, runtime): band + limiter loops get `LOAD_LIFT_DB` 4 at full throttle from `LOAD_LIFT_FROM` 0.25 x redline up
+    (smoothstep) and `CYLINDER_GAIN_DB` by the bank's `cyl` (8: 2, 10: 2.5, 12: 3, 16: 3.5 dB), inside the headroom estimate. Players found big engines quiet and
+    high revs weak / screamy: measured, every bank plays its top band 2-7 dB under idle (low end 7-8 dB down), V12/W16 idle ~-17 dB vs ~-13 for many I4s.
+    The rumble balance itself is baked (mixing in the off loop gained ~1 dB): for the new generator. Not yet heard in game.
   - per-car headroom (ceiling 0.66 driving / 0.68 neutral, leaving room for band peaks lining up mid cross-fade, using measured peaks; pops/BOV limited with `popPeakLoad`)
   - Doppler pitch bends over past `DOPPLER_KNEE` 4 semitones towards `DOPPLER_MAX` 7 (`softPitch`): at four times real it was nearly an octave at 40 m/s
   - tunnels (`isTunnelAt`: roof, close walls, long open run, map only; 17 traces, listener at 4 Hz, cars one per frame): only for listeners outside a car (sitting in one, nothing changes): a car in one or any car while you're in one gets DSP
@@ -600,7 +637,8 @@ it wraps `AudioEngine.GetEngineConfig` (`EngineDebug.Install`, `EngineDebug.Base
   engine loads from baked files. `bake_shim.lua`: the GMod mocks the tests load.
   wasmoon leaks stack slots on `doString` return values: return results through a JS callback (`__result`).
 - `dev/drive_demo/render.js`: a scripted drive mixed from the baked WAVs the way cl_engine plays them (`AE_SOUND=<dir>` for another
-  manifest + WAVs, `AE_OUT`): compare against recordings.
+  manifest + WAVs, `AE_OUT`): compare against recordings. `DRIVE=pops`: blips in neutral then lifts in gear, with cl_engine's
+  burble mirrored (`POPLOG=1` prints each pop); the normal drive never lifts high in the revs, so it never pops.
 - Offline LuaJIT harnesses left: `presets_test.lua`, `sv_ignition_test.lua` (hard-coded paths at the top: /home/claude/...).
 ## Git
 - Branches are named `cc/<feature>` (the user's rule), e.g. `cc/tier-gearing`: never the session's generated name.
