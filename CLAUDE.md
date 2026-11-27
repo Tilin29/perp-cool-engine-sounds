@@ -187,7 +187,7 @@ What real engines and pops measure like against ours, and the targets for the ne
   `EV_HUM_SILENT_DISTANCE` 5 m of the body (not for whoever sits in it), moving it carries like the motor, full to 30 mph, gone by 35,
   pitch +0.8% per km/h (the UN rule); chime once the car is ready, only in the car (2D) at `EV_CHIME_VOLUME` 0.3; power-up at the key
   at `EV_POWERUP_VOLUME` 0.06, sound level 65.- `cl_engine.lua`: per-car playback.
-  - band crossfade with pitch; volumes glide (VOLUME_SLEW), which avoids per-frame zipper clicks
+  - band crossfade with pitch, only over the middle `BAND_CROSSFADE_WIDTH` 0.4 of the (log) gap between two bands (engine and supercharger bands; 1 = the old whole-gap fade): one band alone elsewhere, ~2.8 engine loops a car instead of 4, no loop pitched further than before (2026-11-27; drive demo mirrors it, `CROSSFADE_WIDTH` env for A/B; not yet heard in game); volumes glide (VOLUME_SLEW), which avoids per-frame zipper clicks
   - engine loudness (`engineLoudness`, runtime): band + limiter loops get `LOAD_LIFT_DB` 4 at full throttle from `LOAD_LIFT_FROM` 0.25 x redline up
     (smoothstep) and `CYLINDER_GAIN_DB` by the bank's `cyl` (8: 2, 10: 2.5, 12: 3, 16: 3.5 dB), inside the headroom estimate. Players found big engines quiet and
     high revs weak / screamy: measured, every bank plays its top band 2-7 dB under idle (low end 7-8 dB down), V12/W16 idle ~-17 dB vs ~-13 for many I4s.

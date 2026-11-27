@@ -29,6 +29,9 @@ const EV_VOLUME = +(CL_ENGINE.match(/AudioEngine\.EV_VOLUME = ([\d.]+)/) || [0, 
 const EV_HUM_VOLUME = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_VOLUME = ([\d.]+)/) || [0, 1])[1]
 const EV_HUM_MOVING_GAIN = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_MOVING_GAIN = ([\d.]+)/) || [0, 1])[1]
 const EV_HUM_FULL_MPH = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_FULL_MPH = ([\d.]+)/) || [0, 30])[1]
+// cl_engine's BAND_CROSSFADE_WIDTH (CROSSFADE_WIDTH=1: the old whole-gap fade)
+const CROSSFADE_WIDTH = +(process.env.CROSSFADE_WIDTH || (CL_ENGINE.match(/local BAND_CROSSFADE_WIDTH = ([\d.]+)/) || [0, 1])[1])
+const crossfadeShare = (x) => Math.min(1, Math.max(0, (x - 0.5) / CROSSFADE_WIDTH + 0.5))
 const EV_HUM_GONE_MPH = +(CL_ENGINE.match(/AudioEngine\.EV_HUM_GONE_MPH = ([\d.]+)/) || [0, 35])[1]
 
 function readWav(f) {
@@ -180,7 +183,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       const lr = Math.log(rpm); xr = xr == null ? lr : xr + (lr - xr) * Math.min(1, dt * 20)
       const w = new Array(layers.length).fill(0), n = layers.length
       if (Math.exp(xr) <= layers[0]) w[0] = 1; else if (Math.exp(xr) >= layers[n - 1]) w[n - 1] = 1
-      else for (let i = 0; i < n - 1; i++) if (Math.exp(xr) < layers[i + 1]) { const x = (xr - Math.log(layers[i])) / (Math.log(layers[i + 1]) - Math.log(layers[i])); w[i] = Math.cos(x * Math.PI / 2); w[i + 1] = Math.sin(x * Math.PI / 2); break }
+      else for (let i = 0; i < n - 1; i++) if (Math.exp(xr) < layers[i + 1]) { const x = crossfadeShare((xr - Math.log(layers[i])) / (Math.log(layers[i + 1]) - Math.log(layers[i]))); w[i] = Math.cos(x * Math.PI / 2); w[i + 1] = Math.sin(x * Math.PI / 2); break }
       const gBase = 0.62 * loopGain * +volume * (+electric ? EV_VOLUME : 1)
       // cl_engine's ANTILAG_DIP: the engine's loops dip 8 dB under the upshift anti-lag (0.08 s, back over 0.17 s)
       const antilagAge = t - antilagAt, dip = antilagAge < 0.08 ? 0.4 : antilagAge < 0.25 ? 1 - 0.6 * (1 - (antilagAge - 0.08) / 0.17) : 1
@@ -205,7 +208,7 @@ __result(table.concat({ bk.dir, table.concat(L, " "), table.concat(tr, " "), bk.
       if (scOn) {
         const scRpm = rpm + (red * 0.985 - rpm) * limW, scE = +scPitch * scRpm
         let lo = 0, wl = 1, wh = 0
-        if (scE >= SCB[SCB.length - 1]) lo = SCB.length - 1; else if (scE > SCB[0]) for (let k = 0; k < SCB.length - 1; k++) if (scE < SCB[k + 1]) { const x = Math.log(scE / SCB[k]) / Math.log(SCB[k + 1] / SCB[k]); lo = k; wl = Math.cos(x * Math.PI / 2); wh = Math.sin(x * Math.PI / 2); break }
+        if (scE >= SCB[SCB.length - 1]) lo = SCB.length - 1; else if (scE > SCB[0]) for (let k = 0; k < SCB.length - 1; k++) if (scE < SCB[k + 1]) { const x = crossfadeShare(Math.log(scE / SCB[k]) / Math.log(SCB[k + 1] / SCB[k])); lo = k; wl = Math.cos(x * Math.PI / 2); wh = Math.sin(x * Math.PI / 2); break }
         const share = kmh / Math.max(+top, 30), fast = Math.min(1, Math.max(0, (share - 0.4) / 0.4))
         const scVol = g * 0.7 * Math.min(1, scRpm / red) ** 0.9 * (1 - 0.6 * fast) * (run ? 1 : 0)
         const bypT = Math.max(sThr, cut ? 1 : 0); scThr += Math.max(-dt / 0.1, Math.min(dt / 0.15, bypT - scThr))

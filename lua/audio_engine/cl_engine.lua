@@ -170,6 +170,18 @@ local VOLUME_SLEW = 4
 -- the car's top speed, down to SC_FAST_GAIN (-8 dB): by km/h slow cars never reached the fade
 local SC_GAIN = 0.7
 local SC_FADE_FROM, SC_FADE_TO, SC_FAST_GAIN = 0.4, 0.8, 0.4
+--[[
+	The band cross-fade (engine bands and the supercharger's) runs over the middle BAND_CROSSFADE_WIDTH
+	of the (log) gap between two bands; either side of it one band plays alone. Across the whole gap
+	two bands (four loops with their on/off pairs) always played. No loop is pitched further than
+	before: alone, a band goes at most to the gap's middle, where both played before. 1 = the old
+	whole-gap fade. (Fewer sounds for the game to mix: see the sound budget at rankCars.)
+]]
+local BAND_CROSSFADE_WIDTH = 0.4
+-- a position 0..1 across a band gap -> the upper band's share of the cross-fade, 0..1
+local function bandCrossfadeShare(position)
+	return math.Clamp((position - 0.5) / BAND_CROSSFADE_WIDTH + 0.5, 0, 1)
+end
 -- the whine's baked loops (env bank sc_<variant>_<band>): the rpm each band was rendered at, and
 -- each variant's level (as the old synth baked them)
 local SUPERCHARGER_BANDS = { 375, 750, 1500, 3000, 6000 }
@@ -664,7 +676,8 @@ local function updateSound(car, deltaTime)
 	local layers = bank.layers
 	local bandCount = #layers
 
-	-- equal-power cross-fade between the two bands around the current rpm (log spaced).
+	-- equal-power cross-fade between the two bands around the current rpm (log spaced, over the
+	-- middle BAND_CROSSFADE_WIDTH of their gap).
 	-- The fade position follows the rpm a touch smoothed, so a quick blip doesn't swing the
 	-- loop volumes from one frame to the next (the pitch still follows the exact rpm).
 	local logRpm = log(rpm)
@@ -679,7 +692,7 @@ local function updateSound(car, deltaTime)
 	else
 		for i = 1, bandCount - 1 do
 			if crossfadeRpm < layers[i + 1].rpm then
-				local crossfadePosition = (car.crossfadeLogRpm - log(layers[i].rpm)) / (log(layers[i + 1].rpm) - log(layers[i].rpm))
+				local crossfadePosition = bandCrossfadeShare((car.crossfadeLogRpm - log(layers[i].rpm)) / (log(layers[i + 1].rpm) - log(layers[i].rpm)))
 				bandWeights[i] = cos(crossfadePosition * pi / 2)
 				bandWeights[i + 1] = sin(crossfadePosition * pi / 2)
 				break
@@ -763,7 +776,7 @@ local function updateSound(car, deltaTime)
 	elseif whineRpm > whineBands[1] then
 		for bandIndex = 1, #whineBands - 1 do
 			if whineRpm < whineBands[bandIndex + 1] then
-				local crossfadePosition = log(whineRpm / whineBands[bandIndex]) / log(whineBands[bandIndex + 1] / whineBands[bandIndex])
+				local crossfadePosition = bandCrossfadeShare(log(whineRpm / whineBands[bandIndex]) / log(whineBands[bandIndex + 1] / whineBands[bandIndex]))
 				lowerBand, lowerBandWeight, upperBandWeight = bandIndex, cos(crossfadePosition * pi / 2), sin(crossfadePosition * pi / 2)
 				break
 			end
