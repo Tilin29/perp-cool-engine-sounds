@@ -8,6 +8,8 @@ recorded (no recordings). The old Lua synth, its baker and the editing pages (To
 (2026-11-26, the user: not enough control, and vague); a new offline generator, not in Lua, is being started from scratch. Until it
 exists the shipped WAVs can't be re-rendered (the old baker is in git history before branch `cc/baked-only`).
 Porting the sounds into PERP: `PORTING.md`.
+What real engines and pops measure like against ours, and the targets for the new generator: `SOUND_IMPROVEMENTS.md`
+(2026-11-27; its measuring scripts and a list of 443 CC BY Commons engine recordings in `dev/sound_research/`).
 
 ## Layout
 - `lua/autorun/audio_engine_init.lua`: loader. Shared: sh_config, sh_presets, sh_drivetrain, sh_handling, sh_carlist, sh_perp, sh_police. Client: cl_baked, cl_soundbank, cl_engine, cl_hud, cl_police, cl_camera. Server: sv_perp_physics, sv_handling, sv_engine, sv_cruise, sv_police, sv_seats.
